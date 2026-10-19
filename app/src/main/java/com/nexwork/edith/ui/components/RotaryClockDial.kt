@@ -47,9 +47,11 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import androidx.compose.runtime.withFrameNanos
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlinx.coroutines.delay
@@ -80,11 +82,12 @@ fun RotaryClockDial(
   var currentTimeMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
   var dragHourOffset by remember { mutableFloatStateOf(0f) }
 
-  // 120Hz smooth second-hand progression
+  // 120Hz display-synced smooth fluid progression
   LaunchedEffect(Unit) {
     while (true) {
-      currentTimeMillis = System.currentTimeMillis()
-      delay(50L)
+      withFrameNanos { _ ->
+        currentTimeMillis = System.currentTimeMillis()
+      }
     }
   }
 
@@ -99,10 +102,8 @@ fun RotaryClockDial(
       label = "glassDialRotation",
     )
 
-  val calendar =
-    remember(currentTimeMillis) {
-      Calendar.getInstance().apply { timeInMillis = currentTimeMillis }
-    }
+  val calendar = remember { Calendar.getInstance() }
+  calendar.timeInMillis = currentTimeMillis
 
   val liveHour24 = calendar.get(Calendar.HOUR_OF_DAY)
   val liveMinute = calendar.get(Calendar.MINUTE)
@@ -290,6 +291,7 @@ fun RotaryClockDial(
           outerR = r2Out,
           liveMinute = liveMinute,
           liveSecond = liveSecond,
+          millisFraction = millisFraction,
         )
       }
 
@@ -300,6 +302,9 @@ fun RotaryClockDial(
           innerR = r1In,
           outerR = r1Out,
           liveHour24 = liveHour24,
+          liveMinute = liveMinute,
+          liveSecond = liveSecond,
+          millisFraction = millisFraction,
           hourOffset = animatedHourOffset,
           use24Hour = use24Hour,
         )
@@ -582,12 +587,16 @@ private fun DrawScope.drawGlassHourTrack(
   innerR: Float,
   outerR: Float,
   liveHour24: Int,
+  liveMinute: Int,
+  liveSecond: Int,
+  millisFraction: Float,
   hourOffset: Float,
   use24Hour: Boolean,
 ) {
   val textRadius = (innerR + outerR) * 0.50f
-  val stepDegrees = 20f
-  val baseHourFloat = liveHour24 + hourOffset
+  val stepDegrees = if (use24Hour) 15f else 26f
+  val minuteFraction = (liveMinute + (liveSecond + millisFraction) / 60f) / 60f
+  val baseHourFloat = (if (use24Hour) liveHour24 else (liveHour24 % 12)) + minuteFraction + hourOffset
 
   val textPaint =
     Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -596,34 +605,46 @@ private fun DrawScope.drawGlassHourTrack(
       typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
 
-  // Intermediate ticks
-  for (deg in -75..75 step 5) {
+  // Intermediate ticks spanning -84° to 84° with smooth distance fade
+  for (deg in -84..84 step 4) {
     val rad = deg * (PI / 180.0)
     val cosA = cos(rad).toFloat()
     val sinA = sin(rad).toFloat()
-    val isMajor = deg % 20 == 0
-    val tickLen = if (isMajor) 6.dp.toPx() else 3.dp.toPx()
+    val isMajor = deg % 12 == 0
+    val tickLen = if (isMajor) 5.5.dp.toPx() else 2.5.dp.toPx()
     val startR = outerR - tickLen
-    val alpha = (1f - (abs(deg) / 85f)).coerceIn(0.08f, 0.45f)
+    val absDeg = abs(deg)
+    val centerFade = ((absDeg - 7f) / 7f).coerceIn(0f, 1f)
+    val edgeFade = ((85f - absDeg) / 85f).coerceIn(0f, 1f).pow(1.2f)
+    val alpha = (if (isMajor) 0.45f else 0.18f) * centerFade * edgeFade
+    if (alpha <= 0.01f) continue
     drawLine(
-      color = Color.White.copy(alpha = if (isMajor) alpha else alpha * 0.4f),
+      color = Color.White.copy(alpha = alpha),
       start = Offset(startR * cosA, cy + startR * sinA),
       end = Offset(outerR * cosA, cy + outerR * sinA),
-      strokeWidth = if (isMajor) 1.2.dp.toPx() else 0.7.dp.toPx(),
+      strokeWidth = if (isMajor) 1.1.dp.toPx() else 0.6.dp.toPx(),
       cap = StrokeCap.Round,
     )
   }
 
-  for (delta in -3..3) {
-    val rawHour = (baseHourFloat.roundToInt() + delta)
+  // Render all visible hours across the ring, smoothly fading away from center
+  val deltaRange = if (use24Hour) -7..7 else -5..5
+  for (delta in deltaRange) {
+    val rawHour = baseHourFloat.roundToInt() + delta
     val fractionalShift = baseHourFloat - baseHourFloat.roundToInt()
     val angleDeg = -(delta - fractionalShift) * stepDegrees
-    if (angleDeg < -72f || angleDeg > 72f) continue
+    if (angleDeg < -84f || angleDeg > 84f) continue
 
-    val distanceSteps = abs(delta - fractionalShift)
-    if (abs(angleDeg) < 12f || distanceSteps < 0.65f) continue // Skip center since it is rendered in the active pill
+    val absAngle = abs(angleDeg)
+    if (absAngle < 9.8f) continue // Directly behind the active pill text
 
-    val alpha = (1f - (abs(angleDeg) / 78f)).coerceIn(0.10f, 0.75f)
+    // Smooth fade in as it exits the pill (9.8° -> 14.5°)
+    val centerFade = ((absAngle - 9.8f) / 4.7f).coerceIn(0f, 1f)
+
+    // Smooth fade out as it travels away toward the edges (15° -> 84°)
+    val edgeFade = ((84f - absAngle) / (84f - 15f)).coerceIn(0f, 1f).pow(1.25f)
+    val alpha = 0.85f * centerFade * edgeFade
+    if (alpha <= 0.01f) continue
 
     val wrapped24 = ((rawHour % 24) + 24) % 24
     val displayHour =
@@ -644,7 +665,7 @@ private fun DrawScope.drawGlassHourTrack(
     drawContext.canvas.nativeCanvas.apply {
       save()
       translate(tx, ty)
-      rotate(angleDeg * 0.75f)
+      rotate(angleDeg * 0.70f)
       val fm = textPaint.fontMetrics
       val baselineY = -(fm.ascent + fm.descent) / 2f
       drawText(displayHour.toString(), 0f, baselineY, textPaint)
@@ -662,10 +683,11 @@ private fun DrawScope.drawGlassMinutesTrack(
   outerR: Float,
   liveMinute: Int,
   liveSecond: Int,
+  millisFraction: Float,
 ) {
   val textRadius = (innerR + outerR) * 0.50f
-  val stepDegrees = 7.5f
-  val fractionalShift = liveSecond / 60f
+  val stepDegrees = 6.0f
+  val fractionalShift = (liveSecond + millisFraction) / 60f
 
   val textPaint =
     Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -674,17 +696,21 @@ private fun DrawScope.drawGlassMinutesTrack(
       typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
 
-  // Minute ticks
-  for (deg in -75..75 step 4) {
+  // Minute ticks spanning -84° to 84° with smooth distance fade
+  for (deg in -84..84 step 3) {
     val rad = deg * (PI / 180.0)
     val cosA = cos(rad).toFloat()
     val sinA = sin(rad).toFloat()
-    val isMajor = deg % 8 == 0
+    val isMajor = deg % 6 == 0
     val tickLen = if (isMajor) 5.dp.toPx() else 2.5.dp.toPx()
     val startR = outerR - tickLen
-    val alpha = (1f - (abs(deg) / 85f)).coerceIn(0.05f, 0.40f)
+    val absDeg = abs(deg)
+    val centerFade = ((absDeg - 7f) / 7f).coerceIn(0f, 1f)
+    val edgeFade = ((85f - absDeg) / 85f).coerceIn(0f, 1f).pow(1.2f)
+    val alpha = (if (isMajor) 0.45f else 0.18f) * centerFade * edgeFade
+    if (alpha <= 0.01f) continue
     drawLine(
-      color = Color.White.copy(alpha = if (isMajor) alpha else alpha * 0.35f),
+      color = Color.White.copy(alpha = alpha),
       start = Offset(startR * cosA, cy + startR * sinA),
       end = Offset(outerR * cosA, cy + outerR * sinA),
       strokeWidth = if (isMajor) 1.0.dp.toPx() else 0.6.dp.toPx(),
@@ -692,31 +718,38 @@ private fun DrawScope.drawGlassMinutesTrack(
     )
   }
 
-  // Minute numbers
-  for (delta in -7..7) {
+  // Render whole numbers in the minutes ring across visible arc, fading away from center
+  for (delta in -14..14) {
     val minuteVal = ((liveMinute + delta) % 60 + 60) % 60
     val angleDeg = -(delta - fractionalShift) * stepDegrees
-    if (angleDeg < -72f || angleDeg > 72f) continue
+    if (angleDeg < -84f || angleDeg > 84f) continue
 
-    val distanceSteps = abs(delta - fractionalShift)
-    if (abs(angleDeg) < 10f || distanceSteps < 0.85f) continue // Skip center since it is rendered in active pill
+    val absAngle = abs(angleDeg)
+    if (absAngle < 6.8f) continue // Directly behind the active pill text
+
+    // Smooth fade in as it exits the pill (6.8° -> 10.0°)
+    val centerFade = ((absAngle - 6.8f) / 3.2f).coerceIn(0f, 1f)
+
+    // Smooth fade out as it travels away toward the edges (10° -> 84°)
+    val edgeFade = ((84f - absAngle) / (84f - 10f)).coerceIn(0f, 1f).pow(1.25f)
 
     val isMultipleOf5 = minuteVal % 5 == 0
-    if (!isMultipleOf5 && distanceSteps > 2.2f) continue
-
-    val alpha = (1f - (abs(angleDeg) / 78f)).coerceIn(0.08f, 0.70f) * (if (isMultipleOf5) 1.0f else 0.55f)
+    val baseAlpha = if (isMultipleOf5) 0.85f else 0.45f
+    val alpha = baseAlpha * centerFade * edgeFade
+    if (alpha <= 0.01f) continue
 
     val rad = angleDeg * (PI / 180.0)
     val tx = textRadius * cos(rad).toFloat()
     val ty = cy + textRadius * sin(rad).toFloat()
 
-    textPaint.textSize = if (isMultipleOf5) 10.dp.toPx() else 8.5.dp.toPx()
+    textPaint.textSize = if (isMultipleOf5) 9.5.dp.toPx() else 8.dp.toPx()
+    textPaint.color = if (isMultipleOf5) android.graphics.Color.WHITE else 0xFFCBD5E1.toInt()
     textPaint.alpha = (alpha * 255).roundToInt().coerceIn(0, 255)
 
     drawContext.canvas.nativeCanvas.apply {
       save()
       translate(tx, ty)
-      rotate(angleDeg * 0.75f)
+      rotate(angleDeg * 0.70f)
       val fm = textPaint.fontMetrics
       val baselineY = -(fm.ascent + fm.descent) / 2f
       drawText(String.format(Locale.US, "%02d", minuteVal), 0f, baselineY, textPaint)
@@ -746,17 +779,21 @@ private fun DrawScope.drawGlassSecondsTrack(
       typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
 
-  // Seconds ticks every second
-  for (deg in -75..75 step 3) {
+  // Seconds ticks every second spanning -84° to 84° with smooth distance fade
+  for (deg in -84..84 step 3) {
     val rad = deg * (PI / 180.0)
     val cosA = cos(rad).toFloat()
     val sinA = sin(rad).toFloat()
     val isMajor = deg % 6 == 0
     val tickLen = if (isMajor) 5.dp.toPx() else 2.5.dp.toPx()
     val startR = outerR - tickLen
-    val alpha = (1f - (abs(deg) / 85f)).coerceIn(0.04f, 0.45f)
+    val absDeg = abs(deg)
+    val centerFade = ((absDeg - 5.2f) / 3.3f).coerceIn(0f, 1f)
+    val edgeFade = ((85f - absDeg) / 85f).coerceIn(0f, 1f).pow(1.2f)
+    val alpha = (if (isMajor) 0.50f else 0.20f) * centerFade * edgeFade
+    if (alpha <= 0.01f) continue
     drawLine(
-      color = IceGlowAccent.copy(alpha = if (isMajor) alpha * 0.8f else alpha * 0.35f),
+      color = IceGlowAccent.copy(alpha = alpha),
       start = Offset(startR * cosA, cy + startR * sinA),
       end = Offset(outerR * cosA, cy + outerR * sinA),
       strokeWidth = if (isMajor) 1.0.dp.toPx() else 0.6.dp.toPx(),
@@ -764,19 +801,25 @@ private fun DrawScope.drawGlassSecondsTrack(
     )
   }
 
-  // Seconds numbers
-  for (delta in -10..10) {
+  // Render whole numbers in the seconds ring across visible arc, fading away from center
+  for (delta in -14..14) {
     val secondVal = ((liveSecond + delta) % 60 + 60) % 60
     val angleDeg = -(delta - fractionalShift) * stepDegrees
-    if (angleDeg < -72f || angleDeg > 72f) continue
+    if (angleDeg < -84f || angleDeg > 84f) continue
 
-    val distanceSteps = abs(delta - fractionalShift)
-    if (abs(angleDeg) < 8.5f || distanceSteps < 1.05f) continue // Skip center since it is rendered in active pill
+    val absAngle = abs(angleDeg)
+    if (absAngle < 5.2f) continue // Directly behind active pill text
+
+    // Smooth fade in as it exits the pill (5.2° -> 8.5°)
+    val centerFade = ((absAngle - 5.2f) / 3.3f).coerceIn(0f, 1f)
+
+    // Smooth fade out as it travels away toward the edges (8.5° -> 84°)
+    val edgeFade = ((84f - absAngle) / (84f - 8.5f)).coerceIn(0f, 1f).pow(1.25f)
 
     val isMultipleOf5 = secondVal % 5 == 0
-    if (!isMultipleOf5 && distanceSteps > 2.5f) continue
-
-    val alpha = (1f - (abs(angleDeg) / 78f)).coerceIn(0.08f, 0.65f) * (if (isMultipleOf5) 1.0f else 0.50f)
+    val baseAlpha = if (isMultipleOf5) 0.85f else 0.45f
+    val alpha = baseAlpha * centerFade * edgeFade
+    if (alpha <= 0.01f) continue
 
     val rad = angleDeg * (PI / 180.0)
     val tx = textRadius * cos(rad).toFloat()
@@ -789,7 +832,7 @@ private fun DrawScope.drawGlassSecondsTrack(
     drawContext.canvas.nativeCanvas.apply {
       save()
       translate(tx, ty)
-      rotate(angleDeg * 0.75f)
+      rotate(angleDeg * 0.70f)
       val fm = textPaint.fontMetrics
       val baselineY = -(fm.ascent + fm.descent) / 2f
       drawText(String.format(Locale.US, "%02d", secondVal), 0f, baselineY, textPaint)
