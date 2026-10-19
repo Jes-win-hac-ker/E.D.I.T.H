@@ -7,9 +7,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.navigation3.runtime.NavKey
+import com.nexwork.edith.ui.components.GridLines
 
 /**
- * Clean slate blank screen — ready to build UI step-by-step.
+ * Clean slate with layout grid lines.
  */
 @Composable
 fun MainScreen(
@@ -20,7 +21,9 @@ fun MainScreen(
     modifier = modifier
       .fillMaxSize()
       .background(Color(0xFF0B0D12))
-  )
+  ) {
+    GridLines()
+  }
 }
 
 @Composable
@@ -29,5 +32,7 @@ internal fun MainScreen(data: List<String>, modifier: Modifier = Modifier) {
     modifier = modifier
       .fillMaxSize()
       .background(Color(0xFF0B0D12))
-  )
+  ) {
+    GridLines()
+  }
 }
