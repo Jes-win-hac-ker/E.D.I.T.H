@@ -178,21 +178,6 @@ fun TopSearchBar(
               end = Offset.Infinite,
             )
           )
-          .border(
-            width = 1.3.dp,
-            brush = Brush.linearGradient(
-              colors = listOf(
-                Color(0xE6FFFFFF),
-                Color(0x7038BDF8),
-                Color(0x30FFFFFF),
-                Color(0x5538BDF8),
-                Color(0xB0FFFFFF),
-              ),
-              start = Offset(0f, 0f),
-              end = Offset.Infinite,
-            ),
-            shape = RoundedCornerShape(26.dp),
-          )
           .clickable {
             focusRequester.requestFocus()
             keyboardController?.show()
