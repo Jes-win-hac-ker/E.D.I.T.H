@@ -103,10 +103,10 @@ fun MainScreen(
       GridLines()
     }
 
-    // 2. App rail placed in the horizontal center of the screen
+    // 2. Right-side app rail placed in the 4-square right column
     Box(
       modifier = Modifier
-        .align(Alignment.TopCenter)
+        .align(Alignment.CenterEnd)
         .width(124.dp)
     ) {
       RightAppRail()
@@ -147,7 +147,7 @@ internal fun MainScreen(data: List<String>, modifier: Modifier = Modifier) {
 
     Box(
       modifier = Modifier
-        .align(Alignment.TopCenter)
+        .align(Alignment.CenterEnd)
         .width(124.dp)
     ) {
       RightAppRail()
