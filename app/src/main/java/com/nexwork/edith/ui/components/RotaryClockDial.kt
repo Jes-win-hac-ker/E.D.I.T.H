@@ -35,17 +35,13 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
-import com.nexwork.edith.model.WeatherCondition
 import com.nexwork.edith.theme.GlassBorderHighlight
 import com.nexwork.edith.theme.GlassBorderSubtle
 import com.nexwork.edith.theme.GlassSurface
 import com.nexwork.edith.theme.GlassSurfaceElevated
 import com.nexwork.edith.theme.IceGlowAccent
 import com.nexwork.edith.theme.ObsidianBgTop
-import com.nexwork.edith.theme.WarmSunAccent
-import java.text.SimpleDateFormat
 import java.util.Calendar
-import java.util.Date
 import java.util.Locale
 import androidx.compose.runtime.withFrameNanos
 import kotlin.math.PI
@@ -54,27 +50,22 @@ import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
-import kotlinx.coroutines.delay
 
 /**
- * Sleek Dark Glass Multi-Ring Rotary Clock & Weather Dial.
+ * Sleek Dark Glass Multi-Ring Rotary Clock Dial.
  *
  * Anchored flush to the left screen edge:
- * - Three concentric frosted obsidian glass rings presenting time in [hh : mm : ss : am/pm]:
+ * - Three concentric frosted obsidian glass rings presenting time in [hh : mm : ss]:
  *     1. Inner Ring: Hours (hh) with micro-ticks and interactive spring scrubbing.
- *     2. Middle Ring: Minutes (mm) with dynamic minute track.
+ *     2. Middle Ring: Minutes (mm) with dynamic continuous minute track.
  *     3. Outer Ring: Seconds (ss) with 120Hz smooth fluid chronometer rotation.
  * - Horizontal liquid glass time capsule passing across all three rings framing:
- *     [ HH ] : [ MM ] : [ SS ] [ AM/PM ]
- * - Inner glass hub chamber housing crafted weather, temperature, date, and battery telemetry.
+ *     [ HH ] : [ MM ] : [ SS ]
+ * - Clean obsidian glass hub chamber with interactive 12/24H mode badge.
  */
 @Composable
 fun RotaryClockDial(
-  weather: WeatherCondition,
-  batteryPct: Int,
-  isCharging: Boolean,
   use24Hour: Boolean,
-  onWeatherClick: () -> Unit,
   onClockClick: () -> Unit,
   onToggleTimeFormat: () -> Unit,
   modifier: Modifier = Modifier,
@@ -111,15 +102,6 @@ fun RotaryClockDial(
   val millisFraction = (currentTimeMillis % 1000L) / 1000f
   val isAm = calendar.get(Calendar.AM_PM) == Calendar.AM
 
-  val dayName =
-    remember(currentTimeMillis / 60_000L) {
-      SimpleDateFormat("EEE", Locale.US).format(Date(currentTimeMillis)).uppercase(Locale.US)
-    }
-  val dateStr =
-    remember(currentTimeMillis / 60_000L) {
-      SimpleDateFormat("MMM d", Locale.US).format(Date(currentTimeMillis)).uppercase(Locale.US)
-    }
-
   Box(
     modifier =
       modifier
@@ -150,10 +132,6 @@ fun RotaryClockDial(
                 // Tapping reset when hour is scrubbed
                 abs(dragHourOffset) > 0.1f -> {
                   dragHourOffset = 0f
-                }
-                // Tapping upper weather chamber cycles weather
-                tapOffset.x < 76.dp.toPx() && tapOffset.y < (cy - barHalfH) -> {
-                  onWeatherClick()
                 }
                 // Tapping time readout inside capsule launches clock/alarms
                 tapOffset.y in (cy - barHalfH)..(cy + barHalfH) -> {
@@ -359,22 +337,7 @@ fun RotaryClockDial(
         style = Stroke(width = 0.9.dp.toPx()),
       )
 
-      // 4. Upper Inner Chamber: Weather Icon + Temperature
-      drawCraftedWeather(
-        cy = cy,
-        weather = weather,
-      )
-
-      // 5. Lower Inner Chamber: Date & Battery Telemetry
-      drawCraftedDateAndBattery(
-        cy = cy,
-        dayName = dayName,
-        dateStr = dateStr,
-        batteryPct = batteryPct,
-        isCharging = isCharging,
-      )
-
-      // 6. Horizontal Liquid Frosted Glass Time Capsule across all 3 rings
+      // 4. Horizontal Liquid Frosted Glass Time Capsule across all 3 rings
       val barHalfH = 19.dp.toPx()
       val barRight = r3Out // exactly flush with outer ring rim (190dp)!
       val barPath =
@@ -837,127 +800,3 @@ private fun DrawScope.drawGlassSecondsTrack(
   }
 }
 
-/**
- * 4. Weather Chamber in Upper Hub
- */
-private fun DrawScope.drawCraftedWeather(
-  cy: Float,
-  weather: WeatherCondition,
-) {
-  val baseX = 8.dp.toPx()
-  val baseY = cy - 54.dp.toPx()
-
-  // Warm glowing sun orb
-  val sunCenter = Offset(baseX + 18.dp.toPx(), baseY + 8.dp.toPx())
-  drawCircle(
-    brush =
-      Brush.radialGradient(
-        colors = listOf(WarmSunAccent.copy(alpha = 0.45f), Color.Transparent),
-        center = sunCenter,
-        radius = 11.dp.toPx(),
-      ),
-    radius = 11.dp.toPx(),
-    center = sunCenter,
-  )
-  drawCircle(
-    color = WarmSunAccent,
-    radius = 5.dp.toPx(),
-    center = sunCenter,
-  )
-
-  // Sleek vector cloud in front of sun
-  val cloudPath =
-    Path().apply {
-      moveTo(baseX + 4.dp.toPx(), baseY + 18.dp.toPx())
-      lineTo(baseX + 24.dp.toPx(), baseY + 18.dp.toPx())
-      cubicTo(
-        baseX + 28.dp.toPx(),
-        baseY + 18.dp.toPx(),
-        baseX + 28.dp.toPx(),
-        baseY + 12.dp.toPx(),
-        baseX + 23.dp.toPx(),
-        baseY + 12.dp.toPx(),
-      )
-      cubicTo(
-        baseX + 21.dp.toPx(),
-        baseY + 5.dp.toPx(),
-        baseX + 11.dp.toPx(),
-        baseY + 5.dp.toPx(),
-        baseX + 9.dp.toPx(),
-        baseY + 11.dp.toPx(),
-      )
-      cubicTo(
-        baseX + 3.dp.toPx(),
-        baseY + 11.dp.toPx(),
-        baseX + 1.dp.toPx(),
-        baseY + 18.dp.toPx(),
-        baseX + 4.dp.toPx(),
-        baseY + 18.dp.toPx(),
-      )
-      close()
-    }
-
-  drawPath(
-    path = cloudPath,
-    color = GlassSurfaceElevated.copy(alpha = 0.92f),
-  )
-  drawPath(
-    path = cloudPath,
-    color = Color.White.copy(alpha = 0.9f),
-    style = Stroke(width = 1.3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
-  )
-
-  // Temperature + Condition text
-  val tempPaint =
-    Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      color = android.graphics.Color.WHITE
-      textSize = 14.dp.toPx()
-      typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-    }
-  val condPaint =
-    Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      color = 0xFF94A3B8.toInt()
-      textSize = 7.5.dp.toPx()
-      typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-    }
-
-  drawContext.canvas.nativeCanvas.apply {
-    drawText("${weather.tempCelsius}°", baseX + 32.dp.toPx(), baseY + 16.dp.toPx(), tempPaint)
-    drawText(weather.label.uppercase(Locale.US), baseX + 4.dp.toPx(), baseY + 28.dp.toPx(), condPaint)
-  }
-}
-
-/**
- * 5. Date & Battery Telemetry in Lower Hub
- */
-private fun DrawScope.drawCraftedDateAndBattery(
-  cy: Float,
-  dayName: String,
-  dateStr: String,
-  batteryPct: Int,
-  isCharging: Boolean,
-) {
-  val baseX = 8.dp.toPx()
-  val baseY = cy + 42.dp.toPx()
-
-  val datePaint =
-    Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      color = android.graphics.Color.WHITE
-      textSize = 10.dp.toPx()
-      typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-      letterSpacing = 0.04f
-    }
-
-  val battPaint =
-    Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      color = if (isCharging) 0xFFFBBF24.toInt() else 0xFF38BDF8.toInt()
-      textSize = 9.dp.toPx()
-      typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-    }
-
-  drawContext.canvas.nativeCanvas.apply {
-    drawText("$dayName, $dateStr", baseX, baseY, datePaint)
-    val battText = if (isCharging) "⚡ $batteryPct%" else "$batteryPct% BAT"
-    drawText(battText, baseX, baseY + 14.dp.toPx(), battPaint)
-  }
-}

@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
-import com.nexwork.edith.model.WeatherCondition
 import com.nexwork.edith.ui.components.GridLines
 import com.nexwork.edith.ui.components.RightAppRail
 import com.nexwork.edith.ui.components.RotaryClockDial
@@ -167,11 +166,7 @@ fun MainScreen(
         .graphicsLayer { alpha = railAlpha }
     ) {
       RotaryClockDial(
-        weather = state.weather,
-        batteryPct = state.telemetry.batteryPct,
-        isCharging = state.telemetry.isCharging,
         use24Hour = state.use24Hour,
-        onWeatherClick = viewModel::cycleWeatherCondition,
         onClockClick = viewModel::openClockOrAlarms,
         onToggleTimeFormat = viewModel::toggleTimeFormat,
       )
@@ -227,11 +222,7 @@ internal fun MainScreen(data: List<String>, modifier: Modifier = Modifier) {
         .align(Alignment.CenterStart)
     ) {
       RotaryClockDial(
-        weather = WeatherCondition.PARTLY_CLOUDY,
-        batteryPct = 84,
-        isCharging = false,
         use24Hour = false,
-        onWeatherClick = {},
         onClockClick = {},
         onToggleTimeFormat = {},
       )
