@@ -23,6 +23,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlinx.coroutines.coroutineScope
@@ -30,6 +31,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Very fine layout grid lines with real-time 120Hz touch reactivity:
+ * - Center illumination: High-contrast bright grid in the center with smooth vignette fade towards top and sides.
  * - Touch crosshair trace: Grid lines under the finger illuminate dynamically.
  * - Radial touch aura: Ambient glow and illuminated intersection nodes around the touch point.
  * - Shockwave ripple: Tapping pulses a wave outward through the grid cells.
@@ -40,8 +42,8 @@ fun GridLines(
   modifier: Modifier = Modifier,
   gridSize: Dp = 8.dp,
   majorStep: Int = 4, // Major line every 32dp
-  minorLineColor: Color = Color.White.copy(alpha = 0.08f),
-  majorLineColor: Color = Color.White.copy(alpha = 0.22f),
+  minorLineColor: Color = Color.White.copy(alpha = 0.16f),
+  majorLineColor: Color = Color.White.copy(alpha = 0.40f),
   verticalMajorLineFromRightIndex: Int? = 4, // 4th major square line from the right
   customLineWidth: Dp = 2.dp,
   customLineColor: Color = Color.White,
@@ -122,29 +124,93 @@ fun GridLines(
       val currentRippleR = rippleRadius.value
       val currentRippleA = rippleAlpha.value
 
-      // 1. Base Vertical Grid Lines
+      val centerX = width / 2f
+      val centerY = height / 2f
+
+      // 0. Ambient Center Radial Bloom
+      drawCircle(
+        brush =
+          Brush.radialGradient(
+            colors =
+              listOf(
+                Color(0x1838BDF8),
+                Color(0x0638BDF8),
+                Color.Transparent,
+              ),
+            center = Offset(centerX, centerY),
+            radius = width * 0.70f,
+          ),
+        center = Offset(centerX, centerY),
+        radius = width * 0.70f,
+      )
+
+      val halfPi = (Math.PI / 2.0).toFloat()
+
+      // 1. Base Vertical Grid Lines (bright in center, fading to top/bottom and sides)
       for (i in 0..cols) {
         val x = i * stepPx
         if (x > width) break
         val isMajor = (i % majorStep == 0)
+
+        // Horizontal attenuation (fades towards left and right sides)
+        val dxNorm = (abs(x - centerX) / centerX).coerceIn(0f, 1f)
+        val hFactor = cos(dxNorm * halfPi).coerceAtLeast(0f)
+        if (hFactor < 0.02f) continue
+
+        val baseColor = if (isMajor) majorLineColor else minorLineColor
+        val maxAlpha = baseColor.alpha * hFactor
+        val strokeW = if (isMajor) 0.9.dp.toPx() else 0.5.dp.toPx()
+
         drawLine(
-          color = if (isMajor) majorLineColor else minorLineColor,
+          brush =
+            Brush.verticalGradient(
+              0.00f to Color.Transparent,
+              0.15f to baseColor.copy(alpha = maxAlpha * 0.15f),
+              0.35f to baseColor.copy(alpha = maxAlpha * 0.70f),
+              0.50f to baseColor.copy(alpha = maxAlpha),
+              0.65f to baseColor.copy(alpha = maxAlpha * 0.70f),
+              0.85f to baseColor.copy(alpha = maxAlpha * 0.15f),
+              1.00f to Color.Transparent,
+              startY = 0f,
+              endY = height,
+            ),
           start = Offset(x, 0f),
           end = Offset(x, height),
-          strokeWidth = if (isMajor) 0.8.dp.toPx() else 0.5.dp.toPx(),
+          strokeWidth = strokeW,
         )
       }
 
-      // 2. Base Horizontal Grid Lines
+      // 2. Base Horizontal Grid Lines (bright in center, fading to top/bottom and sides)
       for (j in 0..rows) {
         val y = j * stepPx
         if (y > height) break
         val isMajor = (j % majorStep == 0)
+
+        // Vertical attenuation (fades towards top and bottom)
+        val dyNorm = (abs(y - centerY) / centerY).coerceIn(0f, 1f)
+        val vFactor = cos(dyNorm * halfPi).coerceAtLeast(0f)
+        if (vFactor < 0.02f) continue
+
+        val baseColor = if (isMajor) majorLineColor else minorLineColor
+        val maxAlpha = baseColor.alpha * vFactor
+        val strokeW = if (isMajor) 0.9.dp.toPx() else 0.5.dp.toPx()
+
         drawLine(
-          color = if (isMajor) majorLineColor else minorLineColor,
+          brush =
+            Brush.horizontalGradient(
+              0.00f to Color.Transparent,
+              0.15f to baseColor.copy(alpha = maxAlpha * 0.15f),
+              0.35f to baseColor.copy(alpha = maxAlpha * 0.70f),
+              0.50f to baseColor.copy(alpha = maxAlpha),
+              0.65f to baseColor.copy(alpha = maxAlpha * 0.70f),
+              0.85f to baseColor.copy(alpha = maxAlpha * 0.15f),
+              1.00f to Color.Transparent,
+              startX = 0f,
+              endX = width,
+            ),
           start = Offset(0f, y),
           end = Offset(width, y),
-          strokeWidth = if (isMajor) 0.8.dp.toPx() else 0.5.dp.toPx(),
+          strokeWidth = strokeW,
         )
       }
 
@@ -269,7 +335,13 @@ fun GridLines(
 
           if (nearAlphaBoost > 0.05f) {
             drawLine(
-              color = reactiveColor.copy(alpha = nearAlphaBoost * 0.4f),
+              brush =
+                Brush.verticalGradient(
+                  0.00f to Color.Transparent,
+                  0.08f to reactiveColor.copy(alpha = nearAlphaBoost * 0.4f),
+                  0.92f to reactiveColor.copy(alpha = nearAlphaBoost * 0.4f),
+                  1.00f to Color.Transparent,
+                ),
               start = Offset(targetX, 0f),
               end = Offset(targetX, height),
               strokeWidth = customLineWidth.toPx() + 4.dp.toPx(),
@@ -277,7 +349,13 @@ fun GridLines(
           }
 
           drawLine(
-            color = customLineColor,
+            brush =
+              Brush.verticalGradient(
+                0.00f to Color.Transparent,
+                0.06f to customLineColor,
+                0.94f to customLineColor,
+                1.00f to Color.Transparent,
+              ),
             start = Offset(targetX, 0f),
             end = Offset(targetX, height),
             strokeWidth = customLineWidth.toPx(),
