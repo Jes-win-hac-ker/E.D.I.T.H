@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -42,6 +43,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -155,34 +159,101 @@ fun TopSearchBar(
     Box(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 16.dp, vertical = 12.dp),
+        .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
-      // Full-width search input pill
+      // Liquid glass pill container
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          .clip(RoundedCornerShape(22.dp))
-          .background(GlassSurfaceElevated.copy(alpha = 0.92f))
-          .border(1.2.dp, GlassBorderHighlight.copy(alpha = 0.5f), RoundedCornerShape(22.dp))
+          .clip(RoundedCornerShape(26.dp))
+          .background(
+            Brush.linearGradient(
+              colors = listOf(
+                Color(0x38FFFFFF),
+                Color(0x14FFFFFF),
+                Color(0x0E0F172A),
+                Color(0x2438BDF8),
+              ),
+              start = Offset(0f, 0f),
+              end = Offset.Infinite,
+            )
+          )
+          .border(
+            width = 1.3.dp,
+            brush = Brush.linearGradient(
+              colors = listOf(
+                Color(0xE6FFFFFF),
+                Color(0x7038BDF8),
+                Color(0x30FFFFFF),
+                Color(0x5538BDF8),
+                Color(0xB0FFFFFF),
+              ),
+              start = Offset(0f, 0f),
+              end = Offset.Infinite,
+            ),
+            shape = RoundedCornerShape(26.dp),
+          )
           .clickable {
             focusRequester.requestFocus()
             keyboardController?.show()
             lastInteractionTimestamp = System.currentTimeMillis()
           }
-          .padding(horizontal = 16.dp, vertical = 12.dp)
       ) {
+        // Specular meniscus highlight at top of liquid glass
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(20.dp)
+            .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
+            .background(
+              Brush.verticalGradient(
+                colors = listOf(
+                  Color(0x52FFFFFF),
+                  Color(0x18FFFFFF),
+                  Color.Transparent,
+                )
+              )
+            )
+        )
+
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          modifier = Modifier.fillMaxWidth(),
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
-          Icon(
-            painter = painterResource(id = R.drawable.ic_custom_search),
-            contentDescription = "Search",
-            tint = IceGlowAccent,
-            modifier = Modifier.size(19.dp),
-          )
+          // Liquid droplet search badge
+          Box(
+            modifier = Modifier
+              .size(34.dp)
+              .clip(CircleShape)
+              .background(
+                Brush.radialGradient(
+                  colors = listOf(
+                    Color(0x4038BDF8),
+                    Color(0x1538BDF8),
+                    Color(0x05FFFFFF),
+                  )
+                )
+              )
+              .border(
+                width = 0.9.dp,
+                brush = Brush.linearGradient(
+                  listOf(Color(0xCCFFFFFF), Color(0x4438BDF8))
+                ),
+                shape = CircleShape
+              ),
+            contentAlignment = Alignment.Center,
+          ) {
+            Icon(
+              painter = painterResource(id = R.drawable.ic_custom_search),
+              contentDescription = "Search",
+              tint = Color.White,
+              modifier = Modifier.size(17.dp),
+            )
+          }
 
-          Spacer(modifier = Modifier.width(10.dp))
+          Spacer(modifier = Modifier.width(12.dp))
 
           BasicTextField(
             value = textFieldValue,
@@ -223,7 +294,7 @@ fun TopSearchBar(
               if (textFieldValue.text.isEmpty()) {
                 Text(
                   text = "Search...",
-                  color = TextMutedSlate.copy(alpha = 0.85f),
+                  color = Color(0x99FFFFFF),
                   fontSize = 15.sp,
                   fontFamily = FontFamily.SansSerif,
                 )
@@ -233,21 +304,24 @@ fun TopSearchBar(
           )
 
           if (textFieldValue.text.isNotEmpty()) {
+            Spacer(modifier = Modifier.width(8.dp))
             Box(
               modifier = Modifier
+                .size(26.dp)
                 .clip(CircleShape)
+                .background(Color(0x26FFFFFF))
+                .border(0.8.dp, Color(0x66FFFFFF), CircleShape)
                 .clickable {
                   lastInteractionTimestamp = System.currentTimeMillis()
                   textFieldValue = TextFieldValue("")
                   onSearchQueryChange("")
-                }
-                .padding(4.dp),
+                },
               contentAlignment = Alignment.Center,
             ) {
               Text(
                 text = "✕",
-                color = TextSilver,
-                fontSize = 13.sp,
+                color = Color.White,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
               )
             }
