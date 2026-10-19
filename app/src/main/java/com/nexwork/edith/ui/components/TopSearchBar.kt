@@ -88,21 +88,19 @@ fun TopSearchBar(
       .fillMaxWidth()
       .statusBarsPadding(),
   ) {
-    Row(
+    Box(
       modifier = Modifier
         .fillMaxWidth()
         .padding(horizontal = 16.dp, vertical = 12.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-      // Search input pill
+      // Full-width search input pill
       Box(
         modifier = Modifier
-          .weight(1f)
+          .fillMaxWidth()
           .clip(RoundedCornerShape(22.dp))
           .background(GlassSurfaceElevated.copy(alpha = 0.92f))
           .border(1.2.dp, GlassBorderHighlight.copy(alpha = 0.5f), RoundedCornerShape(22.dp))
-          .padding(horizontal = 14.dp, vertical = 12.dp)
+          .padding(horizontal = 16.dp, vertical = 12.dp)
       ) {
         Row(
           verticalAlignment = Alignment.CenterVertically,
@@ -115,7 +113,7 @@ fun TopSearchBar(
             modifier = Modifier.size(19.dp),
           )
 
-          Spacer(modifier = Modifier.width(8.dp))
+          Spacer(modifier = Modifier.width(10.dp))
 
           BasicTextField(
             value = searchQuery,
@@ -168,20 +166,6 @@ fun TopSearchBar(
           }
         }
       }
-
-      // Cancel button
-      Text(
-        text = "Cancel",
-        color = IceGlowAccent,
-        fontSize = 14.5.sp,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier
-          .clickable {
-            keyboardController?.hide()
-            onDismiss()
-          }
-          .padding(horizontal = 6.dp, vertical = 8.dp),
-      )
     }
   }
 }
