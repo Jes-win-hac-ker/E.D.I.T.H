@@ -180,8 +180,8 @@ fun RightAppRail(
       modifier
         .fillMaxHeight()
         .navigationBarsPadding()
-        .padding(top = 56.dp, start = 8.dp, end = 8.dp, bottom = 24.dp),
-    verticalArrangement = Arrangement.Top,
+        .padding(horizontal = 8.dp, vertical = 32.dp),
+    verticalArrangement = Arrangement.Center,
     horizontalAlignment = Alignment.CenterHorizontally,
   ) {
     apps.forEachIndexed { index, app ->
