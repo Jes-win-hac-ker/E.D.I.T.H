@@ -63,8 +63,43 @@ fun RightAppRail(
 ) {
   val context = LocalContext.current
 
-  // From top to bottom (so Google is at the bottom)
+  // From top to bottom (so Google is at the bottom):
+  // Qwen Code -> Gemini -> WhatsApp -> Camera -> Phone -> GPay -> Google
   val apps = listOf(
+    RightRailAppItem(
+      label = "Qwen Code",
+      packageName = "ai.qwenlm.chat.android",
+      iconRes = R.drawable.ic_custom_qwen,
+      launchFallback = { ctx ->
+        launchOrFallback(ctx, "ai.qwenlm.chat.android") {
+          launchOrFallback(ctx, "com.tongyi.intl") {
+            runCatching {
+              ctx.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://chat.qwenlm.ai/"))
+                  .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+              )
+            }
+          }
+        }
+      },
+    ),
+    RightRailAppItem(
+      label = "Gemini",
+      packageName = "com.google.android.apps.bard",
+      iconRes = R.drawable.ic_custom_gemini,
+      launchFallback = { ctx ->
+        launchOrFallback(ctx, "com.google.android.apps.bard") {
+          launchOrFallback(ctx, "com.google.android.apps.googleassistant") {
+            runCatching {
+              ctx.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://gemini.google.com/"))
+                  .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+              )
+            }
+          }
+        }
+      },
+    ),
     RightRailAppItem(
       label = "WhatsApp",
       packageName = "com.whatsapp",
@@ -142,16 +177,18 @@ fun RightAppRail(
       modifier
         .fillMaxHeight()
         .navigationBarsPadding()
-        .padding(bottom = 36.dp, start = 8.dp, end = 8.dp),
+        .padding(bottom = 32.dp, start = 8.dp, end = 8.dp),
     verticalArrangement = Arrangement.Bottom,
     horizontalAlignment = Alignment.CenterHorizontally,
   ) {
-    apps.forEach { app ->
+    apps.forEachIndexed { index, app ->
       CustomAppItem(
         app = app,
         onClick = { app.launchFallback(context) },
       )
-      Spacer(modifier = Modifier.height(18.dp))
+      if (index < apps.lastIndex) {
+        Spacer(modifier = Modifier.height(14.dp))
+      }
     }
   }
 }
