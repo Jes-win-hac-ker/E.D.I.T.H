@@ -30,7 +30,6 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.dp
 import com.nexwork.edith.theme.GlassBorderHighlight
 import com.nexwork.edith.theme.GlassBorderSubtle
-import com.nexwork.edith.theme.IceGlowAccent
 import com.nexwork.edith.theme.TextPureWhite
 import com.nexwork.edith.theme.TextSilver
 import java.util.Calendar
@@ -43,13 +42,13 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * Sleek Dark Glass Multi-Ring Rotary Chronometer.
+ * Sleek Monochrome Obsidian & White Glass Multi-Ring Rotary Chronometer.
  *
- * Implements the signature Liquid Glassmorphism aesthetic:
- * 1. Concentric annular frosted glass rings (Hours, Minutes, Seconds) with translucent gradients.
- * 2. Multi-stop specular highlight borders along both inner and outer ring perimeters.
- * 3. Diagonal specular light sheen reflecting across the crystal face.
- * 4. Liquid Glass Time Capsule / Loupe with specular meniscus highlight and optical radiance.
+ * Implements a pure Black & White Liquid Glass aesthetic:
+ * 1. Concentric annular frosted glass rings (Hours, Minutes, Seconds) with pure monochrome gradients.
+ * 2. Multi-stop specular white highlight borders along inner and outer ring perimeters.
+ * 3. Diagonal specular light wash reflecting across the crystal face.
+ * 4. Liquid Glass Time Capsule / Loupe with specular meniscus highlight and pure white radiance.
  * 5. Frosted glass mode indicator pill (12H / 24H) in the central hub.
  * 6. Smooth 120Hz continuous chronometer progression.
  */
@@ -96,14 +95,14 @@ fun RotaryClockDial(
       val r3In = 151.dp.toPx() // Outer Ring (Seconds) start
       val r3Out = 188.dp.toPx() // Outer Ring (Seconds) end
 
-      // 0. Soft ambient cyan/white glow behind the whole clock rim
+      // 0. Soft ambient monochrome white halo behind the outer rim
       drawCircle(
         brush =
           Brush.radialGradient(
             colors =
               listOf(
-                IceGlowAccent.copy(alpha = 0.18f),
-                Color(0x1038BDF8),
+                Color(0x18FFFFFF),
+                Color(0x06FFFFFF),
                 Color.Transparent,
               ),
             center = Offset(0f, cy),
@@ -120,7 +119,7 @@ fun RotaryClockDial(
       val hubPath = makeDiscPath(r0, cy)
       val fullDialArc = makeDiscPath(r3Out, cy)
 
-      // 1. Concentric Frosted Glass Ring Fills (True Glassmorphic Translucency)
+      // 1. Concentric Frosted Monochrome Glass Ring Fills
       // Outer Ring (Seconds Track)
       drawPath(
         path = outerRingPath,
@@ -129,9 +128,9 @@ fun RotaryClockDial(
             colors =
               listOf(
                 Color(0x28FFFFFF), // frosted specular highlight
-                Color(0x12FFFFFF),
-                Color(0x1E0F172A), // deep obsidian glass tint
-                Color(0x1838BDF8), // delicate ice cyan refraction
+                Color(0x10FFFFFF),
+                Color(0x220B0D12), // deep obsidian glass base
+                Color(0x14FFFFFF), // subtle silvery glass reflection
               ),
             center = Offset(0f, cy),
             radius = r3Out,
@@ -146,9 +145,9 @@ fun RotaryClockDial(
             colors =
               listOf(
                 Color(0x2CFFFFFF),
-                Color(0x14FFFFFF),
-                Color(0x220F172A),
-                Color(0x1B38BDF8),
+                Color(0x12FFFFFF),
+                Color(0x260B0D12),
+                Color(0x16FFFFFF),
               ),
             center = Offset(0f, cy),
             radius = r2Out,
@@ -163,9 +162,9 @@ fun RotaryClockDial(
             colors =
               listOf(
                 Color(0x30FFFFFF),
-                Color(0x16FFFFFF),
-                Color(0x260F172A),
-                Color(0x2038BDF8),
+                Color(0x14FFFFFF),
+                Color(0x2A0B0D12),
+                Color(0x18FFFFFF),
               ),
             center = Offset(0f, cy),
             radius = r1Out,
@@ -179,10 +178,10 @@ fun RotaryClockDial(
           Brush.radialGradient(
             colors =
               listOf(
-                Color(0x32FFFFFF),
+                Color(0x34FFFFFF),
                 Color(0x16FFFFFF),
                 Color(0x350B0D12),
-                Color(0x240F172A),
+                Color(0x220B0D12),
               ),
             center = Offset(18.dp.toPx(), cy),
             radius = r0,
@@ -224,7 +223,7 @@ fun RotaryClockDial(
         )
       }
 
-      // 3. Multi-stop Specular Glass Rim Strokes for all Rings & Hub
+      // 3. Multi-stop Specular White Glass Rim Strokes for all Rings & Hub
       // Outer Ring outer rim (r3Out)
       drawArc(
         brush =
@@ -232,10 +231,10 @@ fun RotaryClockDial(
             colors =
               listOf(
                 Color(0x99FFFFFF),
-                Color(0x4038BDF8),
+                Color(0x55FFFFFF),
                 Color(0x18FFFFFF),
-                Color(0x3538BDF8),
-                Color(0x70FFFFFF),
+                Color(0x55FFFFFF),
+                Color(0x80FFFFFF),
               ),
             start = Offset(0f, cy - r3Out),
             end = Offset(r3Out, cy + r3Out),
@@ -264,10 +263,10 @@ fun RotaryClockDial(
           Brush.linearGradient(
             colors =
               listOf(
-                Color(0x80FFFFFF),
-                Color(0x3538BDF8),
+                Color(0x85FFFFFF),
+                Color(0x45FFFFFF),
                 Color(0x18FFFFFF),
-                Color(0x60FFFFFF),
+                Color(0x65FFFFFF),
               ),
             start = Offset(0f, cy - r2Out),
             end = Offset(r2Out, cy + r2Out),
@@ -296,10 +295,10 @@ fun RotaryClockDial(
           Brush.linearGradient(
             colors =
               listOf(
-                Color(0x85FFFFFF),
-                Color(0x4038BDF8),
+                Color(0x90FFFFFF),
+                Color(0x50FFFFFF),
                 Color(0x18FFFFFF),
-                Color(0x65FFFFFF),
+                Color(0x70FFFFFF),
               ),
             start = Offset(0f, cy - r1Out),
             end = Offset(r1Out, cy + r1Out),
@@ -330,7 +329,7 @@ fun RotaryClockDial(
               listOf(
                 GlassBorderSubtle,
                 GlassBorderHighlight,
-                IceGlowAccent.copy(alpha = 0.40f),
+                Color(0x80FFFFFF),
                 GlassBorderHighlight,
                 GlassBorderSubtle,
               ),
@@ -354,8 +353,8 @@ fun RotaryClockDial(
                   Color(0x22FFFFFF),
                   Color(0x06FFFFFF),
                   Color.Transparent,
-                  Color(0x0E38BDF8),
-                  Color(0x1AFFFFFF),
+                  Color(0x10FFFFFF),
+                  Color(0x1EFFFFFF),
                   Color.Transparent,
                 ),
               start = Offset(0f, cy - r3Out),
@@ -386,7 +385,7 @@ fun RotaryClockDial(
           )
         }
 
-      // Frosted liquid glass backdrop with subtle occlusion
+      // Frosted liquid monochrome glass backdrop with subtle occlusion
       drawPath(
         path = capsulePath,
         brush =
@@ -394,16 +393,16 @@ fun RotaryClockDial(
             colors =
               listOf(
                 Color(0x450B0D12),
-                Color(0x381E293B),
-                Color(0x300F172A),
-                Color(0x2838BDF8),
+                Color(0x351A202C),
+                Color(0x280B0D12),
+                Color(0x20FFFFFF),
               ),
             start = Offset(0f, cy - barHalfH),
             end = Offset(barRight, cy + barHalfH),
           ),
       )
 
-      // Specular border around capsule
+      // Specular white border around capsule
       drawPath(
         path = capsulePath,
         brush =
@@ -411,9 +410,9 @@ fun RotaryClockDial(
             colors =
               listOf(
                 Color(0x99FFFFFF),
-                Color(0x4038BDF8),
+                Color(0x55FFFFFF),
                 Color(0x20FFFFFF),
-                Color(0x4038BDF8),
+                Color(0x55FFFFFF),
                 Color(0x80FFFFFF),
               ),
             start = Offset(0f, cy - barHalfH),
@@ -504,11 +503,11 @@ fun RotaryClockDial(
       val minStr = String.format(Locale.US, "%02d", liveMinute)
       val secStr = String.format(Locale.US, "%02d", liveSecond)
 
-      // Optical radiance behind active digits
+      // Optical white radiance behind active digits
       drawCircle(
         brush =
           Brush.radialGradient(
-            colors = listOf(IceGlowAccent.copy(alpha = 0.20f), Color.Transparent),
+            colors = listOf(Color.White.copy(alpha = 0.16f), Color.Transparent),
             center = Offset(hourCenterX, cy),
             radius = 16.dp.toPx(),
           ),
@@ -518,7 +517,7 @@ fun RotaryClockDial(
       drawCircle(
         brush =
           Brush.radialGradient(
-            colors = listOf(IceGlowAccent.copy(alpha = 0.20f), Color.Transparent),
+            colors = listOf(Color.White.copy(alpha = 0.16f), Color.Transparent),
             center = Offset(minCenterX, cy),
             radius = 16.dp.toPx(),
           ),
@@ -528,7 +527,7 @@ fun RotaryClockDial(
       drawCircle(
         brush =
           Brush.radialGradient(
-            colors = listOf(IceGlowAccent.copy(alpha = 0.35f), Color.Transparent),
+            colors = listOf(Color.White.copy(alpha = 0.24f), Color.Transparent),
             center = Offset(secCenterX, cy),
             radius = 16.dp.toPx(),
           ),
@@ -536,7 +535,7 @@ fun RotaryClockDial(
         center = Offset(secCenterX, cy),
       )
 
-      // Typography for time presentation
+      // Typography for time presentation (pure white monochrome)
       val numberPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
           color = android.graphics.Color.WHITE
@@ -547,7 +546,7 @@ fun RotaryClockDial(
 
       val secPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-          color = 0xFF38BDF8.toInt()
+          color = android.graphics.Color.WHITE
           textSize = 15.dp.toPx()
           textAlign = Paint.Align.CENTER
           typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
@@ -555,7 +554,7 @@ fun RotaryClockDial(
 
       val colonPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-          color = 0xFF38BDF8.toInt()
+          color = android.graphics.Color.WHITE
           textSize = 14.dp.toPx()
           textAlign = Paint.Align.CENTER
           typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
@@ -563,7 +562,7 @@ fun RotaryClockDial(
 
       val badgePaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-          color = 0xFF38BDF8.toInt()
+          color = android.graphics.Color.WHITE
           textSize = 9.dp.toPx()
           typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
           textAlign = Paint.Align.CENTER
@@ -613,22 +612,22 @@ fun RotaryClockDial(
             addRoundRect(RoundRect(badgeRect, CornerRadius(5.dp.toPx(), 5.dp.toPx())))
           }
 
-        // Translucent frosted glass badge fill
+        // Translucent frosted monochrome glass badge fill
         drawPath(
           path = badgePath,
           brush =
             Brush.linearGradient(
               colors =
                 listOf(
-                  Color(0x2838BDF8),
-                  Color(0x14FFFFFF),
-                  Color(0x180F172A),
+                  Color(0x25FFFFFF),
+                  Color(0x12FFFFFF),
+                  Color(0x180B0D12),
                 ),
               start = Offset(badgeRect.left, badgeRect.top),
               end = Offset(badgeRect.right, badgeRect.bottom),
             ),
         )
-        // Specular badge border
+        // Specular white badge border
         drawPath(
           path = badgePath,
           brush =
@@ -636,8 +635,8 @@ fun RotaryClockDial(
               colors =
                 listOf(
                   Color(0x99FFFFFF),
-                  Color(0x6038BDF8),
-                  Color(0x30FFFFFF),
+                  Color(0x50FFFFFF),
+                  Color(0x75FFFFFF),
                 ),
               start = Offset(badgeRect.left, badgeRect.top),
               end = Offset(badgeRect.right, badgeRect.bottom),
@@ -898,7 +897,7 @@ private fun DrawScope.drawGlassSecondsTrack(
     val alpha = (if (isMajor) 0.50f else 0.20f) * centerFade * edgeFade
     if (alpha <= 0.01f) continue
     drawLine(
-      color = IceGlowAccent.copy(alpha = alpha),
+      color = Color.White.copy(alpha = alpha),
       start = Offset(startR * cosA, cy + startR * sinA),
       end = Offset(outerR * cosA, cy + outerR * sinA),
       strokeWidth = if (isMajor) 1.0.dp.toPx() else 0.6.dp.toPx(),
@@ -932,7 +931,7 @@ private fun DrawScope.drawGlassSecondsTrack(
 
     textPaint.textSize = if (isMultipleOf5) 9.5.dp.toPx() else 8.dp.toPx()
     textPaint.alpha = (alpha * 255).roundToInt().coerceIn(0, 255)
-    textPaint.color = if (isMultipleOf5) 0xFF38BDF8.toInt() else android.graphics.Color.WHITE
+    textPaint.color = if (isMultipleOf5) android.graphics.Color.WHITE else 0xFFCBD5E1.toInt()
 
     drawContext.canvas.nativeCanvas.apply {
       save()
