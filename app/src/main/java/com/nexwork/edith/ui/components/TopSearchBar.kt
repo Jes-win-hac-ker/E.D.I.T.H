@@ -205,41 +205,8 @@ fun TopSearchBar(
           verticalAlignment = Alignment.CenterVertically,
           modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = 18.dp, vertical = 13.dp),
         ) {
-          // Liquid droplet search badge
-          Box(
-            modifier = Modifier
-              .size(34.dp)
-              .clip(CircleShape)
-              .background(
-                Brush.radialGradient(
-                  colors = listOf(
-                    Color(0x4038BDF8),
-                    Color(0x1538BDF8),
-                    Color(0x05FFFFFF),
-                  )
-                )
-              )
-              .border(
-                width = 0.9.dp,
-                brush = Brush.linearGradient(
-                  listOf(Color(0xCCFFFFFF), Color(0x4438BDF8))
-                ),
-                shape = CircleShape
-              ),
-            contentAlignment = Alignment.Center,
-          ) {
-            Icon(
-              painter = painterResource(id = R.drawable.ic_custom_search),
-              contentDescription = "Search",
-              tint = Color.White,
-              modifier = Modifier.size(17.dp),
-            )
-          }
-
-          Spacer(modifier = Modifier.width(12.dp))
-
           BasicTextField(
             value = textFieldValue,
             onValueChange = { newVal ->
