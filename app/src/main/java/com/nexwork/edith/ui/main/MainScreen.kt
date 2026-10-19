@@ -45,6 +45,7 @@ fun MainScreen(
 
   val state by viewModel.launcherState.collectAsStateWithLifecycle()
   var totalVerticalDrag by remember { mutableFloatStateOf(0f) }
+  var dragStartY by remember { mutableFloatStateOf(0f) }
 
   Box(
     modifier = modifier
@@ -53,13 +54,18 @@ fun MainScreen(
       .pointerInput(state.isSpotlightSearchOpen) {
         if (!state.isSpotlightSearchOpen) {
           detectVerticalDragGestures(
-            onDragStart = { totalVerticalDrag = 0f },
+            onDragStart = { offset ->
+              totalVerticalDrag = 0f
+              dragStartY = offset.y
+            },
             onVerticalDrag = { change, dragAmount ->
-              totalVerticalDrag += dragAmount
-              if (totalVerticalDrag > 28f) {
-                change.consume()
-                viewModel.openSpotlightSearch()
-                totalVerticalDrag = 0f
+              if (dragStartY > 90f) {
+                totalVerticalDrag += dragAmount
+                if (totalVerticalDrag > 28f) {
+                  change.consume()
+                  viewModel.openSpotlightSearch()
+                  totalVerticalDrag = 0f
+                }
               }
             },
             onDragEnd = { totalVerticalDrag = 0f },

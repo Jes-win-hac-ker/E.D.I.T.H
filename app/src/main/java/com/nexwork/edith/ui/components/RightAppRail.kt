@@ -179,7 +179,6 @@ fun RightAppRail(
     modifier =
       modifier
         .fillMaxHeight()
-        .statusBarsPadding()
         .navigationBarsPadding()
         .padding(top = 56.dp, start = 8.dp, end = 8.dp, bottom = 24.dp),
     verticalArrangement = Arrangement.Top,

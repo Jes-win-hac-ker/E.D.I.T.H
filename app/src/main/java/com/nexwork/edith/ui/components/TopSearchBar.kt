@@ -155,13 +155,12 @@ fun TopSearchBar(
     ) { -it - 150 } + fadeOut(animationSpec = tween(180)),
     modifier = modifier
       .fillMaxWidth()
-      .statusBarsPadding()
       .displayCutoutPadding(),
   ) {
     Box(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 16.dp, vertical = 14.dp),
+        .padding(start = 16.dp, top = 20.dp, end = 16.dp, bottom = 14.dp),
     ) {
       // Liquid glass pill container
       Box(
