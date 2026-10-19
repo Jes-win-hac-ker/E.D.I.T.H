@@ -11,16 +11,15 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * Clean architectural layout grid lines covering the entire screen.
- * Draws horizontal and vertical grid lines with major/minor intervals and center guidelines.
+ * Very fine, high-density layout grid lines (millimeter / graph-paper style).
  */
 @Composable
 fun GridLines(
   modifier: Modifier = Modifier,
-  gridSize: Dp = 24.dp,
-  majorStep: Int = 4,
-  minorLineColor: Color = Color.White.copy(alpha = 0.10f),
-  majorLineColor: Color = Color.White.copy(alpha = 0.25f),
+  gridSize: Dp = 8.dp,
+  majorStep: Int = 4, // Major line every 32dp
+  minorLineColor: Color = Color.White.copy(alpha = 0.08f),
+  majorLineColor: Color = Color.White.copy(alpha = 0.22f),
   centerLineColor: Color = Color(0xFF38BDF8).copy(alpha = 0.45f),
 ) {
   Canvas(modifier = modifier.fillMaxSize()) {
@@ -45,7 +44,7 @@ fun GridLines(
         color = if (isMajor) majorLineColor else minorLineColor,
         start = Offset(x, 0f),
         end = Offset(x, height),
-        strokeWidth = if (isMajor) 1.2.dp.toPx() else 0.8.dp.toPx(),
+        strokeWidth = if (isMajor) 0.8.dp.toPx() else 0.5.dp.toPx(),
       )
     }
 
@@ -58,19 +57,19 @@ fun GridLines(
         color = if (isMajor) majorLineColor else minorLineColor,
         start = Offset(0f, y),
         end = Offset(width, y),
-        strokeWidth = if (isMajor) 1.2.dp.toPx() else 0.8.dp.toPx(),
+        strokeWidth = if (isMajor) 0.8.dp.toPx() else 0.5.dp.toPx(),
       )
     }
 
     // Screen Center Axis guidelines (dashed accent color)
-    val dashEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f)
+    val dashEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)
 
     // Center Vertical Line
     drawLine(
       color = centerLineColor,
       start = Offset(centerX, 0f),
       end = Offset(centerX, height),
-      strokeWidth = 1.2.dp.toPx(),
+      strokeWidth = 1.dp.toPx(),
       pathEffect = dashEffect,
     )
 
@@ -79,7 +78,7 @@ fun GridLines(
       color = centerLineColor,
       start = Offset(0f, centerY),
       end = Offset(width, centerY),
-      strokeWidth = 1.2.dp.toPx(),
+      strokeWidth = 1.dp.toPx(),
       pathEffect = dashEffect,
     )
   }
