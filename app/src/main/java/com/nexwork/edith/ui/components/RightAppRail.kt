@@ -210,81 +210,12 @@ private fun CustomAppItem(
         .clickable { onClick() }
         .padding(vertical = 4.dp),
   ) {
-    // Transparent Liquid Glass Icon Squircle
-    Box(
-      modifier =
-        Modifier
-          .size(52.dp)
-          .clip(RoundedCornerShape(16.dp))
-          .background(
-            Brush.linearGradient(
-              colors = listOf(
-                Color(0x38FFFFFF),
-                Color(0x14FFFFFF),
-                Color(0x0E0F172A),
-                Color(0x2838BDF8),
-              ),
-              start = Offset(0f, 0f),
-              end = Offset.Infinite,
-            )
-          )
-          .border(
-            width = 1.dp,
-            brush = Brush.linearGradient(
-              colors = listOf(
-                Color(0x99FFFFFF),
-                Color(0x4038BDF8),
-                Color(0x18FFFFFF),
-                Color(0x3538BDF8),
-                Color(0x70FFFFFF),
-              ),
-              start = Offset(0f, 0f),
-              end = Offset.Infinite,
-            ),
-            shape = RoundedCornerShape(16.dp),
-          ),
-      contentAlignment = Alignment.Center,
-    ) {
-      // Specular meniscus highlight at top of liquid glass squircle
-      Box(
-        modifier = Modifier
-          .fillMaxWidth()
-          .height(16.dp)
-          .align(Alignment.TopCenter)
-          .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-          .background(
-            Brush.verticalGradient(
-              colors = listOf(
-                Color(0x55FFFFFF),
-                Color(0x18FFFFFF),
-                Color.Transparent,
-              )
-            )
-          )
-      )
-
-      // Inner liquid fluid ambient radial bloom
-      Box(
-        modifier = Modifier
-          .size(36.dp)
-          .clip(RoundedCornerShape(12.dp))
-          .background(
-            Brush.radialGradient(
-              colors = listOf(
-                Color(0x3338BDF8),
-                Color.Transparent,
-              )
-            )
-          )
-      )
-
-      Icon(
-        painter = painterResource(id = app.iconRes),
-        contentDescription = app.label,
-        tint = TextPureWhite,
-        modifier = Modifier.size(26.dp),
-      )
-    }
+    LiquidGlassAppIcon(
+      packageName = app.packageName,
+      label = app.label,
+      customIconResOverride = app.iconRes,
+      size = 52.dp,
+    )
 
     Spacer(modifier = Modifier.height(5.dp))
 

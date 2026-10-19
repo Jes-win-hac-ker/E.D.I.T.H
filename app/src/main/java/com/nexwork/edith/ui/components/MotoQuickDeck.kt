@@ -169,9 +169,11 @@ fun LeftTopMostUsedSection(
               ) {
                 AppIconBadge(
                   label = app.label,
+                  packageName = app.packageName,
+                  icon = app.icon,
                   iconBitmap = iconBmp,
                   isMotoApp = app.isMotoApp,
-                  modifier = Modifier.size(38.dp),
+                  size = 44.dp,
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
@@ -257,9 +259,11 @@ fun LeftBottomQuickAccessDock(
           ) {
             AppIconBadge(
               label = app.label,
+              packageName = app.packageName,
+              icon = app.icon,
               iconBitmap = iconBmp,
               isMotoApp = app.isMotoApp,
-              modifier = Modifier.size(40.dp),
+              size = 46.dp,
             )
             Spacer(modifier = Modifier.height(5.dp))
             Text(

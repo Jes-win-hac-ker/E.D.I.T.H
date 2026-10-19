@@ -58,6 +58,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexwork.edith.model.AppEntry
@@ -294,9 +295,11 @@ private fun GlassRailAppItem(
     ) {
       AppIconBadge(
         label = app.label,
+        packageName = app.packageName,
+        icon = app.icon,
         iconBitmap = iconBitmap,
         isMotoApp = app.isMotoApp,
-        modifier = Modifier.size(36.dp),
+        size = 44.dp,
       )
       Spacer(modifier = Modifier.height(5.dp))
       Text(
@@ -501,9 +504,11 @@ fun FullAppListGlassOverlay(
               ) {
                 AppIconBadge(
                   label = app.label,
+                  packageName = app.packageName,
+                  icon = app.icon,
                   iconBitmap = bmp,
                   isMotoApp = app.isMotoApp,
-                  modifier = Modifier.size(40.dp),
+                  size = 44.dp,
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
@@ -552,9 +557,11 @@ fun FullAppListGlassOverlay(
               ) {
                 AppIconBadge(
                   label = app.label,
+                  packageName = app.packageName,
+                  icon = app.icon,
                   iconBitmap = bmp,
                   isMotoApp = app.isMotoApp,
-                  modifier = Modifier.size(46.dp),
+                  size = 48.dp,
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
@@ -650,37 +657,21 @@ fun AppContextDropdown(
 @Composable
 fun AppIconBadge(
   label: String,
-  iconBitmap: androidx.compose.ui.graphics.ImageBitmap?,
-  isMotoApp: Boolean,
+  iconBitmap: androidx.compose.ui.graphics.ImageBitmap? = null,
+  isMotoApp: Boolean = false,
+  packageName: String = "",
+  icon: Drawable? = null,
+  size: Dp = 44.dp,
   modifier: Modifier = Modifier,
 ) {
-  if (iconBitmap != null) {
-    Image(
-      bitmap = iconBitmap,
-      contentDescription = label,
-      modifier = modifier.clip(CircleShape),
-    )
-  } else {
-    Surface(
-      color = GlassSurfaceElevated,
-      shape = CircleShape,
-      modifier =
-        modifier.border(
-          width = 1.dp,
-          color = if (isMotoApp) IceGlowAccent.copy(alpha = 0.6f) else GlassBorderHighlight,
-          shape = CircleShape,
-        ),
-    ) {
-      Box(contentAlignment = Alignment.Center) {
-        Text(
-          text = label.take(2).uppercase(),
-          color = if (isMotoApp) IceGlowAccent else TextPureWhite,
-          fontSize = 12.sp,
-          fontWeight = FontWeight.SemiBold,
-        )
-      }
-    }
-  }
+  LiquidGlassAppIcon(
+    packageName = packageName,
+    label = label,
+    icon = icon,
+    iconBitmapOverride = iconBitmap,
+    size = size,
+    modifier = modifier,
+  )
 }
 
 @Composable
