@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -22,7 +23,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
@@ -30,13 +30,11 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.dp
 import com.nexwork.edith.theme.GlassBorderHighlight
 import com.nexwork.edith.theme.GlassBorderSubtle
-import com.nexwork.edith.theme.GlassSurface
-import com.nexwork.edith.theme.GlassSurfaceElevated
 import com.nexwork.edith.theme.IceGlowAccent
-import com.nexwork.edith.theme.ObsidianBgTop
+import com.nexwork.edith.theme.TextPureWhite
+import com.nexwork.edith.theme.TextSilver
 import java.util.Calendar
 import java.util.Locale
-import androidx.compose.runtime.withFrameNanos
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -45,17 +43,15 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * Sleek Dark Glass Multi-Ring Rotary Clock Dial.
+ * Sleek Dark Glass Multi-Ring Rotary Chronometer.
  *
- * Anchored flush to the left screen edge:
- * - Three concentric frosted obsidian glass rings presenting time in [hh : mm : ss]:
- *     1. Inner Ring: Hours (hh) with micro-ticks and smooth numerical progression.
- *     2. Middle Ring: Minutes (mm) with dynamic continuous minute track.
- *     3. Outer Ring: Seconds (ss) with 120Hz smooth fluid chronometer rotation.
- * - Horizontal liquid glass time capsule passing across all three rings framing:
- *     [ HH ] : [ MM ] : [ SS ]
- * - Clean obsidian glass hub chamber with 12/24H mode badge.
- * Non-interactive: purely visual, seamless chronometer display.
+ * Implements the signature Liquid Glassmorphism aesthetic:
+ * 1. Concentric annular frosted glass rings (Hours, Minutes, Seconds) with translucent gradients.
+ * 2. Multi-stop specular highlight borders along both inner and outer ring perimeters.
+ * 3. Diagonal specular light sheen reflecting across the crystal face.
+ * 4. Liquid Glass Time Capsule / Loupe with specular meniscus highlight and optical radiance.
+ * 5. Frosted glass mode indicator pill (12H / 24H) in the central hub.
+ * 6. Smooth 120Hz continuous chronometer progression.
  */
 @Composable
 fun RotaryClockDial(
@@ -91,113 +87,111 @@ fun RotaryClockDial(
     Canvas(modifier = Modifier.matchParentSize()) {
       val cy = size.height / 2f
 
-      // Concentric Radii
-      val r0 = 70.dp.toPx() // Inner chamber hub
-      val r1In = 72.dp.toPx() // Inner Ring (Hours) start
-      val r1Out = 110.dp.toPx() // Inner Ring (Hours) end
-      val r2In = 112.dp.toPx() // Middle Ring (Minutes) start
-      val r2Out = 150.dp.toPx() // Middle Ring (Minutes) end
-      val r3In = 152.dp.toPx() // Outer Ring (Seconds) start
-      val r3Out = 190.dp.toPx() // Outer Ring (Seconds) end
+      // Concentric Radii (in dp to px)
+      val r0 = 68.dp.toPx() // Central hub disc
+      val r1In = 71.dp.toPx() // Inner Ring (Hours) start
+      val r1Out = 108.dp.toPx() // Inner Ring (Hours) end
+      val r2In = 111.dp.toPx() // Middle Ring (Minutes) start
+      val r2Out = 148.dp.toPx() // Middle Ring (Minutes) end
+      val r3In = 151.dp.toPx() // Outer Ring (Seconds) start
+      val r3Out = 188.dp.toPx() // Outer Ring (Seconds) end
 
-      // 0. Soft ambient ice glow behind the outer rim
+      // 0. Soft ambient cyan/white glow behind the whole clock rim
       drawCircle(
         brush =
           Brush.radialGradient(
             colors =
               listOf(
-                IceGlowAccent.copy(alpha = 0.16f),
+                IceGlowAccent.copy(alpha = 0.18f),
+                Color(0x1038BDF8),
                 Color.Transparent,
               ),
             center = Offset(0f, cy),
-            radius = r3Out * 1.15f,
+            radius = r3Out * 1.18f,
           ),
-        radius = r3Out * 1.15f,
+        radius = r3Out * 1.18f,
         center = Offset(0f, cy),
       )
 
-      // 1. Concentric Glass Ring Semi-Circles
-      fun makeSemiCirclePath(r: Float): Path {
-        return Path().apply {
-          moveTo(0f, cy - r)
-          arcTo(
-            rect = Rect(left = -r, top = cy - r, right = r, bottom = cy + r),
-            startAngleDegrees = -90f,
-            sweepAngleDegrees = 180f,
-            forceMoveTo = false,
-          )
-          close()
-        }
-      }
+      // Annular paths
+      val outerRingPath = makeRingPath(r3In, r3Out, cy)
+      val middleRingPath = makeRingPath(r2In, r2Out, cy)
+      val innerRingPath = makeRingPath(r1In, r1Out, cy)
+      val hubPath = makeDiscPath(r0, cy)
+      val fullDialArc = makeDiscPath(r3Out, cy)
 
-      val outerArcPath = makeSemiCirclePath(r3Out)
-      val middleArcPath = makeSemiCirclePath(r2Out)
-      val innerArcPath = makeSemiCirclePath(r1Out)
-      val hubArcPath = makeSemiCirclePath(r0)
-
-      // Outer Ring Background (Seconds Track)
+      // 1. Concentric Frosted Glass Ring Fills (True Glassmorphic Translucency)
+      // Outer Ring (Seconds Track)
       drawPath(
-        path = outerArcPath,
-        brush =
-          Brush.horizontalGradient(
-            colors =
-              listOf(
-                GlassSurface.copy(alpha = 0.45f),
-                GlassSurfaceElevated.copy(alpha = 0.65f),
-              ),
-            startX = 0f,
-            endX = r3Out,
-          ),
-      )
-
-      // Middle Ring Background (Minutes Track)
-      drawPath(
-        path = middleArcPath,
-        brush =
-          Brush.horizontalGradient(
-            colors =
-              listOf(
-                GlassSurface.copy(alpha = 0.55f),
-                GlassSurfaceElevated.copy(alpha = 0.75f),
-              ),
-            startX = 0f,
-            endX = r2Out,
-          ),
-      )
-
-      // Inner Ring Background (Hours Track)
-      drawPath(
-        path = innerArcPath,
-        brush =
-          Brush.horizontalGradient(
-            colors =
-              listOf(
-                GlassSurface.copy(alpha = 0.65f),
-                GlassSurfaceElevated.copy(alpha = 0.85f),
-              ),
-            startX = 0f,
-            endX = r1Out,
-          ),
-      )
-
-      // Inner Chamber Hub Background (Weather & Date)
-      drawPath(
-        path = hubArcPath,
+        path = outerRingPath,
         brush =
           Brush.radialGradient(
             colors =
               listOf(
-                ObsidianBgTop.copy(alpha = 0.95f),
-                GlassSurface.copy(alpha = 0.82f),
+                Color(0x28FFFFFF), // frosted specular highlight
+                Color(0x12FFFFFF),
+                Color(0x1E0F172A), // deep obsidian glass tint
+                Color(0x1838BDF8), // delicate ice cyan refraction
               ),
-            center = Offset(14.dp.toPx(), cy),
+            center = Offset(0f, cy),
+            radius = r3Out,
+          ),
+      )
+
+      // Middle Ring (Minutes Track)
+      drawPath(
+        path = middleRingPath,
+        brush =
+          Brush.radialGradient(
+            colors =
+              listOf(
+                Color(0x2CFFFFFF),
+                Color(0x14FFFFFF),
+                Color(0x220F172A),
+                Color(0x1B38BDF8),
+              ),
+            center = Offset(0f, cy),
+            radius = r2Out,
+          ),
+      )
+
+      // Inner Ring (Hours Track)
+      drawPath(
+        path = innerRingPath,
+        brush =
+          Brush.radialGradient(
+            colors =
+              listOf(
+                Color(0x30FFFFFF),
+                Color(0x16FFFFFF),
+                Color(0x260F172A),
+                Color(0x2038BDF8),
+              ),
+            center = Offset(0f, cy),
+            radius = r1Out,
+          ),
+      )
+
+      // Central Hub Disc
+      drawPath(
+        path = hubPath,
+        brush =
+          Brush.radialGradient(
+            colors =
+              listOf(
+                Color(0x32FFFFFF),
+                Color(0x16FFFFFF),
+                Color(0x350B0D12),
+                Color(0x240F172A),
+              ),
+            center = Offset(18.dp.toPx(), cy),
             radius = r0,
           ),
       )
 
-      // 2. Rotary Tracks inside the 3 Rings
+      // 2. Rotary Chronometer Tracks inside the 3 Rings (Clipped cleanly to each annular band)
       // 2a. Outer Ring: Seconds Track (ss)
-      clipPath(outerArcPath) {
+      clipPath(outerRingPath) {
         drawGlassSecondsTrack(
           cy = cy,
           innerR = r3In,
@@ -208,7 +202,7 @@ fun RotaryClockDial(
       }
 
       // 2b. Middle Ring: Minutes Track (mm)
-      clipPath(middleArcPath) {
+      clipPath(middleRingPath) {
         drawGlassMinutesTrack(
           cy = cy,
           innerR = r2In,
@@ -220,7 +214,7 @@ fun RotaryClockDial(
       }
 
       // 2c. Inner Ring: Hours Track (hh)
-      clipPath(innerArcPath) {
+      clipPath(innerRingPath) {
         drawGlassHourTrack(
           cy = cy,
           innerR = r1In,
@@ -230,19 +224,21 @@ fun RotaryClockDial(
         )
       }
 
-      // 3. Delicate Specular Glass Rim Strokes for all 3 Rings + Hub
+      // 3. Multi-stop Specular Glass Rim Strokes for all Rings & Hub
+      // Outer Ring outer rim (r3Out)
       drawArc(
         brush =
-          Brush.sweepGradient(
+          Brush.linearGradient(
             colors =
               listOf(
-                GlassBorderSubtle,
-                GlassBorderHighlight,
-                IceGlowAccent.copy(alpha = 0.45f),
-                GlassBorderHighlight,
-                GlassBorderSubtle,
+                Color(0x99FFFFFF),
+                Color(0x4038BDF8),
+                Color(0x18FFFFFF),
+                Color(0x3538BDF8),
+                Color(0x70FFFFFF),
               ),
-            center = Offset(0f, cy),
+            start = Offset(0f, cy - r3Out),
+            end = Offset(r3Out, cy + r3Out),
           ),
         startAngle = -90f,
         sweepAngle = 180f,
@@ -251,109 +247,250 @@ fun RotaryClockDial(
         size = Size(r3Out * 2f, r3Out * 2f),
         style = Stroke(width = 1.2.dp.toPx()),
       )
-
+      // Outer Ring inner rim (r3In)
       drawArc(
-        color = GlassBorderSubtle,
+        color = GlassBorderSubtle.copy(alpha = 0.35f),
+        startAngle = -90f,
+        sweepAngle = 180f,
+        useCenter = false,
+        topLeft = Offset(-r3In, cy - r3In),
+        size = Size(r3In * 2f, r3In * 2f),
+        style = Stroke(width = 0.8.dp.toPx()),
+      )
+
+      // Middle Ring outer rim (r2Out)
+      drawArc(
+        brush =
+          Brush.linearGradient(
+            colors =
+              listOf(
+                Color(0x80FFFFFF),
+                Color(0x3538BDF8),
+                Color(0x18FFFFFF),
+                Color(0x60FFFFFF),
+              ),
+            start = Offset(0f, cy - r2Out),
+            end = Offset(r2Out, cy + r2Out),
+          ),
         startAngle = -90f,
         sweepAngle = 180f,
         useCenter = false,
         topLeft = Offset(-r2Out, cy - r2Out),
         size = Size(r2Out * 2f, r2Out * 2f),
-        style = Stroke(width = 0.9.dp.toPx()),
+        style = Stroke(width = 1.0.dp.toPx()),
+      )
+      // Middle Ring inner rim (r2In)
+      drawArc(
+        color = GlassBorderSubtle.copy(alpha = 0.30f),
+        startAngle = -90f,
+        sweepAngle = 180f,
+        useCenter = false,
+        topLeft = Offset(-r2In, cy - r2In),
+        size = Size(r2In * 2f, r2In * 2f),
+        style = Stroke(width = 0.8.dp.toPx()),
       )
 
+      // Inner Ring outer rim (r1Out)
       drawArc(
-        color = GlassBorderSubtle,
+        brush =
+          Brush.linearGradient(
+            colors =
+              listOf(
+                Color(0x85FFFFFF),
+                Color(0x4038BDF8),
+                Color(0x18FFFFFF),
+                Color(0x65FFFFFF),
+              ),
+            start = Offset(0f, cy - r1Out),
+            end = Offset(r1Out, cy + r1Out),
+          ),
         startAngle = -90f,
         sweepAngle = 180f,
         useCenter = false,
         topLeft = Offset(-r1Out, cy - r1Out),
         size = Size(r1Out * 2f, r1Out * 2f),
-        style = Stroke(width = 0.9.dp.toPx()),
+        style = Stroke(width = 1.0.dp.toPx()),
+      )
+      // Inner Ring inner rim (r1In)
+      drawArc(
+        color = GlassBorderSubtle.copy(alpha = 0.30f),
+        startAngle = -90f,
+        sweepAngle = 180f,
+        useCenter = false,
+        topLeft = Offset(-r1In, cy - r1In),
+        size = Size(r1In * 2f, r1In * 2f),
+        style = Stroke(width = 0.8.dp.toPx()),
       )
 
+      // Central Hub outer rim (r0)
       drawArc(
-        color = GlassBorderSubtle,
+        brush =
+          Brush.sweepGradient(
+            colors =
+              listOf(
+                GlassBorderSubtle,
+                GlassBorderHighlight,
+                IceGlowAccent.copy(alpha = 0.40f),
+                GlassBorderHighlight,
+                GlassBorderSubtle,
+              ),
+            center = Offset(0f, cy),
+          ),
         startAngle = -90f,
         sweepAngle = 180f,
         useCenter = false,
         topLeft = Offset(-r0, cy - r0),
         size = Size(r0 * 2f, r0 * 2f),
-        style = Stroke(width = 0.9.dp.toPx()),
+        style = Stroke(width = 1.0.dp.toPx()),
       )
 
-      // 4. Horizontal Liquid Frosted Glass Time Capsule across all 3 rings
-      val barHalfH = 19.dp.toPx()
-      val barRight = r3Out // exactly flush with outer ring rim (190dp)!
-      val barPath =
+      // 4. Diagonal Specular Glass Light Sheen Across Crystal Face
+      clipPath(fullDialArc) {
+        drawRect(
+          brush =
+            Brush.linearGradient(
+              colors =
+                listOf(
+                  Color(0x22FFFFFF),
+                  Color(0x06FFFFFF),
+                  Color.Transparent,
+                  Color(0x0E38BDF8),
+                  Color(0x1AFFFFFF),
+                  Color.Transparent,
+                ),
+              start = Offset(0f, cy - r3Out),
+              end = Offset(r3Out * 1.08f, cy + r3Out),
+            )
+        )
+      }
+
+      // 5. Liquid Glass Time Capsule / Optical Loupe framing [ HH : MM : SS ]
+      val barHalfH = 19.5.dp.toPx()
+      val barRight = r3Out + 2.dp.toPx() // perfectly aligned with outer ring rim
+      val capsulePath =
         Path().apply {
           addRoundRect(
             RoundRect(
-              rect = Rect(left = -8.dp.toPx(), top = cy - barHalfH, right = barRight, bottom = cy + barHalfH),
-              cornerRadius = CornerRadius(barHalfH, barHalfH),
+              rect =
+                Rect(
+                  left = -6.dp.toPx(),
+                  top = cy - barHalfH,
+                  right = barRight,
+                  bottom = cy + barHalfH,
+                ),
+              topRight = CornerRadius(barHalfH, barHalfH),
+              bottomRight = CornerRadius(barHalfH, barHalfH),
+              topLeft = CornerRadius.Zero,
+              bottomLeft = CornerRadius.Zero,
             )
           )
         }
 
-      // Frosted obsidian glass backdrop to cleanly occlude track numbers under the time
+      // Frosted liquid glass backdrop with subtle occlusion
       drawPath(
-        path = barPath,
+        path = capsulePath,
         brush =
-          Brush.horizontalGradient(
+          Brush.linearGradient(
             colors =
               listOf(
-                ObsidianBgTop.copy(alpha = 0.96f),
-                GlassSurfaceElevated.copy(alpha = 0.90f),
-                GlassSurface.copy(alpha = 0.86f),
+                Color(0x450B0D12),
+                Color(0x381E293B),
+                Color(0x300F172A),
+                Color(0x2838BDF8),
               ),
-            startX = 0f,
-            endX = barRight,
+            start = Offset(0f, cy - barHalfH),
+            end = Offset(barRight, cy + barHalfH),
           ),
       )
 
-      // Subtle specular hairlines along top and bottom edges - NO harsh cyan stroke box!
-      drawLine(
+      // Specular border around capsule
+      drawPath(
+        path = capsulePath,
         brush =
-          Brush.horizontalGradient(
+          Brush.linearGradient(
             colors =
               listOf(
-                GlassBorderSubtle.copy(alpha = 0.15f),
-                GlassBorderHighlight.copy(alpha = 0.40f),
+                Color(0x99FFFFFF),
+                Color(0x4038BDF8),
+                Color(0x20FFFFFF),
+                Color(0x4038BDF8),
+                Color(0x80FFFFFF),
+              ),
+            start = Offset(0f, cy - barHalfH),
+            end = Offset(barRight, cy + barHalfH),
+          ),
+        style = Stroke(width = 1.0.dp.toPx()),
+      )
+
+      // Specular meniscus highlight along top edge of capsule
+      val meniscusPath =
+        Path().apply {
+          addRoundRect(
+            RoundRect(
+              rect =
+                Rect(
+                  left = -6.dp.toPx(),
+                  top = cy - barHalfH,
+                  right = barRight,
+                  bottom = cy - barHalfH * 0.15f,
+                ),
+              topRight = CornerRadius(barHalfH, barHalfH),
+              bottomRight = CornerRadius.Zero,
+              topLeft = CornerRadius.Zero,
+              bottomLeft = CornerRadius.Zero,
+            )
+          )
+        }
+      drawPath(
+        path = meniscusPath,
+        brush =
+          Brush.verticalGradient(
+            colors =
+              listOf(
+                Color(0x55FFFFFF),
+                Color(0x18FFFFFF),
                 Color.Transparent,
               ),
-            startX = 0f,
-            endX = barRight,
+            startY = cy - barHalfH,
+            endY = cy - barHalfH * 0.15f,
           ),
-        start = Offset(0f, cy - barHalfH),
-        end = Offset(barRight, cy - barHalfH),
-        strokeWidth = 0.7.dp.toPx(),
+      )
+
+      // 6. Time Presentation Coordinates in [hh : mm : ss] across the 3 rings
+      val hourCenterX = (r1In + r1Out) * 0.5f // ~89.5dp
+      val minCenterX = (r2In + r2Out) * 0.5f // ~129.5dp
+      val secCenterX = (r3In + r3Out) * 0.5f // ~169.5dp
+      val colon1X = (hourCenterX + minCenterX) * 0.5f // ~109.5dp
+      val colon2X = (minCenterX + secCenterX) * 0.5f // ~149.5dp
+      val badgeCenterX = 36.dp.toPx() // neatly centered in Inner Hub
+
+      // Vertical glass hairline dividers between cells
+      val divTop = cy - barHalfH * 0.60f
+      val divBottom = cy + barHalfH * 0.60f
+      drawLine(
+        brush =
+          Brush.verticalGradient(
+            colors = listOf(Color.Transparent, Color(0x35FFFFFF), Color.Transparent),
+            startY = divTop,
+            endY = divBottom,
+          ),
+        start = Offset(colon1X, divTop),
+        end = Offset(colon1X, divBottom),
+        strokeWidth = 0.8.dp.toPx(),
       )
       drawLine(
         brush =
-          Brush.horizontalGradient(
-            colors =
-              listOf(
-                GlassBorderSubtle.copy(alpha = 0.15f),
-                GlassBorderSubtle.copy(alpha = 0.30f),
-                Color.Transparent,
-              ),
-            startX = 0f,
-            endX = barRight,
+          Brush.verticalGradient(
+            colors = listOf(Color.Transparent, Color(0x35FFFFFF), Color.Transparent),
+            startY = divTop,
+            endY = divBottom,
           ),
-        start = Offset(0f, cy + barHalfH),
-        end = Offset(barRight, cy + barHalfH),
-        strokeWidth = 0.7.dp.toPx(),
+        start = Offset(colon2X, divTop),
+        end = Offset(colon2X, divBottom),
+        strokeWidth = 0.8.dp.toPx(),
       )
 
-      // 7. Time Presentation in [hh : mm : ss] across the 3 rings + Mode Badge in Hub
-      val hourCenterX = (r1In + r1Out) * 0.5f // ~91dp
-      val minCenterX = (r2In + r2Out) * 0.5f // ~131dp
-      val secCenterX = (r3In + r3Out) * 0.5f // ~171dp
-      val colon1X = (hourCenterX + minCenterX) * 0.5f // ~111dp
-      val colon2X = (minCenterX + secCenterX) * 0.5f // ~151dp
-      val badgeCenterX = 40.dp.toPx() // neatly centered in Inner Hub!
-
-      // Calculate active display hour
+      // Active hour calculation
       val activeRawHour = liveHour24
       val wrapped24 = ((activeRawHour % 24) + 24) % 24
       val activeDisplayHour =
@@ -367,11 +504,11 @@ fun RotaryClockDial(
       val minStr = String.format(Locale.US, "%02d", liveMinute)
       val secStr = String.format(Locale.US, "%02d", liveSecond)
 
-      // Soft optical radiance behind active digits (zero box borders, zero collisions)
+      // Optical radiance behind active digits
       drawCircle(
         brush =
           Brush.radialGradient(
-            colors = listOf(IceGlowAccent.copy(alpha = 0.10f), Color.Transparent),
+            colors = listOf(IceGlowAccent.copy(alpha = 0.20f), Color.Transparent),
             center = Offset(hourCenterX, cy),
             radius = 16.dp.toPx(),
           ),
@@ -381,7 +518,7 @@ fun RotaryClockDial(
       drawCircle(
         brush =
           Brush.radialGradient(
-            colors = listOf(IceGlowAccent.copy(alpha = 0.10f), Color.Transparent),
+            colors = listOf(IceGlowAccent.copy(alpha = 0.20f), Color.Transparent),
             center = Offset(minCenterX, cy),
             radius = 16.dp.toPx(),
           ),
@@ -391,7 +528,7 @@ fun RotaryClockDial(
       drawCircle(
         brush =
           Brush.radialGradient(
-            colors = listOf(IceGlowAccent.copy(alpha = 0.18f), Color.Transparent),
+            colors = listOf(IceGlowAccent.copy(alpha = 0.35f), Color.Transparent),
             center = Offset(secCenterX, cy),
             radius = 16.dp.toPx(),
           ),
@@ -427,7 +564,7 @@ fun RotaryClockDial(
       val badgePaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
           color = 0xFF38BDF8.toInt()
-          textSize = 8.5.dp.toPx()
+          textSize = 9.dp.toPx()
           typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
           textAlign = Paint.Align.CENTER
         }
@@ -462,20 +599,50 @@ fun RotaryClockDial(
             else -> "PM"
           }
 
-        val badgeHalfW = 14.dp.toPx()
+        val badgeHalfW = 15.dp.toPx()
         val badgeHalfH = 10.dp.toPx()
-        drawRoundRect(
-          color = Color(0x2438BDF8),
-          topLeft = Offset(badgeCenterX - badgeHalfW, cy - badgeHalfH),
-          size = Size(badgeHalfW * 2f, badgeHalfH * 2f),
-          cornerRadius = CornerRadius(5.dp.toPx(), 5.dp.toPx()),
+        val badgeRect =
+          Rect(
+            badgeCenterX - badgeHalfW,
+            cy - badgeHalfH,
+            badgeCenterX + badgeHalfW,
+            cy + badgeHalfH,
+          )
+        val badgePath =
+          Path().apply {
+            addRoundRect(RoundRect(badgeRect, CornerRadius(5.dp.toPx(), 5.dp.toPx())))
+          }
+
+        // Translucent frosted glass badge fill
+        drawPath(
+          path = badgePath,
+          brush =
+            Brush.linearGradient(
+              colors =
+                listOf(
+                  Color(0x2838BDF8),
+                  Color(0x14FFFFFF),
+                  Color(0x180F172A),
+                ),
+              start = Offset(badgeRect.left, badgeRect.top),
+              end = Offset(badgeRect.right, badgeRect.bottom),
+            ),
         )
-        drawRoundRect(
-          color = IceGlowAccent.copy(alpha = 0.40f),
-          topLeft = Offset(badgeCenterX - badgeHalfW, cy - badgeHalfH),
-          size = Size(badgeHalfW * 2f, badgeHalfH * 2f),
-          cornerRadius = CornerRadius(5.dp.toPx(), 5.dp.toPx()),
-          style = Stroke(width = 0.8.dp.toPx()),
+        // Specular badge border
+        drawPath(
+          path = badgePath,
+          brush =
+            Brush.linearGradient(
+              colors =
+                listOf(
+                  Color(0x99FFFFFF),
+                  Color(0x6038BDF8),
+                  Color(0x30FFFFFF),
+                ),
+              start = Offset(badgeRect.left, badgeRect.top),
+              end = Offset(badgeRect.right, badgeRect.bottom),
+            ),
+          style = Stroke(width = 0.9.dp.toPx()),
         )
 
         val bFm = badgePaint.fontMetrics
@@ -483,6 +650,43 @@ fun RotaryClockDial(
         drawText(modeTag, badgeCenterX, bBaseline, badgePaint)
       }
     }
+  }
+}
+
+/**
+ * Creates a semi-annular ring path between [innerR] and [outerR] anchored to the left.
+ */
+private fun makeRingPath(innerR: Float, outerR: Float, cy: Float): Path {
+  return Path().apply {
+    arcTo(
+      rect = Rect(left = -outerR, top = cy - outerR, right = outerR, bottom = cy + outerR),
+      startAngleDegrees = -90f,
+      sweepAngleDegrees = 180f,
+      forceMoveTo = false,
+    )
+    arcTo(
+      rect = Rect(left = -innerR, top = cy - innerR, right = innerR, bottom = cy + innerR),
+      startAngleDegrees = 90f,
+      sweepAngleDegrees = -180f,
+      forceMoveTo = false,
+    )
+    close()
+  }
+}
+
+/**
+ * Creates a semi-circular disc path with radius [r] anchored to the left.
+ */
+private fun makeDiscPath(r: Float, cy: Float): Path {
+  return Path().apply {
+    moveTo(0f, cy - r)
+    arcTo(
+      rect = Rect(left = -r, top = cy - r, right = r, bottom = cy + r),
+      startAngleDegrees = -90f,
+      sweepAngleDegrees = 180f,
+      forceMoveTo = false,
+    )
+    close()
   }
 }
 
@@ -506,13 +710,13 @@ private fun DrawScope.drawGlassHourTrack(
       typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
 
-  // Intermediate ticks spanning -84° to 84° with smooth distance fade
+  // Intermediate micro-ticks spanning -84° to 84° with smooth distance fade
   for (deg in -84..84 step 4) {
     val rad = deg * (PI / 180.0)
     val cosA = cos(rad).toFloat()
     val sinA = sin(rad).toFloat()
     val isMajor = deg % 12 == 0
-    val tickLen = if (isMajor) 5.5.dp.toPx() else 2.5.dp.toPx()
+    val tickLen = if (isMajor) 5.dp.toPx() else 2.5.dp.toPx()
     val startR = outerR - tickLen
     val absDeg = abs(deg)
     val centerFade = ((absDeg - 8f) / 6f).coerceIn(0f, 1f)
@@ -523,12 +727,12 @@ private fun DrawScope.drawGlassHourTrack(
       color = Color.White.copy(alpha = alpha),
       start = Offset(startR * cosA, cy + startR * sinA),
       end = Offset(outerR * cosA, cy + outerR * sinA),
-      strokeWidth = if (isMajor) 1.1.dp.toPx() else 0.6.dp.toPx(),
+      strokeWidth = if (isMajor) 1.0.dp.toPx() else 0.6.dp.toPx(),
       cap = StrokeCap.Round,
     )
   }
 
-  // Render all visible hours across the ring (hours above and below the center)
+  // Render visible hours across the ring with smooth distance fade
   val baseHour = if (use24Hour) liveHour24 else (liveHour24 % 12)
   val deltaRange = if (use24Hour) -7..7 else -5..5
   for (delta in deltaRange) {
@@ -536,7 +740,7 @@ private fun DrawScope.drawGlassHourTrack(
     if (angleDeg < -84f || angleDeg > 84f) continue
 
     val absAngle = abs(angleDeg)
-    if (absAngle < 8f) continue // Directly behind the active hour text in capsule
+    if (absAngle < 8f) continue // Directly behind active hour in capsule
 
     // Smooth fade in as it exits the active line (8° -> 14°)
     val centerFade = ((absAngle - 8f) / 6f).coerceIn(0f, 1f)
@@ -603,7 +807,7 @@ private fun DrawScope.drawGlassMinutesTrack(
     val cosA = cos(rad).toFloat()
     val sinA = sin(rad).toFloat()
     val isMajor = deg % 6 == 0
-    val tickLen = if (isMajor) 5.dp.toPx() else 2.5.dp.toPx()
+    val tickLen = if (isMajor) 4.5.dp.toPx() else 2.2.dp.toPx()
     val startR = outerR - tickLen
     val absDeg = abs(deg)
     val centerFade = ((absDeg - 7f) / 7f).coerceIn(0f, 1f)
@@ -626,16 +830,16 @@ private fun DrawScope.drawGlassMinutesTrack(
     if (angleDeg < -84f || angleDeg > 84f) continue
 
     val absAngle = abs(angleDeg)
-    if (absAngle < 6.8f) continue // Directly behind the active pill text
+    if (absAngle < 6.8f) continue // Directly behind active minute in capsule
 
-    // Smooth fade in as it exits the pill (6.8° -> 10.0°)
+    // Smooth fade in as it exits the capsule (6.8° -> 10.0°)
     val centerFade = ((absAngle - 6.8f) / 3.2f).coerceIn(0f, 1f)
 
     // Smooth fade out as it travels away toward the edges (10° -> 84°)
     val edgeFade = ((84f - absAngle) / (84f - 10f)).coerceIn(0f, 1f).pow(1.25f)
 
     val isMultipleOf5 = minuteVal % 5 == 0
-    val baseAlpha = if (isMultipleOf5) 0.85f else 0.45f
+    val baseAlpha = if (isMultipleOf5) 0.90f else 0.45f
     val alpha = baseAlpha * centerFade * edgeFade
     if (alpha <= 0.01f) continue
 
@@ -686,7 +890,7 @@ private fun DrawScope.drawGlassSecondsTrack(
     val cosA = cos(rad).toFloat()
     val sinA = sin(rad).toFloat()
     val isMajor = deg % 6 == 0
-    val tickLen = if (isMajor) 5.dp.toPx() else 2.5.dp.toPx()
+    val tickLen = if (isMajor) 4.5.dp.toPx() else 2.2.dp.toPx()
     val startR = outerR - tickLen
     val absDeg = abs(deg)
     val centerFade = ((absDeg - 5.2f) / 3.3f).coerceIn(0f, 1f)
@@ -709,16 +913,16 @@ private fun DrawScope.drawGlassSecondsTrack(
     if (angleDeg < -84f || angleDeg > 84f) continue
 
     val absAngle = abs(angleDeg)
-    if (absAngle < 5.2f) continue // Directly behind active pill text
+    if (absAngle < 5.2f) continue // Directly behind active second in capsule
 
-    // Smooth fade in as it exits the pill (5.2° -> 8.5°)
+    // Smooth fade in as it exits the capsule (5.2° -> 8.5°)
     val centerFade = ((absAngle - 5.2f) / 3.3f).coerceIn(0f, 1f)
 
     // Smooth fade out as it travels away toward the edges (8.5° -> 84°)
     val edgeFade = ((84f - absAngle) / (84f - 8.5f)).coerceIn(0f, 1f).pow(1.25f)
 
     val isMultipleOf5 = secondVal % 5 == 0
-    val baseAlpha = if (isMultipleOf5) 0.85f else 0.45f
+    val baseAlpha = if (isMultipleOf5) 0.95f else 0.45f
     val alpha = baseAlpha * centerFade * edgeFade
     if (alpha <= 0.01f) continue
 
@@ -741,4 +945,3 @@ private fun DrawScope.drawGlassSecondsTrack(
     }
   }
 }
-
