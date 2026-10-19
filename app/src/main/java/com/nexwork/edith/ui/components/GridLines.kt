@@ -20,7 +20,6 @@ fun GridLines(
   majorStep: Int = 4, // Major line every 32dp
   minorLineColor: Color = Color.White.copy(alpha = 0.08f),
   majorLineColor: Color = Color.White.copy(alpha = 0.22f),
-  centerLineColor: Color = Color(0xFF38BDF8).copy(alpha = 0.45f),
   verticalMajorLineFromRightIndex: Int? = 4, // 4th major square line from the right of the phone
   customLineWidth: Dp = 2.dp,
   customLineColor: Color = Color.White,
@@ -34,9 +33,6 @@ fun GridLines(
 
     val cols = (width / stepPx).toInt() + 1
     val rows = (height / stepPx).toInt() + 1
-
-    val centerX = width / 2f
-    val centerY = height / 2f
 
     // Vertical grid lines
     for (i in 0..cols) {
@@ -64,26 +60,6 @@ fun GridLines(
       )
     }
 
-    // Screen Center Axis guidelines (dashed accent color)
-    val dashEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)
-
-    // Center Vertical Line
-    drawLine(
-      color = centerLineColor,
-      start = Offset(centerX, 0f),
-      end = Offset(centerX, height),
-      strokeWidth = 1.dp.toPx(),
-      pathEffect = dashEffect,
-    )
-
-    // Center Horizontal Line
-    drawLine(
-      color = centerLineColor,
-      start = Offset(0f, centerY),
-      end = Offset(width, centerY),
-      strokeWidth = 1.dp.toPx(),
-      pathEffect = dashEffect,
-    )
 
     // Solid line on the 4th major square line from the right of the phone
     if (verticalMajorLineFromRightIndex != null && verticalMajorLineFromRightIndex > 0) {
