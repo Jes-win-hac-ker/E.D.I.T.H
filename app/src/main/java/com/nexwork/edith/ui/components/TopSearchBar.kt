@@ -2,6 +2,11 @@ package com.nexwork.edith.ui.components
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -75,8 +80,6 @@ fun TopSearchBar(
   onSearch: ((String) -> Unit)? = null,
   modifier: Modifier = Modifier,
 ) {
-  if (!isOpen) return
-
   BackHandler(enabled = isOpen) {
     onDismiss()
   }
@@ -99,17 +102,17 @@ fun TopSearchBar(
   var isFocused by remember { mutableStateOf(false) }
   var lastInteractionTimestamp by remember { mutableLongStateOf(0L) }
 
-  // Auto-focus and open keyboard on open
+  // Auto-focus and open keyboard after slide-in begins
   LaunchedEffect(isOpen) {
     if (isOpen) {
-      delay(100L)
+      delay(180L)
       focusRequester.requestFocus()
       keyboardController?.show()
       lastInteractionTimestamp = System.currentTimeMillis()
     }
   }
 
-  // Auto-dismiss the search bar after 1 second of inactivity if nothing is typed,
+  // Auto-dismiss the search bar after 2 seconds of inactivity if nothing is typed,
   // granting complete immunity to slide typing (composition != null)
   LaunchedEffect(isOpen, textFieldValue, lastInteractionTimestamp) {
     if (!isOpen) return@LaunchedEffect
@@ -136,8 +139,15 @@ fun TopSearchBar(
 
   AnimatedVisibility(
     visible = isOpen,
-    enter = fadeIn() + slideInVertically { -it },
-    exit = fadeOut() + slideOutVertically { -it },
+    enter = slideInVertically(
+      animationSpec = spring(
+        dampingRatio = Spring.DampingRatioLowBouncy,
+        stiffness = Spring.StiffnessMediumLow,
+      )
+    ) { -it - 150 } + fadeIn(animationSpec = tween(240)),
+    exit = slideOutVertically(
+      animationSpec = tween(durationMillis = 220, easing = FastOutLinearInEasing)
+    ) { -it - 150 } + fadeOut(animationSpec = tween(180)),
     modifier = modifier
       .fillMaxWidth()
       .statusBarsPadding(),
