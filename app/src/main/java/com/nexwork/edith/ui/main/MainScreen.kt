@@ -1,5 +1,6 @@
 package com.nexwork.edith.ui.main
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -15,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -46,6 +48,11 @@ fun MainScreen(
   val state by viewModel.launcherState.collectAsStateWithLifecycle()
   var totalVerticalDrag by remember { mutableFloatStateOf(0f) }
   var dragStartY by remember { mutableFloatStateOf(0f) }
+
+  val railAlpha by animateFloatAsState(
+    targetValue = if (state.isSpotlightSearchOpen) 0.22f else 1f,
+    label = "RightRailAlpha",
+  )
 
   Box(
     modifier = modifier
@@ -103,20 +110,23 @@ fun MainScreen(
       GridLines()
     }
 
-    // 2. Right-side app rail placed in the 4-square right column
+    // 2. Right-side app rail placed in the 4-square right column (dimmed when search is open)
     Box(
       modifier = Modifier
         .align(Alignment.CenterEnd)
         .width(124.dp)
+        .graphicsLayer { alpha = railAlpha }
     ) {
       RightAppRail()
     }
 
-    // 3. Floating top search bar (revealed by swipe down, no overlay or blur)
+    // 3. Floating top search bar with matching apps liquid glass horizontal tab
     TopSearchBar(
       isOpen = state.isSpotlightSearchOpen,
       searchQuery = state.searchQuery,
+      apps = state.apps,
       onSearchQueryChange = viewModel::onSearchQueryChange,
+      onLaunchApp = viewModel::launchApp,
       onDismiss = viewModel::closeSpotlightSearch,
       onSearch = { query ->
         val q = query.trim()

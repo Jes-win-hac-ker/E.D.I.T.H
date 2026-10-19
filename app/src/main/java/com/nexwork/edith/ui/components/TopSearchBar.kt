@@ -1,5 +1,9 @@
 package com.nexwork.edith.ui.components
 
+import android.graphics.Bitmap
+import android.graphics.Canvas as AndroidCanvas
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutLinearInEasing
@@ -7,14 +11,20 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.displayCutoutPadding
@@ -22,8 +32,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -47,7 +58,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
@@ -60,21 +73,19 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexwork.edith.R
-import com.nexwork.edith.theme.GlassBorderHighlight
-import com.nexwork.edith.theme.GlassSurfaceElevated
+import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.theme.IceGlowAccent
-import com.nexwork.edith.theme.TextMutedSlate
 import com.nexwork.edith.theme.TextPureWhite
-import com.nexwork.edith.theme.TextSilver
 import kotlinx.coroutines.delay
 
 /**
  * Top floating search bar triggered by downward swipe on the home screen:
- * - Full width pill layout without cancel button.
- * - Auto-dismisses the search bar after 1 second of inactivity if nothing is typed.
- * - Grants complete immunity to slide typing: while the user is gesture/slide-typing
- *   (composition != null), auto-dismissal is completely inhibited.
- * - Clicking or typing in the search bar resets the inactivity timer.
+ * - Liquid glass pill layout with slide-in physics animation.
+ * - Matching apps appear in a horizontal liquid glass tab directly below the search bar (icons only).
+ * - Auto-launches if there is only 1 matching app.
+ * - Auto-dismisses keyboard after 1s of inactivity if multiple apps match.
+ * - Auto-dismisses search bar after 2s of inactivity if query is empty.
+ * - Complete immunity to slide/gesture typing (composition != null).
  */
 @Composable
 fun TopSearchBar(
@@ -82,6 +93,8 @@ fun TopSearchBar(
   searchQuery: String,
   onSearchQueryChange: (String) -> Unit,
   onDismiss: () -> Unit,
+  apps: List<AppEntry> = emptyList(),
+  onLaunchApp: (AppEntry) -> Unit = {},
   onSearch: ((String) -> Unit)? = null,
   modifier: Modifier = Modifier,
 ) {
@@ -107,6 +120,19 @@ fun TopSearchBar(
   var isFocused by remember { mutableStateOf(false) }
   var lastInteractionTimestamp by remember { mutableLongStateOf(0L) }
 
+  // Filter matching apps based on current query
+  val matchingApps = remember(searchQuery, apps) {
+    val q = searchQuery.trim()
+    if (q.isEmpty()) {
+      emptyList()
+    } else {
+      apps.filter {
+        it.label.contains(q, ignoreCase = true) ||
+          it.packageName.contains(q, ignoreCase = true)
+      }
+    }
+  }
+
   // Auto-focus and open keyboard after slide-in begins
   LaunchedEffect(isOpen) {
     if (isOpen) {
@@ -117,27 +143,44 @@ fun TopSearchBar(
     }
   }
 
-  // Auto-dismiss the search bar after 2 seconds of inactivity if nothing is typed,
-  // granting complete immunity to slide typing (composition != null)
-  LaunchedEffect(isOpen, textFieldValue, lastInteractionTimestamp) {
+  // Auto-launch if exactly 1 matching app is found (with slide typing immunity)
+  LaunchedEffect(searchQuery, matchingApps.size, textFieldValue.composition) {
+    val q = searchQuery.trim()
+    if (q.isNotEmpty() && matchingApps.size == 1 && textFieldValue.composition == null) {
+      delay(320L)
+      if (isOpen && searchQuery.trim().isNotEmpty() && matchingApps.size == 1 && textFieldValue.composition == null) {
+        onLaunchApp(matchingApps.first())
+        onDismiss()
+      }
+    }
+  }
+
+  // Inactivity tracking:
+  // - 2 seconds inactivity when query is empty -> auto-dismiss search bar
+  // - 1 second inactivity when multiple apps match -> auto-dismiss keyboard
+  // - Slide typing immunity: active composition inhibits auto-actions
+  LaunchedEffect(isOpen, textFieldValue, lastInteractionTimestamp, matchingApps.size) {
     if (!isOpen) return@LaunchedEffect
 
     val isSlideTyping = textFieldValue.composition != null
-    val isTextEmpty = textFieldValue.text.isEmpty()
-
-    // 1. Slide typing immunity: if slide/gesture typing is active, DO NOT auto-dismiss
     if (isSlideTyping) {
       return@LaunchedEffect
     }
 
-    // 2. Dismiss the searchbar in this scenario (nothing typed on the search bar)
+    val isTextEmpty = textFieldValue.text.isEmpty()
+
     if (isTextEmpty) {
-      delay(2000L) // 2 seconds of inactivity with nothing typed
-      // Verify condition still holds after the 2 second delay
+      delay(2000L)
       if (isOpen && textFieldValue.text.isEmpty() && textFieldValue.composition == null) {
         keyboardController?.hide()
         focusManager.clearFocus()
         onDismiss()
+      }
+    } else if (matchingApps.size > 1) {
+      delay(1000L)
+      if (isOpen && textFieldValue.text.isNotEmpty() && textFieldValue.composition == null) {
+        keyboardController?.hide()
+        focusManager.clearFocus()
       }
     }
   }
@@ -157,12 +200,12 @@ fun TopSearchBar(
       .fillMaxWidth()
       .displayCutoutPadding(),
   ) {
-    Box(
+    Column(
       modifier = Modifier
         .fillMaxWidth()
         .padding(start = 16.dp, top = 20.dp, end = 16.dp, bottom = 14.dp),
     ) {
-      // Liquid glass pill container
+      // 1. Search Bar Liquid Glass Pill Container
       Box(
         modifier = Modifier
           .fillMaxWidth()
@@ -281,6 +324,219 @@ fun TopSearchBar(
           }
         }
       }
+
+      // 2. Liquid Glass Tab directly underneath showing matching apps in horizontal row (only icons)
+      AnimatedVisibility(
+        visible = searchQuery.trim().isNotEmpty() && matchingApps.isNotEmpty(),
+        enter = fadeIn(tween(200)) + expandVertically(tween(220)),
+        exit = fadeOut(tween(160)) + shrinkVertically(tween(180)),
+      ) {
+        Column {
+          Spacer(modifier = Modifier.height(10.dp))
+
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(22.dp))
+              .background(Color(0xF20B0D12))
+              .background(
+                Brush.linearGradient(
+                  colors = listOf(
+                    Color(0x28FFFFFF),
+                    Color(0x05FFFFFF),
+                    Color(0x2038BDF8),
+                  ),
+                  start = Offset(0f, 0f),
+                  end = Offset.Infinite,
+                )
+              )
+              .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(
+                  colors = listOf(
+                    Color(0x88FFFFFF),
+                    Color(0x3538BDF8),
+                    Color(0x15FFFFFF),
+                    Color(0x3038BDF8),
+                    Color(0x60FFFFFF),
+                  ),
+                  start = Offset(0f, 0f),
+                  end = Offset.Infinite,
+                ),
+                shape = RoundedCornerShape(22.dp),
+              )
+          ) {
+            // Specular meniscus highlight at top of glass tab
+            Box(
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(18.dp)
+                .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                .background(
+                  Brush.verticalGradient(
+                    colors = listOf(
+                      Color(0x45FFFFFF),
+                      Color(0x12FFFFFF),
+                      Color.Transparent,
+                    )
+                  )
+                )
+            )
+
+            // Horizontal row with ONLY icons
+            LazyRow(
+              horizontalArrangement = Arrangement.spacedBy(14.dp),
+              contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              items(matchingApps, key = { it.packageName }) { app ->
+                SearchAppIconItem(
+                  app = app,
+                  onClick = {
+                    onLaunchApp(app)
+                    onDismiss()
+                  },
+                )
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
+
+/**
+ * Liquid glass squircle icon for horizontal search results:
+ * Displays only the icon with the translucent liquid glass aesthetic (no label text).
+ */
+@Composable
+private fun SearchAppIconItem(
+  app: AppEntry,
+  onClick: () -> Unit,
+) {
+  val customIconRes = remember(app.packageName) {
+    when {
+      app.packageName == "com.whatsapp" -> R.drawable.ic_custom_whatsapp
+      app.packageName.contains("camera") -> R.drawable.ic_custom_camera
+      app.packageName.contains("dialer") -> R.drawable.ic_custom_phone
+      app.packageName.contains("paisa") || app.packageName.contains("wallet") -> R.drawable.ic_custom_gpay
+      app.packageName.contains("googlequicksearchbox") -> R.drawable.ic_custom_google
+      app.packageName.contains("bard") -> R.drawable.ic_custom_gemini
+      app.packageName.contains("qwen") -> R.drawable.ic_custom_qwen
+      else -> null
+    }
+  }
+
+  val iconBitmap = remember(app.packageName, app.icon) {
+    if (customIconRes == null) app.icon?.toImageBitmapSafe() else null
+  }
+
+  Box(
+    modifier = Modifier
+      .size(52.dp)
+      .clip(RoundedCornerShape(16.dp))
+      .background(
+        Brush.linearGradient(
+          colors = listOf(
+            Color(0x38FFFFFF),
+            Color(0x14FFFFFF),
+            Color(0x0E0F172A),
+            Color(0x2838BDF8),
+          ),
+          start = Offset(0f, 0f),
+          end = Offset.Infinite,
+        )
+      )
+      .border(
+        width = 1.dp,
+        brush = Brush.linearGradient(
+          colors = listOf(
+            Color(0x99FFFFFF),
+            Color(0x4038BDF8),
+            Color(0x18FFFFFF),
+            Color(0x3538BDF8),
+            Color(0x70FFFFFF),
+          ),
+          start = Offset(0f, 0f),
+          end = Offset.Infinite,
+        ),
+        shape = RoundedCornerShape(16.dp),
+      )
+      .clickable { onClick() },
+    contentAlignment = Alignment.Center,
+  ) {
+    // Specular meniscus highlight at top of squircle
+    Box(
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(16.dp)
+        .align(Alignment.TopCenter)
+        .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+        .background(
+          Brush.verticalGradient(
+            colors = listOf(
+              Color(0x55FFFFFF),
+              Color(0x18FFFFFF),
+              Color.Transparent,
+            )
+          )
+        )
+    )
+
+    // Inner liquid fluid ambient radial bloom
+    Box(
+      modifier = Modifier
+        .size(36.dp)
+        .clip(RoundedCornerShape(12.dp))
+        .background(
+          Brush.radialGradient(
+            colors = listOf(
+              Color(0x3338BDF8),
+              Color.Transparent,
+            )
+          )
+        )
+    )
+
+    if (customIconRes != null) {
+      Icon(
+        painter = painterResource(id = customIconRes),
+        contentDescription = app.label,
+        tint = TextPureWhite,
+        modifier = Modifier.size(26.dp),
+      )
+    } else if (iconBitmap != null) {
+      Image(
+        bitmap = iconBitmap,
+        contentDescription = app.label,
+        modifier = Modifier.size(28.dp),
+      )
+    } else {
+      Text(
+        text = app.label.take(1).uppercase(),
+        color = IceGlowAccent,
+        fontSize = 17.sp,
+        fontWeight = FontWeight.Bold,
+      )
+    }
+  }
+}
+
+private fun Drawable.toImageBitmapSafe(): ImageBitmap? {
+  return try {
+    if (this is BitmapDrawable && bitmap != null) {
+      return bitmap.asImageBitmap()
+    }
+    val w = intrinsicWidth.coerceAtLeast(1).coerceAtMost(192)
+    val h = intrinsicHeight.coerceAtLeast(1).coerceAtMost(192)
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = AndroidCanvas(bmp)
+    setBounds(0, 0, canvas.width, canvas.height)
+    draw(canvas)
+    bmp.asImageBitmap()
+  } catch (_: Exception) {
+    null
+  }
+}
+
