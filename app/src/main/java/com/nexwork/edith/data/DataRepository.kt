@@ -1,0 +1,514 @@
+package com.nexwork.edith.data
+
+import android.app.ActivityManager
+import android.app.AppOpsManager
+import android.app.role.RoleManager
+import android.app.usage.UsageStatsManager
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.ApplicationInfo
+import android.content.pm.LauncherApps
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.BatteryManager
+import android.os.Build
+import android.os.Process
+import android.provider.Settings
+import android.view.WindowManager
+import com.nexwork.edith.model.AppEntry
+import com.nexwork.edith.model.DeviceTelemetry
+import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.withContext
+
+interface DataRepository {
+  val data: Flow<List<String>>
+}
+
+class DefaultDataRepository : DataRepository {
+  override val data: Flow<List<String>> =
+    flowOf(listOf("Phone", "GPay", "Camera", "Messages", "Chrome", "WhatsApp", "Spotify", "Settings"))
+}
+
+class LauncherRepository(private val context: Context? = null) {
+
+  private val prefs by lazy {
+    context?.getSharedPreferences("edith_launcher_prefs", Context.MODE_PRIVATE)
+  }
+
+  fun getPinnedPackages(): Set<String> {
+    val saved = prefs?.getStringSet(KEY_PINNED_PACKAGES, null)
+    if (!saved.isNullOrEmpty()) return saved
+    return DEFAULT_ESSENTIAL_KEYWORDS
+  }
+
+  fun togglePinPackage(packageName: String): Set<String> {
+    val current = getPinnedPackages().toMutableSet()
+    if (current.contains(packageName)) {
+      current.remove(packageName)
+    } else {
+      current.add(packageName)
+    }
+    prefs?.edit()?.putStringSet(KEY_PINNED_PACKAGES, current)?.apply()
+    return current
+  }
+
+  fun hasUsageStatsPermission(): Boolean {
+    val ctx = context ?: return true
+    return try {
+      val appOps = ctx.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager ?: return false
+      val mode =
+        appOps.unsafeCheckOpNoThrow(
+          AppOpsManager.OPSTR_GET_USAGE_STATS,
+          Process.myUid(),
+          ctx.packageName,
+        )
+      mode == AppOpsManager.MODE_ALLOWED
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  /**
+   * Queries foreground usage over the past 14 days using UsageStatsManager.
+   */
+  private fun queryUsageMapPast14Days(ctx: Context): Map<String, Long> {
+    return try {
+      val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return emptyMap()
+      val endTime = System.currentTimeMillis()
+      val startTime = endTime - TimeUnit.DAYS.toMillis(14)
+      val aggregated = usm.queryAndAggregateUsageStats(startTime, endTime)
+      aggregated.mapValues { (_, stats) -> stats.totalTimeInForeground }
+    } catch (_: Exception) {
+      emptyMap()
+    }
+  }
+
+  suspend fun loadInstalledApps(): List<AppEntry> =
+    withContext(Dispatchers.IO) {
+      val ctx = context ?: return@withContext sampleApps()
+      val pinnedSet = getPinnedPackages()
+      val usageMap = queryUsageMapPast14Days(ctx)
+      val result = mutableListOf<AppEntry>()
+
+      try {
+        val launcherApps = ctx.getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
+        val activityList = launcherApps?.getActivityList(null, Process.myUserHandle()).orEmpty()
+        if (activityList.isNotEmpty()) {
+          for (info in activityList) {
+            val pkg = info.componentName.packageName
+            if (pkg == ctx.packageName) continue
+            val label = info.label?.toString()?.takeIf { it.isNotBlank() } ?: pkg
+            val appFlags = info.applicationInfo.flags
+            val isSystem = (appFlags and ApplicationInfo.FLAG_SYSTEM) != 0
+            val isMoto = pkg.startsWith("com.motorola") || pkg.startsWith("com.dolby")
+            val isEssential = isEssentialApp(pkg, label)
+            val isPinned = isEssential || pinnedSet.contains(pkg)
+            val usage14d = usageMap[pkg] ?: 0L
+
+            result.add(
+              AppEntry(
+                label = label,
+                packageName = pkg,
+                activityName = info.componentName.className,
+                icon = runCatching { info.getBadgedIcon(0) }.getOrNull(),
+                isSystemApp = isSystem,
+                isMotoApp = isMoto,
+                isPinned = isPinned,
+                usageTimeMillis14d = usage14d,
+                isEssentialQuickAccess = isEssential,
+              )
+            )
+          }
+        } else {
+          val pm = ctx.packageManager
+          val mainIntent =
+            Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
+          val resolves = pm.queryIntentActivities(mainIntent, 0)
+          for (ri in resolves) {
+            val pkg = ri.activityInfo.packageName
+            if (pkg == ctx.packageName) continue
+            val label = ri.loadLabel(pm).toString().ifBlank { pkg }
+            val isSystem = (ri.activityInfo.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+            val isMoto = pkg.startsWith("com.motorola") || pkg.startsWith("com.dolby")
+            val isEssential = isEssentialApp(pkg, label)
+            val isPinned = isEssential || pinnedSet.contains(pkg)
+            val usage14d = usageMap[pkg] ?: 0L
+
+            result.add(
+              AppEntry(
+                label = label,
+                packageName = pkg,
+                activityName = ri.activityInfo.name,
+                icon = runCatching { ri.loadIcon(pm) }.getOrNull(),
+                isSystemApp = isSystem,
+                isMotoApp = isMoto,
+                isPinned = isPinned,
+                usageTimeMillis14d = usage14d,
+                isEssentialQuickAccess = isEssential,
+              )
+            )
+          }
+        }
+      } catch (_: Exception) {
+        return@withContext sampleApps()
+      }
+
+      if (result.isEmpty()) sampleApps()
+      else result.distinctBy { it.packageName }.sortedBy { it.label.lowercase() }
+    }
+
+  /**
+   * Selects quick-access apps:
+   * 1. Essential quick triggers first (Phone, GPay / Wallet, Camera)
+   * 2. User-pinned apps
+   * 3. Most-used apps from the past 14 days (sorted by foreground time descending)
+   */
+  fun selectQuickAccessApps(allApps: List<AppEntry>, maxCount: Int = 8): List<AppEntry> {
+    if (allApps.isEmpty()) return sampleApps().take(maxCount)
+
+    val ordered =
+      allApps.sortedWith(
+        compareByDescending<AppEntry> { it.isEssentialQuickAccess }
+          .thenByDescending { it.isPinned }
+          .thenByDescending { it.usageTimeMillis14d }
+          .thenBy { essentialPriorityRank(it.packageName, it.label) }
+          .thenBy { it.label.lowercase() }
+      )
+    return ordered.take(maxCount)
+  }
+
+  private fun isEssentialApp(pkg: String, label: String): Boolean {
+    val p = pkg.lowercase()
+    val l = label.lowercase()
+    return p in ESSENTIAL_PACKAGES ||
+      l == "phone" ||
+      l == "gpay" ||
+      l == "google pay" ||
+      l == "wallet" ||
+      l == "camera" ||
+      p.contains("dialer") ||
+      p.contains("nbu.paisa") ||
+      p.contains("tez") ||
+      p.contains("camera3")
+  }
+
+  private fun essentialPriorityRank(pkg: String, label: String): Int {
+    val p = pkg.lowercase()
+    val l = label.lowercase()
+    return when {
+      l.contains("phone") || p.contains("dialer") -> 0
+      l.contains("gpay") || l.contains("google pay") || p.contains("paisa") || p.contains("wallet") -> 1
+      l.contains("camera") || p.contains("camera") -> 2
+      l.contains("messages") || p.contains("messaging") || p.contains("whatsapp") -> 3
+      l.contains("chrome") || p.contains("browser") -> 4
+      l.contains("youtube") || l.contains("spotify") -> 5
+      else -> 10
+    }
+  }
+
+  fun readTelemetry(): DeviceTelemetry {
+    val ctx = context ?: return DeviceTelemetry()
+    return try {
+      val batteryIntent = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+      val level = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, 84) ?: 84
+      val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, 100) ?: 100
+      val status = batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+      val isCharging =
+        status == BatteryManager.BATTERY_STATUS_CHARGING ||
+          status == BatteryManager.BATTERY_STATUS_FULL
+      val pct = if (scale > 0) ((level * 100f) / scale).roundToInt().coerceIn(0, 100) else 84
+
+      val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+      val memInfo = ActivityManager.MemoryInfo()
+      am?.getMemoryInfo(memInfo)
+      val totalGb =
+        if (memInfo.totalMem > 0) (memInfo.totalMem / (1024f * 1024f * 1024f)) else 8.0f
+      val availGb =
+        if (memInfo.availMem > 0) (memInfo.availMem / (1024f * 1024f * 1024f)) else 5.2f
+
+      val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+      @Suppress("DEPRECATION")
+      val hz =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+          ctx.display.refreshRate.roundToInt()
+        } else {
+          wm?.defaultDisplay?.refreshRate?.roundToInt() ?: 120
+        }
+
+      DeviceTelemetry(
+        batteryPct = pct,
+        isCharging = isCharging,
+        availableRamGb = (availGb * 10f).roundToInt() / 10f,
+        totalRamGb = (totalGb * 10f).roundToInt() / 10f,
+        refreshRateHz = if (hz >= 90) hz else 120,
+        deviceModel = "Moto G45 5G",
+        hasUsageAccess = hasUsageStatsPermission(),
+      )
+    } catch (_: Exception) {
+      DeviceTelemetry()
+    }
+  }
+
+  fun isDefaultLauncher(): Boolean {
+    val ctx = context ?: return true
+    return try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val roleManager = ctx.getSystemService(RoleManager::class.java)
+        if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_HOME)) {
+          return roleManager.isRoleHeld(RoleManager.ROLE_HOME)
+        }
+      }
+      val intent = Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) }
+      val resolveInfo = ctx.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+      resolveInfo?.activityInfo?.packageName == ctx.packageName
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  fun launchApp(app: AppEntry): Boolean {
+    val ctx = context ?: return false
+    return try {
+      val launcherApps = ctx.getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
+      if (launcherApps != null && app.activityName.isNotBlank()) {
+        val component = ComponentName(app.packageName, app.activityName)
+        launcherApps.startMainActivity(component, Process.myUserHandle(), null, null)
+        true
+      } else {
+        val launchIntent = ctx.packageManager.getLaunchIntentForPackage(app.packageName)
+        if (launchIntent != null) {
+          launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          ctx.startActivity(launchIntent)
+          true
+        } else {
+          false
+        }
+      }
+    } catch (_: Exception) {
+      try {
+        val fallback = ctx.packageManager.getLaunchIntentForPackage(app.packageName)
+        if (fallback != null) {
+          fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          ctx.startActivity(fallback)
+          true
+        } else {
+          false
+        }
+      } catch (_: Exception) {
+        false
+      }
+    }
+  }
+
+  fun openAppInfo(app: AppEntry) {
+    val ctx = context ?: return
+    runCatching {
+      val intent =
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+          data = Uri.fromParts("package", app.packageName, null)
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+      ctx.startActivity(intent)
+    }
+  }
+
+  fun requestUninstall(app: AppEntry) {
+    val ctx = context ?: return
+    runCatching {
+      val intent =
+        Intent(Intent.ACTION_DELETE).apply {
+          data = Uri.fromParts("package", app.packageName, null)
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+      ctx.startActivity(intent)
+    }
+  }
+
+  fun openHomeSettings() {
+    val ctx = context ?: return
+    runCatching {
+      val intent =
+        Intent(Settings.ACTION_HOME_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+      ctx.startActivity(intent)
+    }.onFailure {
+      runCatching {
+        ctx.startActivity(
+          Intent(Settings.ACTION_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        )
+      }
+    }
+  }
+
+  fun openUsageAccessSettings() {
+    val ctx = context ?: return
+    runCatching {
+      val intent =
+        Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+          data = Uri.fromParts("package", ctx.packageName, null)
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+      ctx.startActivity(intent)
+    }.onFailure {
+      runCatching {
+        ctx.startActivity(
+          Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          }
+        )
+      }
+    }
+  }
+
+  fun openSystemClockOrAlarms() {
+    val ctx = context ?: return
+    runCatching {
+      val clockPackages =
+        listOf(
+          "com.google.android.deskclock",
+          "com.android.deskclock",
+          "com.motorola.timeweatherwidget",
+        )
+      for (pkg in clockPackages) {
+        val launchIntent = ctx.packageManager.getLaunchIntentForPackage(pkg)
+        if (launchIntent != null) {
+          launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          ctx.startActivity(launchIntent)
+          return
+        }
+      }
+      ctx.startActivity(
+        Intent(Settings.ACTION_DATE_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+      )
+    }
+  }
+
+  fun expandNotificationShade() {
+    val ctx = context ?: return
+    runCatching {
+      val statusBarService = ctx.getSystemService("statusbar") ?: return
+      val statusBarManager = Class.forName("android.app.StatusBarManager")
+      val expand = statusBarManager.getMethod("expandNotificationsPanel")
+      expand.invoke(statusBarService)
+    }
+  }
+
+  companion object {
+    private const val KEY_PINNED_PACKAGES = "pinned_packages"
+    private val DEFAULT_ESSENTIAL_KEYWORDS =
+      setOf(
+        "com.google.android.dialer",
+        "com.android.dialer",
+        "com.google.android.apps.nbu.paisa.user",
+        "com.google.android.apps.walletnfcrel",
+        "com.motorola.camera3",
+        "com.motorola.camera2",
+        "com.google.android.apps.messaging",
+        "com.android.chrome",
+      )
+
+    private val ESSENTIAL_PACKAGES =
+      setOf(
+        "com.google.android.dialer",
+        "com.android.dialer",
+        "com.google.android.apps.nbu.paisa.user",
+        "com.google.android.apps.walletnfcrel",
+        "com.motorola.camera3",
+        "com.motorola.camera2",
+        "com.android.camera2",
+      )
+
+    fun sampleApps(): List<AppEntry> =
+      listOf(
+        AppEntry(
+          label = "Phone",
+          packageName = "com.google.android.dialer",
+          activityName = "",
+          isPinned = true,
+          isEssentialQuickAccess = true,
+          usageTimeMillis14d = 18_400_000L,
+        ),
+        AppEntry(
+          label = "GPay",
+          packageName = "com.google.android.apps.nbu.paisa.user",
+          activityName = "",
+          isPinned = true,
+          isEssentialQuickAccess = true,
+          usageTimeMillis14d = 9_200_000L,
+        ),
+        AppEntry(
+          label = "Camera",
+          packageName = "com.motorola.camera3",
+          activityName = "",
+          isMotoApp = true,
+          isPinned = true,
+          isEssentialQuickAccess = true,
+          usageTimeMillis14d = 7_500_000L,
+        ),
+        AppEntry(
+          label = "Messages",
+          packageName = "com.google.android.apps.messaging",
+          activityName = "",
+          isPinned = true,
+          usageTimeMillis14d = 14_100_000L,
+        ),
+        AppEntry(
+          label = "Chrome",
+          packageName = "com.android.chrome",
+          activityName = "",
+          isPinned = true,
+          usageTimeMillis14d = 22_000_000L,
+        ),
+        AppEntry(
+          label = "Spotify",
+          packageName = "com.spotify.music",
+          activityName = "",
+          usageTimeMillis14d = 19_000_000L,
+        ),
+        AppEntry(
+          label = "YouTube",
+          packageName = "com.google.android.youtube",
+          activityName = "",
+          usageTimeMillis14d = 31_000_000L,
+        ),
+        AppEntry(
+          label = "Dolby Atmos",
+          packageName = "com.dolby.daxappui",
+          activityName = "",
+          isMotoApp = true,
+          usageTimeMillis14d = 3_200_000L,
+        ),
+        AppEntry(
+          label = "Moto",
+          packageName = "com.motorola.moto",
+          activityName = "",
+          isMotoApp = true,
+          usageTimeMillis14d = 4_100_000L,
+        ),
+        AppEntry(
+          label = "Settings",
+          packageName = "com.android.settings",
+          activityName = "",
+          isSystemApp = true,
+          usageTimeMillis14d = 5_000_000L,
+        ),
+        AppEntry(
+          label = "Files",
+          packageName = "com.google.android.apps.nbu.files",
+          activityName = "",
+          usageTimeMillis14d = 2_400_000L,
+        ),
+        AppEntry(
+          label = "Maps",
+          packageName = "com.google.android.apps.maps",
+          activityName = "",
+          usageTimeMillis14d = 6_800_000L,
+        ),
+      )
+  }
+}
