@@ -11,7 +11,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * Very fine, high-density layout grid lines (millimeter / graph-paper style).
+ * Very fine, high-density layout grid lines with custom feature lines.
  */
 @Composable
 fun GridLines(
@@ -21,6 +21,9 @@ fun GridLines(
   minorLineColor: Color = Color.White.copy(alpha = 0.08f),
   majorLineColor: Color = Color.White.copy(alpha = 0.22f),
   centerLineColor: Color = Color(0xFF38BDF8).copy(alpha = 0.45f),
+  verticalLineFromRightIndex: Int? = 4, // 4th line from the right of the phone
+  customLineWidth: Dp = 2.dp,
+  customLineColor: Color = Color.White,
 ) {
   Canvas(modifier = modifier.fillMaxSize()) {
     val stepPx = gridSize.toPx()
@@ -81,5 +84,20 @@ fun GridLines(
       strokeWidth = 1.dp.toPx(),
       pathEffect = dashEffect,
     )
+
+    // Line on the 4th line from the right of the phone
+    if (verticalLineFromRightIndex != null && verticalLineFromRightIndex > 0) {
+      val lastLineIndex = (width / stepPx).toInt()
+      val targetIndex = lastLineIndex - (verticalLineFromRightIndex - 1)
+      if (targetIndex >= 0) {
+        val targetX = targetIndex * stepPx
+        drawLine(
+          color = customLineColor,
+          start = Offset(targetX, 0f),
+          end = Offset(targetX, height),
+          strokeWidth = customLineWidth.toPx(),
+        )
+      }
+    }
   }
 }
