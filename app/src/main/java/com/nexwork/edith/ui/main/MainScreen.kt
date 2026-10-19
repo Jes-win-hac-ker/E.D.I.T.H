@@ -1,5 +1,6 @@
 package com.nexwork.edith.ui.main
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -48,6 +49,14 @@ fun MainScreen(
   }
 
   val state by viewModel.launcherState.collectAsStateWithLifecycle()
+
+  // Intercept back gestures: dismiss spotlight search if open; consume at root so launcher never exits/refreshes
+  BackHandler(enabled = true) {
+    if (state.isSpotlightSearchOpen) {
+      viewModel.closeSpotlightSearch()
+    }
+  }
+
   var totalVerticalDrag by remember { mutableFloatStateOf(0f) }
   var totalHorizontalDrag by remember { mutableFloatStateOf(0f) }
   var dragStartY by remember { mutableFloatStateOf(0f) }
