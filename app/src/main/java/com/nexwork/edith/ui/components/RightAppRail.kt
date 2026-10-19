@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -176,9 +177,10 @@ fun RightAppRail(
     modifier =
       modifier
         .fillMaxHeight()
+        .statusBarsPadding()
         .navigationBarsPadding()
-        .padding(bottom = 32.dp, start = 8.dp, end = 8.dp),
-    verticalArrangement = Arrangement.Bottom,
+        .padding(top = 56.dp, start = 8.dp, end = 8.dp, bottom = 24.dp),
+    verticalArrangement = Arrangement.Top,
     horizontalAlignment = Alignment.CenterHorizontally,
   ) {
     apps.forEachIndexed { index, app ->
@@ -187,7 +189,7 @@ fun RightAppRail(
         onClick = { app.launchFallback(context) },
       )
       if (index < apps.lastIndex) {
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
       }
     }
   }
