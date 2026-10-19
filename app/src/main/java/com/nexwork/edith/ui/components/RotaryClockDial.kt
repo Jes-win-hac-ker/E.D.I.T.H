@@ -55,13 +55,16 @@ import kotlin.math.sin
 import kotlinx.coroutines.delay
 
 /**
- * Sleek Dark Glass Rotary Clock & Weather Dial built from scratch.
+ * Sleek Dark Glass Multi-Ring Rotary Clock & Weather Dial.
  *
  * Anchored flush to the left screen edge:
- * - Frosted obsidian outer & inner glass semi-circles with subtle specular borders.
- * - Smooth rotating hour track with fine micro-ticks and distance-based opacity.
- * - Floating glass horizontal time capsule highlighting the current hour + live :MM.SS.
- * - Crafted weather & date readouts nestled inside the inner glass chamber.
+ * - Three concentric frosted obsidian glass rings presenting time in [hh : mm : ss : am/pm]:
+ *     1. Inner Ring: Hours (hh) with micro-ticks and interactive spring scrubbing.
+ *     2. Middle Ring: Minutes (mm) with dynamic minute track.
+ *     3. Outer Ring: Seconds (ss) with 120Hz smooth fluid chronometer rotation.
+ * - Horizontal liquid glass time capsule passing across all three rings framing:
+ *     [ HH ] : [ MM ] : [ SS ] [ AM/PM ]
+ * - Inner glass hub chamber housing crafted weather, temperature, date, and battery telemetry.
  */
 @Composable
 fun RotaryClockDial(
@@ -77,14 +80,15 @@ fun RotaryClockDial(
   var currentTimeMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
   var dragHourOffset by remember { mutableFloatStateOf(0f) }
 
+  // 120Hz smooth second-hand progression
   LaunchedEffect(Unit) {
     while (true) {
       currentTimeMillis = System.currentTimeMillis()
-      delay(1000L)
+      delay(50L)
     }
   }
 
-  val animatedOffset by
+  val animatedHourOffset by
     animateFloatAsState(
       targetValue = dragHourOffset,
       animationSpec =
@@ -103,6 +107,7 @@ fun RotaryClockDial(
   val liveHour24 = calendar.get(Calendar.HOUR_OF_DAY)
   val liveMinute = calendar.get(Calendar.MINUTE)
   val liveSecond = calendar.get(Calendar.SECOND)
+  val millisFraction = (currentTimeMillis % 1000L) / 1000f
   val isAm = calendar.get(Calendar.AM_PM) == Calendar.AM
 
   val dayName =
@@ -117,8 +122,8 @@ fun RotaryClockDial(
   Box(
     modifier =
       modifier
-        .width(212.dp)
-        .height(332.dp)
+        .width(228.dp)
+        .height(396.dp)
         .pointerInput(Unit) {
           detectVerticalDragGestures(
             onDragEnd = {
@@ -135,17 +140,21 @@ fun RotaryClockDial(
           detectTapGestures(
             onTap = { tapOffset ->
               val cy = size.height / 2f
-              val barHalfH = 26.dp.toPx()
+              val barHalfH = 22.dp.toPx()
               when {
-                tapOffset.y in (cy - barHalfH)..(cy + barHalfH) && tapOffset.x > 152.dp.toPx() -> {
+                // Tapping mode badge at far right of capsule toggles 12/24H mode
+                tapOffset.y in (cy - barHalfH)..(cy + barHalfH) && tapOffset.x > 186.dp.toPx() -> {
                   onToggleTimeFormat()
                 }
+                // Tapping reset when hour is scrubbed
                 abs(dragHourOffset) > 0.1f -> {
                   dragHourOffset = 0f
                 }
-                tapOffset.x < 108.dp.toPx() && tapOffset.y < (cy - barHalfH) -> {
+                // Tapping upper weather chamber cycles weather
+                tapOffset.x < 76.dp.toPx() && tapOffset.y < (cy - barHalfH) -> {
                   onWeatherClick()
                 }
+                // Tapping time readout inside capsule launches clock/alarms
                 tapOffset.y in (cy - barHalfH)..(cy + barHalfH) -> {
                   onClockClick()
                 }
@@ -156,92 +165,147 @@ fun RotaryClockDial(
   ) {
     Canvas(modifier = Modifier.matchParentSize()) {
       val cy = size.height / 2f
-      val outerR = 156.dp.toPx()
-      val innerR = 104.dp.toPx()
 
-      // 1. Soft ambient ice glow behind the outer rim
+      // Concentric Radii
+      val r0 = 70.dp.toPx() // Inner chamber hub
+      val r1In = 72.dp.toPx() // Inner Ring (Hours) start
+      val r1Out = 110.dp.toPx() // Inner Ring (Hours) end
+      val r2In = 112.dp.toPx() // Middle Ring (Minutes) start
+      val r2Out = 150.dp.toPx() // Middle Ring (Minutes) end
+      val r3In = 152.dp.toPx() // Outer Ring (Seconds) start
+      val r3Out = 190.dp.toPx() // Outer Ring (Seconds) end
+
+      // 0. Soft ambient ice glow behind the outer rim
       drawCircle(
         brush =
           Brush.radialGradient(
             colors =
               listOf(
-                IceGlowAccent.copy(alpha = 0.14f),
+                IceGlowAccent.copy(alpha = 0.16f),
                 Color.Transparent,
               ),
             center = Offset(0f, cy),
-            radius = outerR * 1.15f,
+            radius = r3Out * 1.15f,
           ),
-        radius = outerR * 1.15f,
+        radius = r3Out * 1.15f,
         center = Offset(0f, cy),
       )
 
-      // 2. Outer Frosted Glass Semi-Circle Track
-      val outerArcPath =
-        Path().apply {
-          moveTo(0f, cy - outerR)
+      // 1. Concentric Glass Ring Semi-Circles
+      fun makeSemiCirclePath(r: Float): Path {
+        return Path().apply {
+          moveTo(0f, cy - r)
           arcTo(
-            rect = Rect(left = -outerR, top = cy - outerR, right = outerR, bottom = cy + outerR),
+            rect = Rect(left = -r, top = cy - r, right = r, bottom = cy + r),
             startAngleDegrees = -90f,
             sweepAngleDegrees = 180f,
             forceMoveTo = false,
           )
           close()
         }
+      }
 
+      val outerArcPath = makeSemiCirclePath(r3Out)
+      val middleArcPath = makeSemiCirclePath(r2Out)
+      val innerArcPath = makeSemiCirclePath(r1Out)
+      val hubArcPath = makeSemiCirclePath(r0)
+
+      // Outer Ring Background (Seconds Track)
       drawPath(
         path = outerArcPath,
         brush =
           Brush.horizontalGradient(
             colors =
               listOf(
-                GlassSurface.copy(alpha = 0.55f),
-                GlassSurfaceElevated.copy(alpha = 0.85f),
+                GlassSurface.copy(alpha = 0.45f),
+                GlassSurfaceElevated.copy(alpha = 0.65f),
               ),
             startX = 0f,
-            endX = outerR,
+            endX = r3Out,
           ),
       )
 
-      // 3. Inner Deep Obsidian Glass Chamber
-      val innerArcPath =
-        Path().apply {
-          moveTo(0f, cy - innerR)
-          arcTo(
-            rect = Rect(left = -innerR, top = cy - innerR, right = innerR, bottom = cy + innerR),
-            startAngleDegrees = -90f,
-            sweepAngleDegrees = 180f,
-            forceMoveTo = false,
-          )
-          close()
-        }
+      // Middle Ring Background (Minutes Track)
+      drawPath(
+        path = middleArcPath,
+        brush =
+          Brush.horizontalGradient(
+            colors =
+              listOf(
+                GlassSurface.copy(alpha = 0.55f),
+                GlassSurfaceElevated.copy(alpha = 0.75f),
+              ),
+            startX = 0f,
+            endX = r2Out,
+          ),
+      )
 
+      // Inner Ring Background (Hours Track)
       drawPath(
         path = innerArcPath,
+        brush =
+          Brush.horizontalGradient(
+            colors =
+              listOf(
+                GlassSurface.copy(alpha = 0.65f),
+                GlassSurfaceElevated.copy(alpha = 0.85f),
+              ),
+            startX = 0f,
+            endX = r1Out,
+          ),
+      )
+
+      // Inner Chamber Hub Background (Weather & Date)
+      drawPath(
+        path = hubArcPath,
         brush =
           Brush.radialGradient(
             colors =
               listOf(
-                ObsidianBgTop.copy(alpha = 0.92f),
-                GlassSurface.copy(alpha = 0.78f),
+                ObsidianBgTop.copy(alpha = 0.95f),
+                GlassSurface.copy(alpha = 0.82f),
               ),
-            center = Offset(16.dp.toPx(), cy),
-            radius = innerR,
+            center = Offset(14.dp.toPx(), cy),
+            radius = r0,
           ),
       )
 
-      // 4. Rotating Hour Track & Micro-Ticks
+      // 2. Rotary Tracks inside the 3 Rings
+      // 2a. Outer Ring: Seconds Track (ss)
       clipPath(outerArcPath) {
+        drawGlassSecondsTrack(
+          cy = cy,
+          innerR = r3In,
+          outerR = r3Out,
+          liveSecond = liveSecond,
+          millisFraction = millisFraction,
+        )
+      }
+
+      // 2b. Middle Ring: Minutes Track (mm)
+      clipPath(middleArcPath) {
+        drawGlassMinutesTrack(
+          cy = cy,
+          innerR = r2In,
+          outerR = r2Out,
+          liveMinute = liveMinute,
+          liveSecond = liveSecond,
+        )
+      }
+
+      // 2c. Inner Ring: Hours Track (hh)
+      clipPath(innerArcPath) {
         drawGlassHourTrack(
           cy = cy,
-          innerR = innerR,
-          outerR = outerR,
+          innerR = r1In,
+          outerR = r1Out,
           liveHour24 = liveHour24,
-          hourOffset = animatedOffset,
+          hourOffset = animatedHourOffset,
           use24Hour = use24Hour,
         )
       }
 
-      // 5. Delicate Specular Glass Rim Strokes (1.2dp instead of thick wireframe lines)
+      // 3. Delicate Specular Glass Rim Strokes for all 3 Rings + Hub
       drawArc(
         brush =
           Brush.sweepGradient(
@@ -258,9 +322,9 @@ fun RotaryClockDial(
         startAngle = -90f,
         sweepAngle = 180f,
         useCenter = false,
-        topLeft = Offset(-outerR, cy - outerR),
-        size = Size(outerR * 2f, outerR * 2f),
-        style = Stroke(width = 1.3.dp.toPx()),
+        topLeft = Offset(-r3Out, cy - r3Out),
+        size = Size(r3Out * 2f, r3Out * 2f),
+        style = Stroke(width = 1.2.dp.toPx()),
       )
 
       drawArc(
@@ -268,18 +332,38 @@ fun RotaryClockDial(
         startAngle = -90f,
         sweepAngle = 180f,
         useCenter = false,
-        topLeft = Offset(-innerR, cy - innerR),
-        size = Size(innerR * 2f, innerR * 2f),
-        style = Stroke(width = 1.dp.toPx()),
+        topLeft = Offset(-r2Out, cy - r2Out),
+        size = Size(r2Out * 2f, r2Out * 2f),
+        style = Stroke(width = 0.9.dp.toPx()),
       )
 
-      // 6. Upper Inner Chamber: Crafted Weather Icon + Temperature
+      drawArc(
+        color = GlassBorderSubtle,
+        startAngle = -90f,
+        sweepAngle = 180f,
+        useCenter = false,
+        topLeft = Offset(-r1Out, cy - r1Out),
+        size = Size(r1Out * 2f, r1Out * 2f),
+        style = Stroke(width = 0.9.dp.toPx()),
+      )
+
+      drawArc(
+        color = GlassBorderSubtle,
+        startAngle = -90f,
+        sweepAngle = 180f,
+        useCenter = false,
+        topLeft = Offset(-r0, cy - r0),
+        size = Size(r0 * 2f, r0 * 2f),
+        style = Stroke(width = 0.9.dp.toPx()),
+      )
+
+      // 4. Upper Inner Chamber: Weather Icon + Temperature
       drawCraftedWeather(
         cy = cy,
         weather = weather,
       )
 
-      // 7. Lower Inner Chamber: Date & Battery Pill
+      // 5. Lower Inner Chamber: Date & Battery Telemetry
       drawCraftedDateAndBattery(
         cy = cy,
         dayName = dayName,
@@ -288,15 +372,15 @@ fun RotaryClockDial(
         isCharging = isCharging,
       )
 
-      // 8. Horizontal Frosted Glass Time Capsule (extending from x=0 to x=198dp)
-      val barHalfH = 25.dp.toPx()
-      val barRight = 198.dp.toPx()
+      // 6. Horizontal Liquid Frosted Glass Time Capsule across all 3 rings
+      val barHalfH = 22.dp.toPx()
+      val barRight = 222.dp.toPx()
       val barPath =
         Path().apply {
           addRoundRect(
             RoundRect(
-              rect = Rect(left = -18.dp.toPx(), top = cy - barHalfH, right = barRight, bottom = cy + barHalfH),
-              cornerRadius = CornerRadius(25.dp.toPx(), 25.dp.toPx()),
+              rect = Rect(left = -12.dp.toPx(), top = cy - barHalfH, right = barRight, bottom = cy + barHalfH),
+              cornerRadius = CornerRadius(22.dp.toPx(), 22.dp.toPx()),
             )
           )
         }
@@ -307,7 +391,7 @@ fun RotaryClockDial(
           Brush.horizontalGradient(
             colors =
               listOf(
-                ObsidianBgTop.copy(alpha = 0.94f),
+                ObsidianBgTop.copy(alpha = 0.95f),
                 GlassSurfaceElevated.copy(alpha = 0.88f),
                 GlassSurface.copy(alpha = 0.92f),
               ),
@@ -323,35 +407,25 @@ fun RotaryClockDial(
             colors =
               listOf(
                 GlassBorderSubtle,
-                IceGlowAccent.copy(alpha = 0.45f),
+                IceGlowAccent.copy(alpha = 0.40f),
                 GlassBorderHighlight,
               ),
             startX = 0f,
             endX = barRight,
           ),
-        style = Stroke(width = 1.2.dp.toPx()),
+        style = Stroke(width = 1.1.dp.toPx()),
       )
 
-      // 9. Active Hour Highlight Capsule inside the Horizontal Bar (around x=116..146dp)
-      val capsuleLeft = 114.dp.toPx()
-      val capsuleRight = 146.dp.toPx()
-      val capsuleHalfH = 19.dp.toPx()
-      drawRoundRect(
-        color = IceGlowAccent.copy(alpha = 0.16f),
-        topLeft = Offset(capsuleLeft, cy - capsuleHalfH),
-        size = Size(capsuleRight - capsuleLeft, capsuleHalfH * 2f),
-        cornerRadius = CornerRadius(12.dp.toPx(), 12.dp.toPx()),
-      )
-      drawRoundRect(
-        color = IceGlowAccent.copy(alpha = 0.7f),
-        topLeft = Offset(capsuleLeft, cy - capsuleHalfH),
-        size = Size(capsuleRight - capsuleLeft, capsuleHalfH * 2f),
-        cornerRadius = CornerRadius(12.dp.toPx(), 12.dp.toPx()),
-        style = Stroke(width = 1.2.dp.toPx()),
-      )
+      // 7. Time Presentation in [hh : mm : ss : am/pm] across the 3 rings
+      val hourCenterX = (r1In + r1Out) * 0.5f // ~91dp
+      val minCenterX = (r2In + r2Out) * 0.5f // ~131dp
+      val secCenterX = (r3In + r3Out) * 0.5f // ~171dp
+      val colon1X = (hourCenterX + minCenterX) * 0.5f // ~111dp
+      val colon2X = (minCenterX + secCenterX) * 0.5f // ~151dp
+      val badgeCenterX = (secCenterX + barRight) * 0.5f // ~196dp
 
-      // Re-render the active center hour on top of the capsule so it's crystal sharp
-      val activeRawHour = (liveHour24 + animatedOffset).roundToInt()
+      // Calculate active display hour
+      val activeRawHour = (liveHour24 + animatedHourOffset).roundToInt()
       val wrapped24 = ((activeRawHour % 24) + 24) % 24
       val activeDisplayHour =
         if (use24Hour) {
@@ -360,38 +434,149 @@ fun RotaryClockDial(
           val h12 = wrapped24 % 12
           if (h12 == 0) 12 else h12
         }
+      val hourStr = if (use24Hour) String.format(Locale.US, "%02d", activeDisplayHour) else activeDisplayHour.toString()
+      val minStr = String.format(Locale.US, "%02d", liveMinute)
+      val secStr = String.format(Locale.US, "%02d", liveSecond)
 
-      val activeHourPaint =
+      // 7a. Active Hour Highlight Pill (aligned with Hours ring)
+      val pillHalfW = 14.5.dp.toPx()
+      val pillHalfH = 16.dp.toPx()
+      drawRoundRect(
+        color = IceGlowAccent.copy(alpha = 0.16f),
+        topLeft = Offset(hourCenterX - pillHalfW, cy - pillHalfH),
+        size = Size(pillHalfW * 2f, pillHalfH * 2f),
+        cornerRadius = CornerRadius(9.dp.toPx(), 9.dp.toPx()),
+      )
+      drawRoundRect(
+        color = IceGlowAccent.copy(alpha = 0.65f),
+        topLeft = Offset(hourCenterX - pillHalfW, cy - pillHalfH),
+        size = Size(pillHalfW * 2f, pillHalfH * 2f),
+        cornerRadius = CornerRadius(9.dp.toPx(), 9.dp.toPx()),
+        style = Stroke(width = 1.1.dp.toPx()),
+      )
+
+      // 7b. Active Minute Highlight Pill (aligned with Minutes ring)
+      drawRoundRect(
+        color = IceGlowAccent.copy(alpha = 0.16f),
+        topLeft = Offset(minCenterX - pillHalfW, cy - pillHalfH),
+        size = Size(pillHalfW * 2f, pillHalfH * 2f),
+        cornerRadius = CornerRadius(9.dp.toPx(), 9.dp.toPx()),
+      )
+      drawRoundRect(
+        color = IceGlowAccent.copy(alpha = 0.65f),
+        topLeft = Offset(minCenterX - pillHalfW, cy - pillHalfH),
+        size = Size(pillHalfW * 2f, pillHalfH * 2f),
+        cornerRadius = CornerRadius(9.dp.toPx(), 9.dp.toPx()),
+        style = Stroke(width = 1.1.dp.toPx()),
+      )
+
+      // 7c. Active Second Highlight Pill (aligned with Seconds ring)
+      drawRoundRect(
+        color = IceGlowAccent.copy(alpha = 0.24f),
+        topLeft = Offset(secCenterX - pillHalfW, cy - pillHalfH),
+        size = Size(pillHalfW * 2f, pillHalfH * 2f),
+        cornerRadius = CornerRadius(9.dp.toPx(), 9.dp.toPx()),
+      )
+      drawRoundRect(
+        color = IceGlowAccent.copy(alpha = 0.85f),
+        topLeft = Offset(secCenterX - pillHalfW, cy - pillHalfH),
+        size = Size(pillHalfW * 2f, pillHalfH * 2f),
+        cornerRadius = CornerRadius(9.dp.toPx(), 9.dp.toPx()),
+        style = Stroke(width = 1.2.dp.toPx()),
+      )
+
+      // Typography for time presentation
+      val numberPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
           color = android.graphics.Color.WHITE
-          textSize = 17.dp.toPx()
+          textSize = 14.dp.toPx()
           textAlign = Paint.Align.CENTER
           typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
         }
-      drawContext.canvas.nativeCanvas.apply {
-        val fm = activeHourPaint.fontMetrics
-        val baseline = cy - (fm.ascent + fm.descent) / 2f
-        drawText(
-          activeDisplayHour.toString(),
-          (capsuleLeft + capsuleRight) / 2f,
-          baseline,
-          activeHourPaint,
-        )
-      }
 
-      // 10. Minutes, Seconds & Mode Badge inside Horizontal Capsule
-      drawGlassCapsuleTimeReadout(
-        cy = cy,
-        minute = liveMinute,
-        second = liveSecond,
-        isAm = isAm,
-        use24Hour = use24Hour,
-        scrubOffset = animatedOffset.roundToInt(),
-      )
+      val secPaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = 0xFF38BDF8.toInt()
+          textSize = 14.dp.toPx()
+          textAlign = Paint.Align.CENTER
+          typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        }
+
+      val colonPaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = 0xFF38BDF8.toInt()
+          textSize = 13.dp.toPx()
+          textAlign = Paint.Align.CENTER
+          typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        }
+
+      val badgePaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = if (animatedHourOffset.roundToInt() != 0) 0xFFFBBF24.toInt() else 0xFF38BDF8.toInt()
+          textSize = 9.dp.toPx()
+          typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+          textAlign = Paint.Align.CENTER
+        }
+
+      drawContext.canvas.nativeCanvas.apply {
+        val nFm = numberPaint.fontMetrics
+        val nBaseline = cy - (nFm.ascent + nFm.descent) / 2f
+
+        val cFm = colonPaint.fontMetrics
+        val cBaseline = cy - (cFm.ascent + cFm.descent) / 2f - 0.5.dp.toPx()
+
+        // Draw Hour
+        drawText(hourStr, hourCenterX, nBaseline, numberPaint)
+
+        // Draw Colon 1
+        drawText(":", colon1X, cBaseline, colonPaint)
+
+        // Draw Minute
+        drawText(minStr, minCenterX, nBaseline, numberPaint)
+
+        // Draw Colon 2
+        drawText(":", colon2X, cBaseline, colonPaint)
+
+        // Draw Second
+        drawText(secStr, secCenterX, nBaseline, secPaint)
+
+        // Draw Mode Tag (AM / PM / 24H) Badge
+        val modeTag =
+          when {
+            animatedHourOffset.roundToInt() > 0 -> "+${animatedHourOffset.roundToInt()}H"
+            animatedHourOffset.roundToInt() < 0 -> "${animatedHourOffset.roundToInt()}H"
+            use24Hour -> "24H"
+            isAm -> "AM"
+            else -> "PM"
+          }
+
+        val badgeHalfW = 14.dp.toPx()
+        val badgeHalfH = 13.dp.toPx()
+        drawRoundRect(
+          color = Color(0x2838BDF8),
+          topLeft = Offset(badgeCenterX - badgeHalfW, cy - badgeHalfH),
+          size = Size(badgeHalfW * 2f, badgeHalfH * 2f),
+          cornerRadius = CornerRadius(7.dp.toPx(), 7.dp.toPx()),
+        )
+        drawRoundRect(
+          color = IceGlowAccent.copy(alpha = 0.55f),
+          topLeft = Offset(badgeCenterX - badgeHalfW, cy - badgeHalfH),
+          size = Size(badgeHalfW * 2f, badgeHalfH * 2f),
+          cornerRadius = CornerRadius(7.dp.toPx(), 7.dp.toPx()),
+          style = Stroke(width = 0.9.dp.toPx()),
+        )
+
+        val bFm = badgePaint.fontMetrics
+        val bBaseline = cy - (bFm.ascent + bFm.descent) / 2f
+        drawText(modeTag, badgeCenterX, bBaseline, badgePaint)
+      }
     }
   }
 }
 
+/**
+ * 1. Inner Ring: Hours Track (hh)
+ */
 private fun DrawScope.drawGlassHourTrack(
   cy: Float,
   innerR: Float,
@@ -401,9 +586,7 @@ private fun DrawScope.drawGlassHourTrack(
   use24Hour: Boolean,
 ) {
   val textRadius = (innerR + outerR) * 0.50f
-  val tickInnerR = outerR - 8.dp.toPx()
-  val tickOuterR = outerR - 2.dp.toPx()
-  val stepDegrees = 22f
+  val stepDegrees = 20f
   val baseHourFloat = liveHour24 + hourOffset
 
   val textPaint =
@@ -413,40 +596,34 @@ private fun DrawScope.drawGlassHourTrack(
       typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
 
-  // Subtle intermediate degree ticks along the outer glass rim
-  for (deg in -80..80 step 5) {
+  // Intermediate ticks
+  for (deg in -75..75 step 5) {
     val rad = deg * (PI / 180.0)
     val cosA = cos(rad).toFloat()
     val sinA = sin(rad).toFloat()
-    val isMajor = deg % 22 == 0
-    val startR = if (isMajor) tickInnerR - 2.dp.toPx() else tickInnerR + 2.dp.toPx()
-    val alpha = (1f - (abs(deg) / 90f)).coerceIn(0.08f, 0.45f)
+    val isMajor = deg % 20 == 0
+    val tickLen = if (isMajor) 6.dp.toPx() else 3.dp.toPx()
+    val startR = outerR - tickLen
+    val alpha = (1f - (abs(deg) / 85f)).coerceIn(0.08f, 0.45f)
     drawLine(
-      color = Color.White.copy(alpha = if (isMajor) alpha else alpha * 0.5f),
+      color = Color.White.copy(alpha = if (isMajor) alpha else alpha * 0.4f),
       start = Offset(startR * cosA, cy + startR * sinA),
-      end = Offset(tickOuterR * cosA, cy + tickOuterR * sinA),
+      end = Offset(outerR * cosA, cy + outerR * sinA),
       strokeWidth = if (isMajor) 1.2.dp.toPx() else 0.7.dp.toPx(),
       cap = StrokeCap.Round,
     )
   }
 
-  for (delta in -4..4) {
+  for (delta in -3..3) {
     val rawHour = (baseHourFloat.roundToInt() + delta)
     val fractionalShift = baseHourFloat - baseHourFloat.roundToInt()
     val angleDeg = -(delta - fractionalShift) * stepDegrees
-    if (angleDeg < -82f || angleDeg > 82f) continue
+    if (angleDeg < -72f || angleDeg > 72f) continue
 
     val distanceSteps = abs(delta - fractionalShift)
-    // Skip drawing the center hour here since it's drawn inside the highlight capsule
-    if (distanceSteps < 0.35f) continue
+    if (abs(angleDeg) < 12f || distanceSteps < 0.65f) continue // Skip center since it is rendered in the active pill
 
-    val alpha =
-      when {
-        distanceSteps < 1.2f -> 0.82f
-        distanceSteps < 2.2f -> 0.52f
-        distanceSteps < 3.2f -> 0.28f
-        else -> 0.14f
-      }
+    val alpha = (1f - (abs(angleDeg) / 78f)).coerceIn(0.10f, 0.75f)
 
     val wrapped24 = ((rawHour % 24) + 24) % 24
     val displayHour =
@@ -461,7 +638,7 @@ private fun DrawScope.drawGlassHourTrack(
     val tx = textRadius * cos(rad).toFloat()
     val ty = cy + textRadius * sin(rad).toFloat()
 
-    textPaint.textSize = 12.5.dp.toPx()
+    textPaint.textSize = 11.5.dp.toPx()
     textPaint.alpha = (alpha * 255).roundToInt().coerceIn(0, 255)
 
     drawContext.canvas.nativeCanvas.apply {
@@ -476,59 +653,207 @@ private fun DrawScope.drawGlassHourTrack(
   }
 }
 
+/**
+ * 2. Middle Ring: Minutes Track (mm)
+ */
+private fun DrawScope.drawGlassMinutesTrack(
+  cy: Float,
+  innerR: Float,
+  outerR: Float,
+  liveMinute: Int,
+  liveSecond: Int,
+) {
+  val textRadius = (innerR + outerR) * 0.50f
+  val stepDegrees = 7.5f
+  val fractionalShift = liveSecond / 60f
+
+  val textPaint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = android.graphics.Color.WHITE
+      textAlign = Paint.Align.CENTER
+      typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+    }
+
+  // Minute ticks
+  for (deg in -75..75 step 4) {
+    val rad = deg * (PI / 180.0)
+    val cosA = cos(rad).toFloat()
+    val sinA = sin(rad).toFloat()
+    val isMajor = deg % 8 == 0
+    val tickLen = if (isMajor) 5.dp.toPx() else 2.5.dp.toPx()
+    val startR = outerR - tickLen
+    val alpha = (1f - (abs(deg) / 85f)).coerceIn(0.05f, 0.40f)
+    drawLine(
+      color = Color.White.copy(alpha = if (isMajor) alpha else alpha * 0.35f),
+      start = Offset(startR * cosA, cy + startR * sinA),
+      end = Offset(outerR * cosA, cy + outerR * sinA),
+      strokeWidth = if (isMajor) 1.0.dp.toPx() else 0.6.dp.toPx(),
+      cap = StrokeCap.Round,
+    )
+  }
+
+  // Minute numbers
+  for (delta in -7..7) {
+    val minuteVal = ((liveMinute + delta) % 60 + 60) % 60
+    val angleDeg = -(delta - fractionalShift) * stepDegrees
+    if (angleDeg < -72f || angleDeg > 72f) continue
+
+    val distanceSteps = abs(delta - fractionalShift)
+    if (abs(angleDeg) < 10f || distanceSteps < 0.85f) continue // Skip center since it is rendered in active pill
+
+    val isMultipleOf5 = minuteVal % 5 == 0
+    if (!isMultipleOf5 && distanceSteps > 2.2f) continue
+
+    val alpha = (1f - (abs(angleDeg) / 78f)).coerceIn(0.08f, 0.70f) * (if (isMultipleOf5) 1.0f else 0.55f)
+
+    val rad = angleDeg * (PI / 180.0)
+    val tx = textRadius * cos(rad).toFloat()
+    val ty = cy + textRadius * sin(rad).toFloat()
+
+    textPaint.textSize = if (isMultipleOf5) 10.dp.toPx() else 8.5.dp.toPx()
+    textPaint.alpha = (alpha * 255).roundToInt().coerceIn(0, 255)
+
+    drawContext.canvas.nativeCanvas.apply {
+      save()
+      translate(tx, ty)
+      rotate(angleDeg * 0.75f)
+      val fm = textPaint.fontMetrics
+      val baselineY = -(fm.ascent + fm.descent) / 2f
+      drawText(String.format(Locale.US, "%02d", minuteVal), 0f, baselineY, textPaint)
+      restore()
+    }
+  }
+}
+
+/**
+ * 3. Outer Ring: Seconds Track (ss) with 120Hz smooth progression
+ */
+private fun DrawScope.drawGlassSecondsTrack(
+  cy: Float,
+  innerR: Float,
+  outerR: Float,
+  liveSecond: Int,
+  millisFraction: Float,
+) {
+  val textRadius = (innerR + outerR) * 0.50f
+  val stepDegrees = 6.0f
+  val fractionalShift = millisFraction
+
+  val textPaint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = android.graphics.Color.WHITE
+      textAlign = Paint.Align.CENTER
+      typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+    }
+
+  // Seconds ticks every second
+  for (deg in -75..75 step 3) {
+    val rad = deg * (PI / 180.0)
+    val cosA = cos(rad).toFloat()
+    val sinA = sin(rad).toFloat()
+    val isMajor = deg % 6 == 0
+    val tickLen = if (isMajor) 5.dp.toPx() else 2.5.dp.toPx()
+    val startR = outerR - tickLen
+    val alpha = (1f - (abs(deg) / 85f)).coerceIn(0.04f, 0.45f)
+    drawLine(
+      color = IceGlowAccent.copy(alpha = if (isMajor) alpha * 0.8f else alpha * 0.35f),
+      start = Offset(startR * cosA, cy + startR * sinA),
+      end = Offset(outerR * cosA, cy + outerR * sinA),
+      strokeWidth = if (isMajor) 1.0.dp.toPx() else 0.6.dp.toPx(),
+      cap = StrokeCap.Round,
+    )
+  }
+
+  // Seconds numbers
+  for (delta in -10..10) {
+    val secondVal = ((liveSecond + delta) % 60 + 60) % 60
+    val angleDeg = -(delta - fractionalShift) * stepDegrees
+    if (angleDeg < -72f || angleDeg > 72f) continue
+
+    val distanceSteps = abs(delta - fractionalShift)
+    if (abs(angleDeg) < 8.5f || distanceSteps < 1.05f) continue // Skip center since it is rendered in active pill
+
+    val isMultipleOf5 = secondVal % 5 == 0
+    if (!isMultipleOf5 && distanceSteps > 2.5f) continue
+
+    val alpha = (1f - (abs(angleDeg) / 78f)).coerceIn(0.08f, 0.65f) * (if (isMultipleOf5) 1.0f else 0.50f)
+
+    val rad = angleDeg * (PI / 180.0)
+    val tx = textRadius * cos(rad).toFloat()
+    val ty = cy + textRadius * sin(rad).toFloat()
+
+    textPaint.textSize = if (isMultipleOf5) 9.5.dp.toPx() else 8.dp.toPx()
+    textPaint.alpha = (alpha * 255).roundToInt().coerceIn(0, 255)
+    textPaint.color = if (isMultipleOf5) 0xFF38BDF8.toInt() else android.graphics.Color.WHITE
+
+    drawContext.canvas.nativeCanvas.apply {
+      save()
+      translate(tx, ty)
+      rotate(angleDeg * 0.75f)
+      val fm = textPaint.fontMetrics
+      val baselineY = -(fm.ascent + fm.descent) / 2f
+      drawText(String.format(Locale.US, "%02d", secondVal), 0f, baselineY, textPaint)
+      restore()
+    }
+  }
+}
+
+/**
+ * 4. Weather Chamber in Upper Hub
+ */
 private fun DrawScope.drawCraftedWeather(
   cy: Float,
   weather: WeatherCondition,
 ) {
-  val baseX = 14.dp.toPx()
-  val baseY = cy - 64.dp.toPx()
+  val baseX = 8.dp.toPx()
+  val baseY = cy - 54.dp.toPx()
 
   // Warm glowing sun orb
-  val sunCenter = Offset(baseX + 22.dp.toPx(), baseY + 8.dp.toPx())
+  val sunCenter = Offset(baseX + 18.dp.toPx(), baseY + 8.dp.toPx())
   drawCircle(
     brush =
       Brush.radialGradient(
         colors = listOf(WarmSunAccent.copy(alpha = 0.45f), Color.Transparent),
         center = sunCenter,
-        radius = 12.dp.toPx(),
+        radius = 11.dp.toPx(),
       ),
-    radius = 12.dp.toPx(),
+    radius = 11.dp.toPx(),
     center = sunCenter,
   )
   drawCircle(
     color = WarmSunAccent,
-    radius = 5.5.dp.toPx(),
+    radius = 5.dp.toPx(),
     center = sunCenter,
   )
 
   // Sleek vector cloud in front of sun
   val cloudPath =
     Path().apply {
-      moveTo(baseX + 4.dp.toPx(), baseY + 19.dp.toPx())
-      lineTo(baseX + 26.dp.toPx(), baseY + 19.dp.toPx())
+      moveTo(baseX + 4.dp.toPx(), baseY + 18.dp.toPx())
+      lineTo(baseX + 24.dp.toPx(), baseY + 18.dp.toPx())
       cubicTo(
-        baseX + 30.dp.toPx(),
-        baseY + 19.dp.toPx(),
-        baseX + 30.dp.toPx(),
+        baseX + 28.dp.toPx(),
+        baseY + 18.dp.toPx(),
+        baseX + 28.dp.toPx(),
         baseY + 12.dp.toPx(),
-        baseX + 25.dp.toPx(),
+        baseX + 23.dp.toPx(),
         baseY + 12.dp.toPx(),
       )
       cubicTo(
-        baseX + 23.dp.toPx(),
+        baseX + 21.dp.toPx(),
         baseY + 5.dp.toPx(),
-        baseX + 12.dp.toPx(),
+        baseX + 11.dp.toPx(),
         baseY + 5.dp.toPx(),
-        baseX + 10.dp.toPx(),
+        baseX + 9.dp.toPx(),
         baseY + 11.dp.toPx(),
       )
       cubicTo(
         baseX + 3.dp.toPx(),
         baseY + 11.dp.toPx(),
         baseX + 1.dp.toPx(),
-        baseY + 19.dp.toPx(),
+        baseY + 18.dp.toPx(),
         baseX + 4.dp.toPx(),
-        baseY + 19.dp.toPx(),
+        baseY + 18.dp.toPx(),
       )
       close()
     }
@@ -540,29 +865,32 @@ private fun DrawScope.drawCraftedWeather(
   drawPath(
     path = cloudPath,
     color = Color.White.copy(alpha = 0.9f),
-    style = Stroke(width = 1.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+    style = Stroke(width = 1.3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
   )
 
   // Temperature + Condition text
   val tempPaint =
     Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = android.graphics.Color.WHITE
-      textSize = 16.dp.toPx()
+      textSize = 14.dp.toPx()
       typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
     }
   val condPaint =
     Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = 0xFF94A3B8.toInt()
-      textSize = 8.5.dp.toPx()
+      textSize = 7.5.dp.toPx()
       typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
 
   drawContext.canvas.nativeCanvas.apply {
-    drawText("${weather.tempCelsius}°", baseX + 36.dp.toPx(), baseY + 18.dp.toPx(), tempPaint)
-    drawText(weather.label.uppercase(Locale.US), baseX + 4.dp.toPx(), baseY + 31.dp.toPx(), condPaint)
+    drawText("${weather.tempCelsius}°", baseX + 32.dp.toPx(), baseY + 16.dp.toPx(), tempPaint)
+    drawText(weather.label.uppercase(Locale.US), baseX + 4.dp.toPx(), baseY + 28.dp.toPx(), condPaint)
   }
 }
 
+/**
+ * 5. Date & Battery Telemetry in Lower Hub
+ */
 private fun DrawScope.drawCraftedDateAndBattery(
   cy: Float,
   dayName: String,
@@ -570,82 +898,27 @@ private fun DrawScope.drawCraftedDateAndBattery(
   batteryPct: Int,
   isCharging: Boolean,
 ) {
-  val baseX = 14.dp.toPx()
-  val baseY = cy + 46.dp.toPx()
+  val baseX = 8.dp.toPx()
+  val baseY = cy + 42.dp.toPx()
 
   val datePaint =
     Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = android.graphics.Color.WHITE
-      textSize = 11.dp.toPx()
+      textSize = 10.dp.toPx()
       typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-      letterSpacing = 0.05f
+      letterSpacing = 0.04f
     }
 
   val battPaint =
     Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = if (isCharging) 0xFFFBBF24.toInt() else 0xFF38BDF8.toInt()
-      textSize = 9.5.dp.toPx()
+      textSize = 9.dp.toPx()
       typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
 
   drawContext.canvas.nativeCanvas.apply {
     drawText("$dayName, $dateStr", baseX, baseY, datePaint)
     val battText = if (isCharging) "⚡ $batteryPct%" else "$batteryPct% BAT"
-    drawText(battText, baseX, baseY + 15.dp.toPx(), battPaint)
-  }
-}
-
-private fun DrawScope.drawGlassCapsuleTimeReadout(
-  cy: Float,
-  minute: Int,
-  second: Int,
-  isAm: Boolean,
-  use24Hour: Boolean,
-  scrubOffset: Int,
-) {
-  val minStr = String.format(Locale.US, ":%02d", minute)
-  val secStr = String.format(Locale.US, " %02d", second)
-
-  val minutePaint =
-    Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      color = android.graphics.Color.WHITE
-      textSize = 21.dp.toPx()
-      typeface = Typeface.create("sans-serif-light", Typeface.BOLD)
-    }
-
-  val secondPaint =
-    Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      color = 0xFF94A3B8.toInt()
-      textSize = 11.dp.toPx()
-      typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-    }
-
-  val badgePaint =
-    Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      color = if (scrubOffset != 0) 0xFFFBBF24.toInt() else 0xFF38BDF8.toInt()
-      textSize = 10.dp.toPx()
-      typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-      textAlign = Paint.Align.CENTER
-    }
-
-  drawContext.canvas.nativeCanvas.apply {
-    val fm = minutePaint.fontMetrics
-    val baseline = cy - (fm.ascent + fm.descent) / 2f
-
-    drawText(minStr, 14.dp.toPx(), baseline, minutePaint)
-    val minWidth = minutePaint.measureText(minStr)
-    drawText(secStr, 14.dp.toPx() + minWidth, baseline - 4.dp.toPx(), secondPaint)
-
-    val modeTag =
-      when {
-        scrubOffset > 0 -> "+${scrubOffset}H"
-        scrubOffset < 0 -> "${scrubOffset}H"
-        use24Hour -> "24H"
-        isAm -> "AM"
-        else -> "PM"
-      }
-    val bFm = badgePaint.fontMetrics
-    val bBaseline = cy - (bFm.ascent + bFm.descent) / 2f
-    drawText(modeTag, 171.dp.toPx(), bBaseline, badgePaint)
+    drawText(battText, baseX, baseY + 14.dp.toPx(), battPaint)
   }
 }
