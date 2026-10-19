@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.nexwork.edith.theme.EDITHTheme
 
 class MainActivity : ComponentActivity() {
@@ -21,6 +24,8 @@ class MainActivity : ComponentActivity() {
       navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
     )
 
+    hideStatusBar()
+
     setContent {
       EDITHTheme {
         Surface(
@@ -30,6 +35,20 @@ class MainActivity : ComponentActivity() {
           MainNavigation()
         }
       }
+    }
+  }
+
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    if (hasFocus) {
+      hideStatusBar()
+    }
+  }
+
+  private fun hideStatusBar() {
+    WindowCompat.getInsetsController(window, window.decorView).apply {
+      hide(WindowInsetsCompat.Type.statusBars())
+      systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
     }
   }
 }
