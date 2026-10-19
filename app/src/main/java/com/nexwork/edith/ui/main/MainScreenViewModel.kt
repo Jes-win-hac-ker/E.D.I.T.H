@@ -26,6 +26,7 @@ data class LauncherHomeState(
   val quickRailApps: List<AppEntry> = LauncherRepository.sampleApps().take(7),
   val searchQuery: String = "",
   val isFullOverlayOpen: Boolean = false,
+  val isSpotlightSearchOpen: Boolean = false,
   val cornerSwipeProgress: Float = 0f,
   val use24Hour: Boolean = false,
   val isDefaultLauncher: Boolean = true,
@@ -49,6 +50,14 @@ class MainScreenViewModel(
 
   init {
     refreshLauncherData()
+  }
+
+  fun initContext(context: android.content.Context) {
+    val needsRefresh = !launcherRepository.hasContext()
+    launcherRepository.setContext(context)
+    if (needsRefresh) {
+      refreshLauncherData()
+    }
   }
 
   fun refreshLauncherData() {
@@ -181,8 +190,30 @@ class MainScreenViewModel(
     launcherRepository.expandNotificationShade()
   }
 
+  fun openSpotlightSearch() {
+    _launcherState.update { state ->
+      state.copy(
+        isSpotlightSearchOpen = true,
+        searchQuery = "",
+      )
+    }
+  }
+
+  fun closeSpotlightSearch() {
+    _launcherState.update { state ->
+      state.copy(
+        isSpotlightSearchOpen = false,
+        searchQuery = "",
+      )
+    }
+  }
+
   fun handleBackPress(): Boolean {
     val current = _launcherState.value
+    if (current.isSpotlightSearchOpen) {
+      closeSpotlightSearch()
+      return true
+    }
     if (current.isFullOverlayOpen || current.searchQuery.isNotEmpty() || current.cornerSwipeProgress > 0f) {
       closeFullAppListOverlay()
       return true

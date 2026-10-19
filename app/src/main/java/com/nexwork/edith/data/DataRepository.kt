@@ -8,6 +8,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.content.pm.ApplicationInfo
 import android.content.pm.LauncherApps
 import android.content.pm.PackageManager
@@ -35,11 +36,18 @@ class DefaultDataRepository : DataRepository {
     flowOf(listOf("Phone", "GPay", "Camera", "Messages", "Chrome", "WhatsApp", "Spotify", "Settings"))
 }
 
-class LauncherRepository(private val context: Context? = null) {
+class LauncherRepository(private var context: Context? = null) {
 
-  private val prefs by lazy {
-    context?.getSharedPreferences("edith_launcher_prefs", Context.MODE_PRIVATE)
+  fun setContext(ctx: Context) {
+    if (this.context == null) {
+      this.context = ctx.applicationContext
+    }
   }
+
+  fun hasContext(): Boolean = this.context != null
+
+  private val prefs: SharedPreferences?
+    get() = context?.getSharedPreferences("edith_launcher_prefs", Context.MODE_PRIVATE)
 
   fun getPinnedPackages(): Set<String> {
     val saved = prefs?.getStringSet(KEY_PINNED_PACKAGES, null)
