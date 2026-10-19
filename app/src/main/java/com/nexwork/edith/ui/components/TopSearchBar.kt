@@ -124,8 +124,8 @@ fun TopSearchBar(
 
     // 2. Dismiss the searchbar in this scenario (nothing typed on the search bar)
     if (isTextEmpty) {
-      delay(1000L) // 1 second of inactivity with nothing typed
-      // Verify condition still holds after the 1 second delay
+      delay(2000L) // 2 seconds of inactivity with nothing typed
+      // Verify condition still holds after the 2 second delay
       if (isOpen && textFieldValue.text.isEmpty() && textFieldValue.composition == null) {
         keyboardController?.hide()
         focusManager.clearFocus()
