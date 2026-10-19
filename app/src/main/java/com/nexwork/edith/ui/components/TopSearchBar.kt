@@ -35,6 +35,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -79,10 +81,29 @@ import com.nexwork.edith.theme.TextPureWhite
 import kotlinx.coroutines.delay
 
 /**
+ * Filters apps matching the search query by label or packageName,
+ * ordered with most-used apps first (by 14-day foreground usage, essential status, and pinned status).
+ */
+fun filterMatchingApps(query: String, apps: List<AppEntry>): List<AppEntry> {
+  val q = query.trim()
+  if (q.isEmpty()) return emptyList()
+  return apps.filter {
+    it.label.contains(q, ignoreCase = true) ||
+      it.packageName.contains(q, ignoreCase = true)
+  }.sortedWith(
+    compareByDescending<AppEntry> { it.usageTimeMillis14d }
+      .thenByDescending { it.isEssentialQuickAccess }
+      .thenByDescending { it.isPinned }
+      .thenBy { it.label.lowercase() }
+  )
+}
+
+/**
  * Top floating search bar triggered by downward swipe on the home screen:
  * - Liquid glass pill layout with slide-in physics animation.
  * - Matching apps appear in a horizontal liquid glass tab directly below the search bar (icons only).
- * - Auto-launches if there is only 1 matching app.
+ * - Auto-launches if there is only 1 matching app (after 320ms).
+ * - Auto-launches the most used app after 3s of inactivity if multiple apps match.
  * - Auto-dismisses keyboard after 1s of inactivity if multiple apps match.
  * - Auto-dismisses search bar after 2s of inactivity if query is empty.
  * - Complete immunity to slide/gesture typing (composition != null).
@@ -96,6 +117,8 @@ fun TopSearchBar(
   apps: List<AppEntry> = emptyList(),
   onLaunchApp: (AppEntry) -> Unit = {},
   onSearch: ((String) -> Unit)? = null,
+  singleAppAutoLaunchDelayMs: Long = 320L,
+  multipleAppsAutoLaunchDelayMs: Long = 3000L,
   modifier: Modifier = Modifier,
 ) {
   BackHandler(enabled = isOpen) {
@@ -120,17 +143,9 @@ fun TopSearchBar(
   var isFocused by remember { mutableStateOf(false) }
   var lastInteractionTimestamp by remember { mutableLongStateOf(0L) }
 
-  // Filter matching apps based on current query
+  // Filter matching apps based on current query (sorted by most-used first)
   val matchingApps = remember(searchQuery, apps) {
-    val q = searchQuery.trim()
-    if (q.isEmpty()) {
-      emptyList()
-    } else {
-      apps.filter {
-        it.label.contains(q, ignoreCase = true) ||
-          it.packageName.contains(q, ignoreCase = true)
-      }
-    }
+    filterMatchingApps(searchQuery, apps)
   }
 
   // Auto-focus and open keyboard after slide-in begins
@@ -147,9 +162,33 @@ fun TopSearchBar(
   LaunchedEffect(searchQuery, matchingApps.size, textFieldValue.composition) {
     val q = searchQuery.trim()
     if (q.isNotEmpty() && matchingApps.size == 1 && textFieldValue.composition == null) {
-      delay(320L)
+      delay(singleAppAutoLaunchDelayMs)
       if (isOpen && searchQuery.trim().isNotEmpty() && matchingApps.size == 1 && textFieldValue.composition == null) {
         onLaunchApp(matchingApps.first())
+        onDismiss()
+      }
+    }
+  }
+
+  // Auto-launch the most used app after 3 seconds of inactivity if multiple apps match
+  LaunchedEffect(
+    isOpen,
+    searchQuery,
+    matchingApps.size,
+    textFieldValue.composition,
+    lastInteractionTimestamp,
+  ) {
+    if (!isOpen) return@LaunchedEffect
+
+    val isSlideTyping = textFieldValue.composition != null
+    if (isSlideTyping) return@LaunchedEffect
+
+    val q = searchQuery.trim()
+    if (q.isNotEmpty() && matchingApps.size > 1) {
+      val targetApp = matchingApps.first()
+      delay(multipleAppsAutoLaunchDelayMs)
+      if (isOpen && searchQuery.trim().isNotEmpty() && matchingApps.size > 1 && textFieldValue.composition == null) {
+        onLaunchApp(targetApp)
         onDismiss()
       }
     }
@@ -383,15 +422,24 @@ fun TopSearchBar(
                 )
             )
 
+            val lazyListState = rememberLazyListState()
+            LaunchedEffect(lazyListState.isScrollInProgress) {
+              if (lazyListState.isScrollInProgress) {
+                lastInteractionTimestamp = System.currentTimeMillis()
+              }
+            }
+
             // Horizontal row with ONLY icons
             LazyRow(
+              state = lazyListState,
               horizontalArrangement = Arrangement.spacedBy(14.dp),
               contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
               modifier = Modifier.fillMaxWidth(),
             ) {
-              items(matchingApps, key = { it.packageName }) { app ->
+              itemsIndexed(matchingApps, key = { _, it -> it.packageName }) { index, app ->
                 SearchAppIconItem(
                   app = app,
+                  isPrimaryCandidate = (index == 0 && matchingApps.size > 1),
                   onClick = {
                     onLaunchApp(app)
                     onDismiss()
@@ -409,10 +457,12 @@ fun TopSearchBar(
 /**
  * Liquid glass squircle icon for horizontal search results:
  * Displays only the icon with the translucent liquid glass aesthetic (no label text).
+ * If isPrimaryCandidate is true, highlights the app as the prioritized target that will auto-launch in 3s.
  */
 @Composable
 private fun SearchAppIconItem(
   app: AppEntry,
+  isPrimaryCandidate: Boolean = false,
   onClick: () -> Unit,
 ) {
   val customIconRes = remember(app.packageName) {
@@ -442,16 +492,21 @@ private fun SearchAppIconItem(
             Color(0x38FFFFFF),
             Color(0x14FFFFFF),
             Color(0x0E0F172A),
-            Color(0x2838BDF8),
+            if (isPrimaryCandidate) Color(0x4538BDF8) else Color(0x2838BDF8),
           ),
           start = Offset(0f, 0f),
           end = Offset.Infinite,
         )
       )
       .border(
-        width = 1.dp,
+        width = if (isPrimaryCandidate) 1.4.dp else 1.dp,
         brush = Brush.linearGradient(
-          colors = listOf(
+          colors = if (isPrimaryCandidate) listOf(
+            Color(0xFF38BDF8),
+            Color(0x8038BDF8),
+            Color(0x4038BDF8),
+            Color(0xFF38BDF8),
+          ) else listOf(
             Color(0x99FFFFFF),
             Color(0x4038BDF8),
             Color(0x18FFFFFF),
@@ -483,6 +538,17 @@ private fun SearchAppIconItem(
           )
         )
     )
+
+    if (isPrimaryCandidate) {
+      Box(
+        modifier = Modifier
+          .padding(top = 4.dp, end = 4.dp)
+          .align(Alignment.TopEnd)
+          .size(5.dp)
+          .clip(CircleShape)
+          .background(IceGlowAccent)
+      )
+    }
 
     // Inner liquid fluid ambient radial bloom
     Box(

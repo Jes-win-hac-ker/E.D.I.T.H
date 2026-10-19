@@ -54,6 +54,53 @@ class MainScreenViewModelTest {
     val handledRoot = viewModel.handleBackPress()
     assertFalse(handledRoot)
   }
+
+  @Test
+  fun filterMatchingApps_prioritizesMostUsedAppForAutoLaunch() {
+    val appLeastUsed = com.nexwork.edith.model.AppEntry(
+      label = "Calculator",
+      packageName = "com.google.android.calculator",
+      activityName = "",
+      usageTimeMillis14d = 1_000L,
+    )
+    val appMostUsed = com.nexwork.edith.model.AppEntry(
+      label = "Camera",
+      packageName = "com.motorola.camera3",
+      activityName = "",
+      usageTimeMillis14d = 50_000L,
+    )
+    val appMediumUsed = com.nexwork.edith.model.AppEntry(
+      label = "Calendar",
+      packageName = "com.google.android.calendar",
+      activityName = "",
+      usageTimeMillis14d = 10_000L,
+    )
+
+    val apps = listOf(appLeastUsed, appMostUsed, appMediumUsed)
+
+    val matched = com.nexwork.edith.ui.components.filterMatchingApps("cal", apps)
+    assertEquals(2, matched.size)
+    // Between Calendar (10_000L) and Calculator (1_000L), Calendar has higher usage so it must be first
+    assertEquals("Calendar", matched.first().label)
+
+    val matchedC = com.nexwork.edith.ui.components.filterMatchingApps("c", apps)
+    assertEquals(3, matchedC.size)
+    // Camera has highest usage (50_000L), so it is at index 0 for 3-second auto-launch
+    assertEquals("Camera", matchedC.first().label)
+  }
+
+  @Test
+  fun filterMatchingApps_emptyQueryReturnsEmpty() {
+    val apps = listOf(
+      com.nexwork.edith.model.AppEntry(
+        label = "Phone",
+        packageName = "com.google.android.dialer",
+        activityName = "",
+      )
+    )
+    assertTrue(com.nexwork.edith.ui.components.filterMatchingApps("", apps).isEmpty())
+    assertTrue(com.nexwork.edith.ui.components.filterMatchingApps("   ", apps).isEmpty())
+  }
 }
 
 private class FakeMyModelRepository : DataRepository {
