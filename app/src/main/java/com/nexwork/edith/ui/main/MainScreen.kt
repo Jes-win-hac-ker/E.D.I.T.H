@@ -1,6 +1,7 @@
 package com.nexwork.edith.ui.main
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -64,11 +65,37 @@ fun MainScreen(
             onDragEnd = { totalVerticalDrag = 0f },
             onDragCancel = { totalVerticalDrag = 0f },
           )
+        } else {
+          detectVerticalDragGestures(
+            onDragStart = { totalVerticalDrag = 0f },
+            onVerticalDrag = { change, dragAmount ->
+              totalVerticalDrag += dragAmount
+              if (totalVerticalDrag < -28f) {
+                change.consume()
+                viewModel.closeSpotlightSearch()
+                totalVerticalDrag = 0f
+              }
+            },
+            onDragEnd = { totalVerticalDrag = 0f },
+            onDragCancel = { totalVerticalDrag = 0f },
+          )
         }
       }
   ) {
-    // 1. Reactive Grid Lines covering the screen + solid vertical line
-    GridLines()
+    // 1. Reactive Grid Lines (tapping outside search bar dismisses search)
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .pointerInput(state.isSpotlightSearchOpen) {
+          if (state.isSpotlightSearchOpen) {
+            detectTapGestures {
+              viewModel.closeSpotlightSearch()
+            }
+          }
+        }
+    ) {
+      GridLines()
+    }
 
     // 2. Right-side app rail placed in the 4-square right column
     Box(
