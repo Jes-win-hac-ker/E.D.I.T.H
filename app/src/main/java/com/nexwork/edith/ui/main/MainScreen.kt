@@ -24,8 +24,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
+import com.nexwork.edith.model.WeatherCondition
 import com.nexwork.edith.ui.components.GridLines
 import com.nexwork.edith.ui.components.RightAppRail
+import com.nexwork.edith.ui.components.RotaryClockDial
 import com.nexwork.edith.ui.components.TopSearchBar
 
 /**
@@ -72,13 +74,19 @@ fun MainScreen(
             },
             onDrag = { change, dragAmount ->
               val screenWidth = size.width
+              val screenHeight = size.height
+              val isOverClockDial = dragStartX < 212.dp.toPx() &&
+                abs(dragStartY - (screenHeight / 2f)) < 166.dp.toPx()
+
               // Exclusion zones:
               // 1. Left system back gesture edge (0..40dp)
               // 2. Right app rail and right back edge (screenWidth - 124dp .. screenWidth)
               // 3. Extreme top margin (0..40dp)
+              // 4. Over the rotary clock dial (0..212dp vertically within dial bounds)
               val isExcludedZone = dragStartX < 40.dp.toPx() ||
                 dragStartX > (screenWidth - 124.dp.toPx()) ||
-                dragStartY < 40.dp.toPx()
+                dragStartY < 40.dp.toPx() ||
+                isOverClockDial
 
               if (!isExcludedZone) {
                 totalVerticalDrag += dragAmount.y
@@ -152,7 +160,24 @@ fun MainScreen(
       GridLines()
     }
 
-    // 2. Right-side app rail placed in the 4-square right column (dimmed when search is open)
+    // 2. Sleek Dark Glass Rotary Clock & Weather Dial (anchored on the left)
+    Box(
+      modifier = Modifier
+        .align(Alignment.CenterStart)
+        .graphicsLayer { alpha = railAlpha }
+    ) {
+      RotaryClockDial(
+        weather = state.weather,
+        batteryPct = state.telemetry.batteryPct,
+        isCharging = state.telemetry.isCharging,
+        use24Hour = state.use24Hour,
+        onWeatherClick = viewModel::cycleWeatherCondition,
+        onClockClick = viewModel::openClockOrAlarms,
+        onToggleTimeFormat = viewModel::toggleTimeFormat,
+      )
+    }
+
+    // 3. Right-side app rail placed in the 4-square right column (dimmed when search is open)
     Box(
       modifier = Modifier
         .align(Alignment.CenterEnd)
@@ -162,7 +187,7 @@ fun MainScreen(
       RightAppRail()
     }
 
-    // 3. Floating top search bar with matching apps liquid glass horizontal tab
+    // 4. Floating top search bar with matching apps liquid glass horizontal tab
     TopSearchBar(
       isOpen = state.isSpotlightSearchOpen,
       searchQuery = state.searchQuery,
@@ -196,6 +221,21 @@ internal fun MainScreen(data: List<String>, modifier: Modifier = Modifier) {
       .background(Color(0xFF0B0D12))
   ) {
     GridLines()
+
+    Box(
+      modifier = Modifier
+        .align(Alignment.CenterStart)
+    ) {
+      RotaryClockDial(
+        weather = WeatherCondition.PARTLY_CLOUDY,
+        batteryPct = 84,
+        isCharging = false,
+        use24Hour = false,
+        onWeatherClick = {},
+        onClockClick = {},
+        onToggleTimeFormat = {},
+      )
+    }
 
     Box(
       modifier = Modifier
