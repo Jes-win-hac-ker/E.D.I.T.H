@@ -2,11 +2,12 @@ package com.nexwork.edith.ui.main
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
+import kotlin.math.abs
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,7 +48,9 @@ fun MainScreen(
 
   val state by viewModel.launcherState.collectAsStateWithLifecycle()
   var totalVerticalDrag by remember { mutableFloatStateOf(0f) }
+  var totalHorizontalDrag by remember { mutableFloatStateOf(0f) }
   var dragStartY by remember { mutableFloatStateOf(0f) }
+  var dragStartX by remember { mutableFloatStateOf(0f) }
 
   val railAlpha by animateFloatAsState(
     targetValue = if (state.isSpotlightSearchOpen) 0.22f else 1f,
@@ -60,37 +63,76 @@ fun MainScreen(
       .background(Color(0xFF0B0D12))
       .pointerInput(state.isSpotlightSearchOpen) {
         if (!state.isSpotlightSearchOpen) {
-          detectVerticalDragGestures(
+          detectDragGestures(
             onDragStart = { offset ->
               totalVerticalDrag = 0f
+              totalHorizontalDrag = 0f
+              dragStartX = offset.x
               dragStartY = offset.y
             },
-            onVerticalDrag = { change, dragAmount ->
-              if (dragStartY > 90f) {
-                totalVerticalDrag += dragAmount
-                if (totalVerticalDrag > 28f) {
+            onDrag = { change, dragAmount ->
+              val screenWidth = size.width
+              // Exclusion zones:
+              // 1. Left system back gesture edge (0..40dp)
+              // 2. Right app rail and right back edge (screenWidth - 124dp .. screenWidth)
+              // 3. Extreme top margin (0..40dp)
+              val isExcludedZone = dragStartX < 40.dp.toPx() ||
+                dragStartX > (screenWidth - 124.dp.toPx()) ||
+                dragStartY < 40.dp.toPx()
+
+              if (!isExcludedZone) {
+                totalVerticalDrag += dragAmount.y
+                totalHorizontalDrag += dragAmount.x
+
+                // Only activate search if gesture is strictly vertical downward (not horizontal or diagonal)
+                // and displacement exceeds threshold
+                val thresholdPx = 40.dp.toPx()
+                val isStrictlyVerticalDown = totalVerticalDrag > 0f &&
+                  totalVerticalDrag > abs(totalHorizontalDrag) * 1.5f
+
+                if (isStrictlyVerticalDown && totalVerticalDrag > thresholdPx) {
                   change.consume()
                   viewModel.openSpotlightSearch()
                   totalVerticalDrag = 0f
+                  totalHorizontalDrag = 0f
                 }
               }
             },
-            onDragEnd = { totalVerticalDrag = 0f },
-            onDragCancel = { totalVerticalDrag = 0f },
+            onDragEnd = {
+              totalVerticalDrag = 0f
+              totalHorizontalDrag = 0f
+            },
+            onDragCancel = {
+              totalVerticalDrag = 0f
+              totalHorizontalDrag = 0f
+            },
           )
         } else {
-          detectVerticalDragGestures(
-            onDragStart = { totalVerticalDrag = 0f },
-            onVerticalDrag = { change, dragAmount ->
-              totalVerticalDrag += dragAmount
-              if (totalVerticalDrag < -28f) {
+          detectDragGestures(
+            onDragStart = {
+              totalVerticalDrag = 0f
+              totalHorizontalDrag = 0f
+            },
+            onDrag = { change, dragAmount ->
+              totalVerticalDrag += dragAmount.y
+              totalHorizontalDrag += dragAmount.x
+
+              // Dismiss search on upward swipe
+              if (totalVerticalDrag < -28.dp.toPx() && abs(totalVerticalDrag) > abs(totalHorizontalDrag)) {
                 change.consume()
                 viewModel.closeSpotlightSearch()
                 totalVerticalDrag = 0f
+                totalHorizontalDrag = 0f
               }
             },
-            onDragEnd = { totalVerticalDrag = 0f },
-            onDragCancel = { totalVerticalDrag = 0f },
+            onDragEnd = {
+              totalVerticalDrag = 0f
+              totalHorizontalDrag = 0f
+            },
+            onDragCancel = {
+              totalVerticalDrag = 0f
+              totalHorizontalDrag = 0f
+            },
           )
         }
       }
