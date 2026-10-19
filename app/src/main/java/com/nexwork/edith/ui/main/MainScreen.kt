@@ -112,6 +112,20 @@ fun MainScreen(
       searchQuery = state.searchQuery,
       onSearchQueryChange = viewModel::onSearchQueryChange,
       onDismiss = viewModel::closeSpotlightSearch,
+      onSearch = { query ->
+        val q = query.trim()
+        if (q.isNotEmpty()) {
+          val match = state.apps.firstOrNull {
+            it.label.equals(q, ignoreCase = true)
+          } ?: state.apps.firstOrNull {
+            it.label.contains(q, ignoreCase = true)
+          }
+          if (match != null) {
+            viewModel.launchApp(match)
+            viewModel.closeSpotlightSearch()
+          }
+        }
+      },
     )
   }
 }

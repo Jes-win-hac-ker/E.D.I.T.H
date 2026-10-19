@@ -41,10 +41,12 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexwork.edith.R
@@ -59,7 +61,9 @@ import kotlinx.coroutines.delay
 /**
  * Top floating search bar triggered by downward swipe on the home screen:
  * - Full width pill layout without cancel button.
- * - Auto-dismisses keyboard after 1 second of inactivity (works even when nothing is typed).
+ * - Auto-dismisses the search bar after 1 second of inactivity if nothing is typed.
+ * - Grants complete immunity to slide typing: while the user is gesture/slide-typing
+ *   (composition != null), auto-dismissal is completely inhibited.
  * - Clicking or typing in the search bar resets the inactivity timer.
  */
 @Composable
@@ -68,6 +72,7 @@ fun TopSearchBar(
   searchQuery: String,
   onSearchQueryChange: (String) -> Unit,
   onDismiss: () -> Unit,
+  onSearch: ((String) -> Unit)? = null,
   modifier: Modifier = Modifier,
 ) {
   if (!isOpen) return
@@ -79,6 +84,17 @@ fun TopSearchBar(
   val focusRequester = remember { FocusRequester() }
   val focusManager = LocalFocusManager.current
   val keyboardController = LocalSoftwareKeyboardController.current
+
+  var textFieldValue by remember {
+    mutableStateOf(TextFieldValue(text = searchQuery, selection = TextRange(searchQuery.length)))
+  }
+
+  // Synchronize external query changes (e.g. on reset/clear)
+  LaunchedEffect(searchQuery) {
+    if (searchQuery != textFieldValue.text) {
+      textFieldValue = TextFieldValue(text = searchQuery, selection = TextRange(searchQuery.length))
+    }
+  }
 
   var isFocused by remember { mutableStateOf(false) }
   var lastInteractionTimestamp by remember { mutableLongStateOf(0L) }
@@ -93,12 +109,28 @@ fun TopSearchBar(
     }
   }
 
-  // Auto-dismiss keyboard after 1 second of inactivity (even if nothing is typed)
-  LaunchedEffect(isOpen, searchQuery, lastInteractionTimestamp, isFocused) {
-    if (isOpen && isFocused) {
-      delay(1000L) // 1 second of typing/touch inactivity
-      keyboardController?.hide()
-      focusManager.clearFocus()
+  // Auto-dismiss the search bar after 1 second of inactivity if nothing is typed,
+  // granting complete immunity to slide typing (composition != null)
+  LaunchedEffect(isOpen, textFieldValue, lastInteractionTimestamp) {
+    if (!isOpen) return@LaunchedEffect
+
+    val isSlideTyping = textFieldValue.composition != null
+    val isTextEmpty = textFieldValue.text.isEmpty()
+
+    // 1. Slide typing immunity: if slide/gesture typing is active, DO NOT auto-dismiss
+    if (isSlideTyping) {
+      return@LaunchedEffect
+    }
+
+    // 2. Dismiss the searchbar in this scenario (nothing typed on the search bar)
+    if (isTextEmpty) {
+      delay(1000L) // 1 second of inactivity with nothing typed
+      // Verify condition still holds after the 1 second delay
+      if (isOpen && textFieldValue.text.isEmpty() && textFieldValue.composition == null) {
+        keyboardController?.hide()
+        focusManager.clearFocus()
+        onDismiss()
+      }
     }
   }
 
@@ -143,10 +175,13 @@ fun TopSearchBar(
           Spacer(modifier = Modifier.width(10.dp))
 
           BasicTextField(
-            value = searchQuery,
-            onValueChange = { newQuery ->
+            value = textFieldValue,
+            onValueChange = { newVal ->
               lastInteractionTimestamp = System.currentTimeMillis()
-              onSearchQueryChange(newQuery)
+              textFieldValue = newVal
+              if (newVal.text != searchQuery) {
+                onSearchQueryChange(newVal.text)
+              }
             },
             singleLine = true,
             textStyle = TextStyle(
@@ -161,6 +196,7 @@ fun TopSearchBar(
               onSearch = {
                 keyboardController?.hide()
                 focusManager.clearFocus()
+                onSearch?.invoke(textFieldValue.text)
               }
             ),
             modifier = Modifier
@@ -174,7 +210,7 @@ fun TopSearchBar(
                 }
               },
             decorationBox = { innerTextField ->
-              if (searchQuery.isEmpty()) {
+              if (textFieldValue.text.isEmpty()) {
                 Text(
                   text = "Search...",
                   color = TextMutedSlate.copy(alpha = 0.85f),
@@ -186,12 +222,13 @@ fun TopSearchBar(
             },
           )
 
-          if (searchQuery.isNotEmpty()) {
+          if (textFieldValue.text.isNotEmpty()) {
             Box(
               modifier = Modifier
                 .clip(CircleShape)
                 .clickable {
                   lastInteractionTimestamp = System.currentTimeMillis()
+                  textFieldValue = TextFieldValue("")
                   onSearchQueryChange("")
                 }
                 .padding(4.dp),
