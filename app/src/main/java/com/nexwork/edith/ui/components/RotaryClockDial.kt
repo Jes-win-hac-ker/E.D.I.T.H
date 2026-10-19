@@ -2,19 +2,13 @@ package com.nexwork.edith.ui.components
 
 import android.graphics.Paint
 import android.graphics.Typeface
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -33,7 +27,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.nexwork.edith.theme.GlassBorderHighlight
 import com.nexwork.edith.theme.GlassBorderSubtle
@@ -56,22 +49,20 @@ import kotlin.math.sin
  *
  * Anchored flush to the left screen edge:
  * - Three concentric frosted obsidian glass rings presenting time in [hh : mm : ss]:
- *     1. Inner Ring: Hours (hh) with micro-ticks and interactive spring scrubbing.
+ *     1. Inner Ring: Hours (hh) with micro-ticks and smooth numerical progression.
  *     2. Middle Ring: Minutes (mm) with dynamic continuous minute track.
  *     3. Outer Ring: Seconds (ss) with 120Hz smooth fluid chronometer rotation.
  * - Horizontal liquid glass time capsule passing across all three rings framing:
  *     [ HH ] : [ MM ] : [ SS ]
- * - Clean obsidian glass hub chamber with interactive 12/24H mode badge.
+ * - Clean obsidian glass hub chamber with 12/24H mode badge.
+ * Non-interactive: purely visual, seamless chronometer display.
  */
 @Composable
 fun RotaryClockDial(
-  use24Hour: Boolean,
-  onClockClick: () -> Unit,
-  onToggleTimeFormat: () -> Unit,
+  use24Hour: Boolean = false,
   modifier: Modifier = Modifier,
 ) {
   var currentTimeMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
-  var dragHourOffset by remember { mutableFloatStateOf(0f) }
 
   // 120Hz display-synced smooth fluid progression
   LaunchedEffect(Unit) {
@@ -81,17 +72,6 @@ fun RotaryClockDial(
       }
     }
   }
-
-  val animatedHourOffset by
-    animateFloatAsState(
-      targetValue = dragHourOffset,
-      animationSpec =
-        spring(
-          dampingRatio = Spring.DampingRatioMediumBouncy,
-          stiffness = Spring.StiffnessLow,
-        ),
-      label = "glassDialRotation",
-    )
 
   val calendar = remember { Calendar.getInstance() }
   calendar.timeInMillis = currentTimeMillis
@@ -107,40 +87,6 @@ fun RotaryClockDial(
       modifier
         .width(228.dp)
         .height(396.dp)
-        .pointerInput(Unit) {
-          detectVerticalDragGestures(
-            onDragEnd = {
-              val rounded = dragHourOffset.roundToInt().toFloat()
-              dragHourOffset = if (abs(rounded) <= 0.3f) 0f else rounded
-            },
-            onVerticalDrag = { change, dragAmount ->
-              change.consume()
-              dragHourOffset = (dragHourOffset - dragAmount / 36f).coerceIn(-12f, 12f)
-            },
-          )
-        }
-        .pointerInput(Unit) {
-          detectTapGestures(
-            onTap = { tapOffset ->
-              val cy = size.height / 2f
-              val barHalfH = 20.dp.toPx()
-              when {
-                // Tapping mode badge in hub (left of time) toggles 12/24H mode
-                tapOffset.y in (cy - barHalfH)..(cy + barHalfH) && tapOffset.x < 64.dp.toPx() -> {
-                  onToggleTimeFormat()
-                }
-                // Tapping reset when hour is scrubbed
-                abs(dragHourOffset) > 0.1f -> {
-                  dragHourOffset = 0f
-                }
-                // Tapping time readout inside capsule launches clock/alarms
-                tapOffset.y in (cy - barHalfH)..(cy + barHalfH) -> {
-                  onClockClick()
-                }
-              }
-            }
-          )
-        }
   ) {
     Canvas(modifier = Modifier.matchParentSize()) {
       val cy = size.height / 2f
@@ -280,7 +226,6 @@ fun RotaryClockDial(
           innerR = r1In,
           outerR = r1Out,
           liveHour24 = liveHour24,
-          hourOffset = animatedHourOffset,
           use24Hour = use24Hour,
         )
       }
@@ -409,7 +354,7 @@ fun RotaryClockDial(
       val badgeCenterX = 40.dp.toPx() // neatly centered in Inner Hub!
 
       // Calculate active display hour
-      val activeRawHour = (liveHour24 + animatedHourOffset).roundToInt()
+      val activeRawHour = liveHour24
       val wrapped24 = ((activeRawHour % 24) + 24) % 24
       val activeDisplayHour =
         if (use24Hour) {
@@ -481,7 +426,7 @@ fun RotaryClockDial(
 
       val badgePaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-          color = if (animatedHourOffset.roundToInt() != 0) 0xFFFBBF24.toInt() else 0xFF38BDF8.toInt()
+          color = 0xFF38BDF8.toInt()
           textSize = 8.5.dp.toPx()
           typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
           textAlign = Paint.Align.CENTER
@@ -512,8 +457,6 @@ fun RotaryClockDial(
         // Draw Mode Tag (AM / PM / 24H) Badge in Hub
         val modeTag =
           when {
-            animatedHourOffset.roundToInt() > 0 -> "+${animatedHourOffset.roundToInt()}H"
-            animatedHourOffset.roundToInt() < 0 -> "${animatedHourOffset.roundToInt()}H"
             use24Hour -> "24H"
             isAm -> "AM"
             else -> "PM"
@@ -551,7 +494,6 @@ private fun DrawScope.drawGlassHourTrack(
   innerR: Float,
   outerR: Float,
   liveHour24: Int,
-  hourOffset: Float,
   use24Hour: Boolean,
 ) {
   val textRadius = (innerR + outerR) * 0.50f
@@ -590,7 +532,7 @@ private fun DrawScope.drawGlassHourTrack(
   val baseHour = if (use24Hour) liveHour24 else (liveHour24 % 12)
   val deltaRange = if (use24Hour) -7..7 else -5..5
   for (delta in deltaRange) {
-    val angleDeg = -(delta + hourOffset) * stepDegrees
+    val angleDeg = -delta * stepDegrees
     if (angleDeg < -84f || angleDeg > 84f) continue
 
     val absAngle = abs(angleDeg)

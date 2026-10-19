@@ -73,19 +73,13 @@ fun MainScreen(
             },
             onDrag = { change, dragAmount ->
               val screenWidth = size.width
-              val screenHeight = size.height
-              val isOverClockDial = dragStartX < 228.dp.toPx() &&
-                abs(dragStartY - (screenHeight / 2f)) < 198.dp.toPx()
-
               // Exclusion zones:
               // 1. Left system back gesture edge (0..40dp)
               // 2. Right app rail and right back edge (screenWidth - 124dp .. screenWidth)
               // 3. Extreme top margin (0..40dp)
-              // 4. Over the rotary clock dial (0..228dp vertically within dial bounds)
               val isExcludedZone = dragStartX < 40.dp.toPx() ||
                 dragStartX > (screenWidth - 124.dp.toPx()) ||
-                dragStartY < 40.dp.toPx() ||
-                isOverClockDial
+                dragStartY < 40.dp.toPx()
 
               if (!isExcludedZone) {
                 totalVerticalDrag += dragAmount.y
@@ -167,8 +161,6 @@ fun MainScreen(
     ) {
       RotaryClockDial(
         use24Hour = state.use24Hour,
-        onClockClick = viewModel::openClockOrAlarms,
-        onToggleTimeFormat = viewModel::toggleTimeFormat,
       )
     }
 
@@ -223,8 +215,6 @@ internal fun MainScreen(data: List<String>, modifier: Modifier = Modifier) {
     ) {
       RotaryClockDial(
         use24Hour = false,
-        onClockClick = {},
-        onToggleTimeFormat = {},
       )
     }
 
