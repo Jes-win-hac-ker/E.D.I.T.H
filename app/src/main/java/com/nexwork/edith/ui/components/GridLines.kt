@@ -21,7 +21,7 @@ fun GridLines(
   minorLineColor: Color = Color.White.copy(alpha = 0.08f),
   majorLineColor: Color = Color.White.copy(alpha = 0.22f),
   centerLineColor: Color = Color(0xFF38BDF8).copy(alpha = 0.45f),
-  verticalLineFromRightIndex: Int? = 4, // 4th line from the right of the phone
+  verticalMajorLineFromRightIndex: Int? = 4, // 4th major square line from the right of the phone
   customLineWidth: Dp = 2.dp,
   customLineColor: Color = Color.White,
 ) {
@@ -85,10 +85,11 @@ fun GridLines(
       pathEffect = dashEffect,
     )
 
-    // Line on the 4th line from the right of the phone
-    if (verticalLineFromRightIndex != null && verticalLineFromRightIndex > 0) {
+    // Solid line on the 4th major square line from the right of the phone
+    if (verticalMajorLineFromRightIndex != null && verticalMajorLineFromRightIndex > 0) {
       val lastLineIndex = (width / stepPx).toInt()
-      val targetIndex = lastLineIndex - (verticalLineFromRightIndex - 1)
+      val highestMajor = (lastLineIndex / majorStep) * majorStep
+      val targetIndex = highestMajor - (verticalMajorLineFromRightIndex - 1) * majorStep
       if (targetIndex >= 0) {
         val targetX = targetIndex * stepPx
         drawLine(
