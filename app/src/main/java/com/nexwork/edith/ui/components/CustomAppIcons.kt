@@ -35,14 +35,16 @@ object CustomAppIcons {
       pkg.contains("qwen") || pkg.contains("tongyi") -> R.drawable.ic_custom_qwen
       // YouTube
       pkg.contains("youtube") -> R.drawable.ic_custom_youtube
+      // Threads
+      pkg == "com.instagram.barcelona" || pkg.contains("threads") -> R.drawable.ic_custom_threads
       // Instagram
-      pkg.contains("instagram") -> R.drawable.ic_custom_instagram
+      pkg == "com.instagram.android" || pkg == "com.instagram.lite" || pkg == "com.instagram" -> R.drawable.ic_custom_instagram
       // Chrome / Chromium
       pkg.contains("chrome") || pkg.contains("chromium") -> R.drawable.ic_custom_chrome
       // Settings
       pkg.contains("settings") -> R.drawable.ic_custom_settings
       // Play Store
-      pkg == "com.android.vending" || pkg.contains("feedback") -> R.drawable.ic_custom_playstore
+      pkg == "com.android.vending" -> R.drawable.ic_custom_playstore
       // Messages / SMS
       pkg.contains("messaging") || pkg == "com.android.mms" -> R.drawable.ic_custom_messages
       // Gmail / Mail
