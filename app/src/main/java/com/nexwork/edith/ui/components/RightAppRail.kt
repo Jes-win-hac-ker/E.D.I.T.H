@@ -180,30 +180,44 @@ fun RightAppRail(
     ),
   )
 
-  Column(
+  Box(
     modifier =
       modifier
         .fillMaxHeight()
-        .navigationBarsPadding()
-        .padding(horizontal = 8.dp, vertical = 20.dp),
-    verticalArrangement = Arrangement.Center,
-    horizontalAlignment = Alignment.CenterHorizontally,
+        .navigationBarsPadding(),
+    contentAlignment = Alignment.Center,
   ) {
-    apps.forEachIndexed { index, app ->
-      CustomAppItem(
-        app = app,
-        onClick = { app.launchFallback(context) },
-      )
-      if (index < apps.lastIndex) {
-        Spacer(modifier = Modifier.height(10.dp))
+    // 1. Centered Vertical App Column aligned with dial
+    Column(
+      modifier =
+        Modifier
+          .align(Alignment.Center)
+          .padding(horizontal = 8.dp),
+      verticalArrangement = Arrangement.Center,
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      apps.forEachIndexed { index, app ->
+        CustomAppItem(
+          app = app,
+          onClick = { app.launchFallback(context) },
+        )
+        if (index < apps.lastIndex) {
+          Spacer(modifier = Modifier.height(10.dp))
+        }
       }
     }
 
-    Spacer(modifier = Modifier.height(14.dp))
-
-    MultiFunctionButton(
-      onClick = onMultiFunctionClick,
-    )
+    // 2. Corner Multi-Function Button with clear negative space from app list
+    Box(
+      modifier =
+        Modifier
+          .align(Alignment.BottomCenter)
+          .padding(bottom = 24.dp),
+    ) {
+      MultiFunctionButton(
+        onClick = onMultiFunctionClick,
+      )
+    }
   }
 }
 
