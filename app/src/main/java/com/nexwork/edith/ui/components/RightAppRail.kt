@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.annotation.DrawableRes
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,12 +30,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexwork.edith.R
@@ -62,6 +66,7 @@ data class RightRailAppItem(
  */
 @Composable
 fun RightAppRail(
+  onMultiFunctionClick: () -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
   val context = LocalContext.current
@@ -180,7 +185,7 @@ fun RightAppRail(
       modifier
         .fillMaxHeight()
         .navigationBarsPadding()
-        .padding(horizontal = 8.dp, vertical = 32.dp),
+        .padding(horizontal = 8.dp, vertical = 20.dp),
     verticalArrangement = Arrangement.Center,
     horizontalAlignment = Alignment.CenterHorizontally,
   ) {
@@ -190,8 +195,159 @@ fun RightAppRail(
         onClick = { app.launchFallback(context) },
       )
       if (index < apps.lastIndex) {
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
       }
+    }
+
+    Spacer(modifier = Modifier.height(14.dp))
+
+    MultiFunctionButton(
+      onClick = onMultiFunctionClick,
+    )
+  }
+}
+
+/**
+ * Sleek Monochrome Liquid Glass Multi-Function Button (MFB):
+ * Positioned cleanly at the bottom of the right app rail:
+ * 1. 50dp squircle matching the app icons footprint.
+ * 2. Multi-stop specular border with specular top meniscus highlight.
+ * 3. Inner ambient radial bloom.
+ * 4. Precision HUD reticle glyph (center ring with 4 cardinal orbital ticks and core dot).
+ */
+@Composable
+fun MultiFunctionButton(
+  onClick: () -> Unit = {},
+  modifier: Modifier = Modifier,
+  size: Dp = 50.dp,
+) {
+  val cornerRadius = size * 0.308f
+
+  Box(
+    modifier = modifier
+      .size(size)
+      .clip(RoundedCornerShape(cornerRadius))
+      .background(
+        Brush.linearGradient(
+          colors = listOf(
+            Color(0x38FFFFFF),
+            Color(0x14FFFFFF),
+            Color(0x0E0F172A),
+            Color(0x2838BDF8),
+          ),
+          start = Offset(0f, 0f),
+          end = Offset.Infinite,
+        )
+      )
+      .border(
+        width = 1.dp,
+        brush = Brush.linearGradient(
+          colors = listOf(
+            Color(0x99FFFFFF),
+            Color(0x4038BDF8),
+            Color(0x18FFFFFF),
+            Color(0x3538BDF8),
+            Color(0x70FFFFFF),
+          ),
+          start = Offset(0f, 0f),
+          end = Offset.Infinite,
+        ),
+        shape = RoundedCornerShape(cornerRadius),
+      )
+      .clickable { onClick() },
+    contentAlignment = Alignment.Center,
+  ) {
+    // 1. Specular meniscus highlight at top of squircle
+    Box(
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(size * 0.31f)
+        .align(Alignment.TopCenter)
+        .clip(RoundedCornerShape(topStart = cornerRadius, topEnd = cornerRadius))
+        .background(
+          Brush.verticalGradient(
+            colors = listOf(
+              Color(0x55FFFFFF),
+              Color(0x18FFFFFF),
+              Color.Transparent,
+            )
+          )
+        )
+    )
+
+    // 2. Inner liquid fluid ambient radial bloom
+    Box(
+      modifier = Modifier
+        .size(size * 0.69f)
+        .clip(RoundedCornerShape(cornerRadius * 0.75f))
+        .background(
+          Brush.radialGradient(
+            colors = listOf(
+              Color(0x3338BDF8),
+              Color.Transparent,
+            )
+          )
+        )
+    )
+
+    // 3. Precision HUD Multi-Function Reticle Glyph
+    Canvas(modifier = Modifier.size(size * 0.44f)) {
+      val cx = this.size.width / 2f
+      val cy = this.size.height / 2f
+      val strokeW = 1.25.dp.toPx()
+
+      // Center ring
+      val ringRadius = 4.5.dp.toPx()
+      drawCircle(
+        color = Color.White.copy(alpha = 0.92f),
+        radius = ringRadius,
+        center = Offset(cx, cy),
+        style = Stroke(width = strokeW),
+      )
+
+      // Center glowing core dot
+      drawCircle(
+        color = IceGlowAccent,
+        radius = 1.6.dp.toPx(),
+        center = Offset(cx, cy),
+      )
+
+      // 4 Cardinal precision ticks
+      val tickInner = ringRadius + 2.0.dp.toPx()
+      val tickOuter = tickInner + 3.2.dp.toPx()
+
+      // Top
+      drawLine(
+        color = Color.White.copy(alpha = 0.85f),
+        start = Offset(cx, cy - tickInner),
+        end = Offset(cx, cy - tickOuter),
+        strokeWidth = strokeW,
+        cap = StrokeCap.Round,
+      )
+      // Bottom
+      drawLine(
+        color = Color.White.copy(alpha = 0.85f),
+        start = Offset(cx, cy + tickInner),
+        end = Offset(cx, cy + tickOuter),
+        strokeWidth = strokeW,
+        cap = StrokeCap.Round,
+      )
+      // Left
+      drawLine(
+        color = Color.White.copy(alpha = 0.85f),
+        start = Offset(cx - tickInner, cy),
+        end = Offset(cx - tickOuter, cy),
+        strokeWidth = strokeW,
+        cap = StrokeCap.Round,
+      )
+      // Right
+      drawLine(
+        color = Color.White.copy(alpha = 0.85f),
+        start = Offset(cx + tickInner, cy),
+        end = Offset(cx + tickOuter, cy),
+        strokeWidth = strokeW,
+        cap = StrokeCap.Round,
+      )
     }
   }
 }
