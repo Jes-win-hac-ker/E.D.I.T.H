@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.app.AppOpsManager
 import android.app.role.RoleManager
 import android.app.usage.UsageStatsManager
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -23,7 +24,9 @@ import com.nexwork.edith.model.DeviceTelemetry
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
 
@@ -260,6 +263,39 @@ class LauncherRepository(private var context: Context? = null) {
       )
     } catch (_: Exception) {
       DeviceTelemetry()
+    }
+  }
+
+  fun observeTelemetry(): Flow<DeviceTelemetry> = callbackFlow {
+    val ctx = context
+    if (ctx == null) {
+      trySend(DeviceTelemetry())
+      close()
+      return@callbackFlow
+    }
+
+    // Emit current state immediately
+    trySend(readTelemetry())
+
+    val receiver = object : BroadcastReceiver() {
+      override fun onReceive(c: Context?, intent: Intent?) {
+        trySend(readTelemetry())
+      }
+    }
+
+    val filter = IntentFilter().apply {
+      addAction(Intent.ACTION_BATTERY_CHANGED)
+      addAction(Intent.ACTION_POWER_CONNECTED)
+      addAction(Intent.ACTION_POWER_DISCONNECTED)
+    }
+
+    ctx.registerReceiver(receiver, filter)
+
+    awaitClose {
+      try {
+        ctx.unregisterReceiver(receiver)
+      } catch (_: Exception) {
+      }
     }
   }
 

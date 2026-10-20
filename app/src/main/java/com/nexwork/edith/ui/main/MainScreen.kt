@@ -29,6 +29,7 @@ import com.nexwork.edith.ui.components.GridLines
 import com.nexwork.edith.ui.components.RightAppRail
 import com.nexwork.edith.ui.components.RotaryClockDial
 import com.nexwork.edith.ui.components.TopSearchBar
+import com.nexwork.edith.ui.components.VerticalEnergyRail
 
 /**
  * Main Home Launcher screen:
@@ -162,7 +163,16 @@ fun MainScreen(
       GridLines()
     }
 
-    // 2. Sleek Dark Glass Rotary Clock & Weather Dial (anchored on the left)
+    // 2. Liquid Glass Vertical Energy Rail (Battery Telemetry along 4th major grid line)
+    VerticalEnergyRail(
+      batteryPct = state.telemetry.batteryPct,
+      isCharging = state.telemetry.isCharging,
+      modifier = Modifier
+        .fillMaxSize()
+        .graphicsLayer { alpha = railAlpha },
+    )
+
+    // 3. Sleek Dark Glass Rotary Clock & Weather Dial (anchored on the left)
     Box(
       modifier = Modifier
         .align(Alignment.CenterStart)
@@ -173,7 +183,7 @@ fun MainScreen(
       )
     }
 
-    // 3. Right-side app rail placed in the 4-square right column (dimmed when search is open)
+    // 4. Right-side app rail placed in the 4-square right column (dimmed when search is open)
     Box(
       modifier = Modifier
         .align(Alignment.CenterEnd)
@@ -183,7 +193,7 @@ fun MainScreen(
       RightAppRail()
     }
 
-    // 4. Floating top search bar with matching apps liquid glass horizontal tab
+    // 5. Floating top search bar with matching apps liquid glass horizontal tab
     TopSearchBar(
       isOpen = state.isSpotlightSearchOpen,
       searchQuery = state.searchQuery,
@@ -191,6 +201,8 @@ fun MainScreen(
       onSearchQueryChange = viewModel::onSearchQueryChange,
       onLaunchApp = viewModel::launchApp,
       onDismiss = viewModel::closeSpotlightSearch,
+      singleAppAutoLaunchDelayMs = 320L,
+      multipleAppsAutoLaunchDelayMs = 3000L,
       onSearch = { query ->
         val q = query.trim()
         if (q.isNotEmpty()) {
@@ -217,6 +229,12 @@ internal fun MainScreen(data: List<String>, modifier: Modifier = Modifier) {
       .background(Color(0xFF0B0D12))
   ) {
     GridLines()
+
+    VerticalEnergyRail(
+      batteryPct = 84,
+      isCharging = false,
+      modifier = Modifier.fillMaxSize(),
+    )
 
     Box(
       modifier = Modifier

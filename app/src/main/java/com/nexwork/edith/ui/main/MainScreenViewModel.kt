@@ -9,6 +9,7 @@ import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.model.DeviceTelemetry
 import com.nexwork.edith.model.WeatherCondition
 import com.nexwork.edith.ui.main.MainScreenUiState.Success
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -48,8 +49,13 @@ class MainScreenViewModel(
   private val _launcherState = MutableStateFlow(LauncherHomeState())
   val launcherState: StateFlow<LauncherHomeState> = _launcherState.asStateFlow()
 
+  private var telemetryObservationJob: Job? = null
+
   init {
     refreshLauncherData()
+    if (launcherRepository.hasContext()) {
+      startTelemetryObservation()
+    }
   }
 
   fun initContext(context: android.content.Context) {
@@ -57,6 +63,18 @@ class MainScreenViewModel(
     launcherRepository.setContext(context)
     if (needsRefresh) {
       refreshLauncherData()
+      startTelemetryObservation()
+    } else if (telemetryObservationJob == null) {
+      startTelemetryObservation()
+    }
+  }
+
+  private fun startTelemetryObservation() {
+    telemetryObservationJob?.cancel()
+    telemetryObservationJob = viewModelScope.launch {
+      launcherRepository.observeTelemetry().collect { telemetry ->
+        _launcherState.update { it.copy(telemetry = telemetry) }
+      }
     }
   }
 

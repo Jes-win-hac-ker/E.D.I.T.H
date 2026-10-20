@@ -48,6 +48,7 @@ fun GridLines(
   customLineWidth: Dp = 2.dp,
   customLineColor: Color = Color.White,
   reactiveColor: Color = Color(0xFF38BDF8),
+  railGapHeight: Dp? = 290.dp,
 ) {
   val scope = rememberCoroutineScope()
   var touchPos by remember { mutableStateOf<Offset?>(null) }
@@ -333,33 +334,102 @@ fun GridLines(
             if (touchNearDist < 60.dp.toPx()) (1f - touchNearDist / 60.dp.toPx()) * currentAlpha
             else 0f
 
+          val cy = height / 2f
+          val railH = railGapHeight?.toPx() ?: 0f
+          val hasGap = railGapHeight != null && railH > 0f
+          val gapTop = if (hasGap) cy - railH / 2f else 0f
+          val gapBottom = if (hasGap) cy + railH / 2f + 42.dp.toPx() else 0f
+
           if (nearAlphaBoost > 0.05f) {
-            drawLine(
-              brush =
-                Brush.verticalGradient(
+            val glowWidth = customLineWidth.toPx() + 4.dp.toPx()
+            if (hasGap) {
+              if (gapTop > 0f) {
+                drawLine(
+                  brush = Brush.verticalGradient(
+                    0.00f to Color.Transparent,
+                    0.08f to reactiveColor.copy(alpha = nearAlphaBoost * 0.4f),
+                    1.00f to reactiveColor.copy(alpha = nearAlphaBoost * 0.4f),
+                    startY = 0f,
+                    endY = gapTop,
+                  ),
+                  start = Offset(targetX, 0f),
+                  end = Offset(targetX, gapTop),
+                  strokeWidth = glowWidth,
+                )
+              }
+              if (gapBottom < height) {
+                drawLine(
+                  brush = Brush.verticalGradient(
+                    0.00f to reactiveColor.copy(alpha = nearAlphaBoost * 0.4f),
+                    0.92f to reactiveColor.copy(alpha = nearAlphaBoost * 0.4f),
+                    1.00f to Color.Transparent,
+                    startY = gapBottom,
+                    endY = height,
+                  ),
+                  start = Offset(targetX, gapBottom),
+                  end = Offset(targetX, height),
+                  strokeWidth = glowWidth,
+                )
+              }
+            } else {
+              drawLine(
+                brush = Brush.verticalGradient(
                   0.00f to Color.Transparent,
                   0.08f to reactiveColor.copy(alpha = nearAlphaBoost * 0.4f),
                   0.92f to reactiveColor.copy(alpha = nearAlphaBoost * 0.4f),
                   1.00f to Color.Transparent,
                 ),
-              start = Offset(targetX, 0f),
-              end = Offset(targetX, height),
-              strokeWidth = customLineWidth.toPx() + 4.dp.toPx(),
-            )
+                start = Offset(targetX, 0f),
+                end = Offset(targetX, height),
+                strokeWidth = glowWidth,
+              )
+            }
           }
 
-          drawLine(
-            brush =
-              Brush.verticalGradient(
+          if (hasGap) {
+            // Segment 1: Above Energy Rail docking into top node
+            if (gapTop > 0f) {
+              drawLine(
+                brush = Brush.verticalGradient(
+                  0.00f to Color.Transparent,
+                  0.06f to customLineColor,
+                  1.00f to customLineColor,
+                  startY = 0f,
+                  endY = gapTop,
+                ),
+                start = Offset(targetX, 0f),
+                end = Offset(targetX, gapTop),
+                strokeWidth = customLineWidth.toPx(),
+              )
+            }
+            // Segment 2: Below Telemetry Lozenge running down to screen bottom
+            if (gapBottom < height) {
+              drawLine(
+                brush = Brush.verticalGradient(
+                  0.00f to customLineColor,
+                  0.94f to customLineColor,
+                  1.00f to Color.Transparent,
+                  startY = gapBottom,
+                  endY = height,
+                ),
+                start = Offset(targetX, gapBottom),
+                end = Offset(targetX, height),
+                strokeWidth = customLineWidth.toPx(),
+              )
+            }
+          } else {
+            drawLine(
+              brush = Brush.verticalGradient(
                 0.00f to Color.Transparent,
                 0.06f to customLineColor,
                 0.94f to customLineColor,
                 1.00f to Color.Transparent,
               ),
-            start = Offset(targetX, 0f),
-            end = Offset(targetX, height),
-            strokeWidth = customLineWidth.toPx(),
-          )
+              start = Offset(targetX, 0f),
+              end = Offset(targetX, height),
+              strokeWidth = customLineWidth.toPx(),
+            )
+          }
         }
       }
     }
