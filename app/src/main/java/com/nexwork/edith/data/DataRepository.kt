@@ -225,45 +225,83 @@ class LauncherRepository(private var context: Context? = null) {
 
   fun readTelemetry(): DeviceTelemetry {
     val ctx = context ?: return DeviceTelemetry()
-    return try {
-      val batteryIntent = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-      val level = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, 84) ?: 84
-      val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, 100) ?: 100
-      val status = batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-      val isCharging =
-        status == BatteryManager.BATTERY_STATUS_CHARGING ||
-          status == BatteryManager.BATTERY_STATUS_FULL
-      val pct = if (scale > 0) ((level * 100f) / scale).roundToInt().coerceIn(0, 100) else 84
+    
+    // 1. Direct BatteryManager query (fast, driver-level, no broadcast receiver required)
+    val bm = ctx.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+    val bmCapacity = try {
+      bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+    } catch (_: Exception) {
+      null
+    }
+    val bmIsCharging = try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        bm?.isCharging == true
+      } else false
+    } catch (_: Exception) {
+      false
+    }
 
+    // 2. Sticky battery changed broadcast fallback
+    val batteryIntent = try {
+      val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        ctx.registerReceiver(null, filter, Context.RECEIVER_EXPORTED)
+      } else {
+        ctx.registerReceiver(null, filter)
+      }
+    } catch (_: Exception) {
+      null
+    }
+
+    val level = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+    val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+    val status = batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+    val isChargingIntent =
+      status == BatteryManager.BATTERY_STATUS_CHARGING ||
+        status == BatteryManager.BATTERY_STATUS_FULL
+
+    val isCharging = bmIsCharging || isChargingIntent
+    val pct = when {
+      bmCapacity != null && bmCapacity in 0..100 -> bmCapacity
+      level >= 0 && scale > 0 -> ((level * 100f) / scale).roundToInt().coerceIn(0, 100)
+      else -> 84
+    }
+
+    // 3. RAM telemetry
+    var totalGb = 8.0f
+    var availGb = 5.2f
+    try {
       val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
       val memInfo = ActivityManager.MemoryInfo()
       am?.getMemoryInfo(memInfo)
-      val totalGb =
-        if (memInfo.totalMem > 0) (memInfo.totalMem / (1024f * 1024f * 1024f)) else 8.0f
-      val availGb =
-        if (memInfo.availMem > 0) (memInfo.availMem / (1024f * 1024f * 1024f)) else 5.2f
-
-      val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-      @Suppress("DEPRECATION")
-      val hz =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-          ctx.display.refreshRate.roundToInt()
-        } else {
-          wm?.defaultDisplay?.refreshRate?.roundToInt() ?: 120
-        }
-
-      DeviceTelemetry(
-        batteryPct = pct,
-        isCharging = isCharging,
-        availableRamGb = (availGb * 10f).roundToInt() / 10f,
-        totalRamGb = (totalGb * 10f).roundToInt() / 10f,
-        refreshRateHz = if (hz >= 90) hz else 120,
-        deviceModel = "Moto G45 5G",
-        hasUsageAccess = hasUsageStatsPermission(),
-      )
+      if (memInfo.totalMem > 0) totalGb = memInfo.totalMem / (1024f * 1024f * 1024f)
+      if (memInfo.availMem > 0) availGb = memInfo.availMem / (1024f * 1024f * 1024f)
     } catch (_: Exception) {
-      DeviceTelemetry()
     }
+
+    // 4. Refresh rate telemetry
+    val hz = try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        val dm = ctx.getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+        dm?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.refreshRate?.roundToInt() ?: 120
+      } else {
+        val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+        @Suppress("DEPRECATION")
+        wm?.defaultDisplay?.refreshRate?.roundToInt() ?: 120
+      }
+    } catch (_: Exception) {
+      120
+    }
+
+    return DeviceTelemetry(
+      batteryPct = pct,
+      isCharging = isCharging,
+      availableRamGb = (availGb * 10f).roundToInt() / 10f,
+      totalRamGb = (totalGb * 10f).roundToInt() / 10f,
+      refreshRateHz = if (hz >= 90) hz else 120,
+      deviceModel = "Moto G45 5G",
+      hasUsageAccess = hasUsageStatsPermission(),
+    )
   }
 
   fun observeTelemetry(): Flow<DeviceTelemetry> = callbackFlow {
@@ -289,7 +327,15 @@ class LauncherRepository(private var context: Context? = null) {
       addAction(Intent.ACTION_POWER_DISCONNECTED)
     }
 
-    ctx.registerReceiver(receiver, filter)
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        ctx.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+      } else {
+        ctx.registerReceiver(receiver, filter)
+      }
+    } catch (_: Exception) {
+      // In case registration fails, initial telemetry is already sent
+    }
 
     awaitClose {
       try {

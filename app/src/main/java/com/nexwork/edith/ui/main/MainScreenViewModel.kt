@@ -59,14 +59,9 @@ class MainScreenViewModel(
   }
 
   fun initContext(context: android.content.Context) {
-    val needsRefresh = !launcherRepository.hasContext()
     launcherRepository.setContext(context)
-    if (needsRefresh) {
-      refreshLauncherData()
-      startTelemetryObservation()
-    } else if (telemetryObservationJob == null) {
-      startTelemetryObservation()
-    }
+    refreshLauncherData()
+    startTelemetryObservation()
   }
 
   private fun startTelemetryObservation() {
