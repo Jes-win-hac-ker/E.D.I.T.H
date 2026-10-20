@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -150,18 +151,27 @@ fun MultiFunctionGestureDeck(
     }
   }
 
-  // Target card geometry
-  val cardWidth = 138.dp
-  val cardWidthPx = with(density) { cardWidth.toPx() }
-  val cardHeightPx = with(density) { buttonSize.toPx() }
-  val cardSlideDistance = with(density) { 148.dp.toPx() }
+  // Target Unified Panel Geometry
+  val panelWidth = 232.dp
+  val panelWidthPx = with(density) { panelWidth.toPx() }
+  val baseHeight = buttonSize // 50.dp
+  val expandedHeight = 356.dp
+  val baseHeightPx = with(density) { baseHeight.toPx() }
+  val expandedHeightPx = with(density) { expandedHeight.toPx() }
+  val itemHeightPx = with(density) { 44.dp.toPx() }
 
-  // Target tab geometry
-  val tabWidth = 210.dp
-  val tabHeight = 360.dp
-  val tabWidthPx = with(density) { tabWidth.toPx() }
-  val tabHeightPx = with(density) { tabHeight.toPx() }
-  val itemHeightPx = with(density) { 50.dp.toPx() }
+  // Horizontal slide geometry:
+  // Slid out: right edge is at +10dp (tucked under the MFB right edge at +25dp).
+  // Left edge = -222dp.
+  // Center X = (-222dp + 10dp) / 2 = -106dp.
+  val targetCenterXPx = with(density) { -106.dp.toPx() }
+  val curCenterXPx = targetCenterXPx * cardSlideAnim.value
+
+  // Vertical expansion geometry:
+  // Bottom edge stays anchored at +baseHeight / 2 (+25dp).
+  // Top edge expands UPWARDS from -25dp to -331dp.
+  val curHeightPx = baseHeightPx + (expandedHeightPx - baseHeightPx) * tabExpandAnim.value
+  val curCenterYPx = (baseHeightPx / 2f) - (curHeightPx / 2f)
 
   // Animate Card Slide
   LaunchedEffect(deckState) {
@@ -220,34 +230,32 @@ fun MultiFunctionGestureDeck(
   }
 
   Box(
-    modifier = modifier,
+    modifier = modifier.size(buttonSize),
     contentAlignment = Alignment.Center,
   ) {
-    // 1. Floating App List Tab (anchored above the card and MFB)
-    if (tabExpandAnim.value > 0.01f) {
-      val tabOffsetX = with(density) { -164.dp.toPx() }
-      val tabOffsetY = with(density) { -374.dp.toPx() }
-
+    // 1. Unified Sliding & Expanding Glass Panel (Base Card + App List Tab)
+    if (cardSlideAnim.value > 0.01f) {
       Box(
         modifier =
           Modifier
-            .offset { IntOffset(tabOffsetX.roundToInt(), tabOffsetY.roundToInt()) }
-            .width(tabWidth)
-            .height(tabHeight * tabExpandAnim.value)
-            .alpha(tabExpandAnim.value)
-            .scale(0.85f + 0.15f * tabExpandAnim.value)
-            .shadow(16.dp, RoundedCornerShape(22.dp))
-            .clip(RoundedCornerShape(22.dp))
+            .offset { IntOffset(curCenterXPx.roundToInt(), curCenterYPx.roundToInt()) }
+            .width(panelWidth)
+            .height(with(density) { curHeightPx.toDp() })
+            .alpha(cardSlideAnim.value)
+            .scale(0.85f + 0.15f * cardSlideAnim.value)
+            .zIndex(1f) // Drawn beneath MFB icon (zIndex 2f) so it emerges from under it
+            .shadow(16.dp, RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(18.dp))
             .background(
               Brush.linearGradient(
                 colors =
                   listOf(
-                    Color(0xF00B0D12),
-                    Color(0xE8141A24),
-                    Color(0xF40B0D12),
+                    Color(0xF20B0D12),
+                    Color(0xEA121620),
+                    Color(0xF20B0D12),
                   ),
                 start = Offset(0f, 0f),
-                end = Offset(tabWidthPx, tabHeightPx),
+                end = Offset(panelWidthPx, curHeightPx),
               )
             )
             .border(
@@ -255,32 +263,37 @@ fun MultiFunctionGestureDeck(
               brush =
                 Brush.linearGradient(
                   colors =
-                    listOf(
-                      Color(0x88FFFFFF),
+                    if (isCardHovered || tabExpandAnim.value > 0.1f) listOf(
+                      Color(0x90FFFFFF),
                       Color(0x4038BDF8),
+                      Color(0x18FFFFFF),
+                      Color(0x70FFFFFF),
+                    ) else listOf(
+                      Color(0x70FFFFFF),
                       Color(0x20FFFFFF),
-                      Color(0x60FFFFFF),
+                      Color(0x10FFFFFF),
+                      Color(0x50FFFFFF),
                     ),
                   start = Offset(0f, 0f),
-                  end = Offset(tabWidthPx, tabHeightPx),
+                  end = Offset(panelWidthPx, curHeightPx),
                 ),
-              shape = RoundedCornerShape(22.dp),
-            )
+              shape = RoundedCornerShape(18.dp),
+            ),
       ) {
-        // Specular meniscus highlight along top edge of tab
+        // Specular meniscus highlight along top edge of panel
         Box(
           modifier =
             Modifier
               .fillMaxWidth()
-              .height(28.dp)
+              .height(24.dp)
               .align(Alignment.TopCenter)
-              .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+              .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
               .background(
                 Brush.verticalGradient(
                   colors =
                     listOf(
-                      Color(0x50FFFFFF),
-                      Color(0x16FFFFFF),
+                      Color(0x45FFFFFF),
+                      Color(0x12FFFFFF),
                       Color.Transparent,
                     )
                 )
@@ -288,196 +301,178 @@ fun MultiFunctionGestureDeck(
         )
 
         Column(
-          modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp)
+          modifier = Modifier.fillMaxSize(),
+          verticalArrangement = Arrangement.SpaceBetween,
         ) {
-          // Tab Header
-          Row(
+          // A. Header (Fades in when tab expands)
+          if (tabExpandAnim.value > 0.05f) {
+            Column(
+              modifier =
+                Modifier
+                  .fillMaxWidth()
+                  .alpha(tabExpandAnim.value)
+            ) {
+              Row(
+                modifier =
+                  Modifier
+                    .fillMaxWidth()
+                    .height(36.dp)
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+              ) {
+                Text(
+                  text = "APPLICATIONS",
+                  color = TextSilver,
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Bold,
+                  letterSpacing = 1.2.sp,
+                  fontFamily = FontFamily.SansSerif,
+                )
+
+                Box(
+                  modifier =
+                    Modifier
+                      .clip(RoundedCornerShape(6.dp))
+                      .background(Color(0x22FFFFFF))
+                      .border(0.5.dp, Color(0x30FFFFFF), RoundedCornerShape(6.dp))
+                      .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                  Text(
+                    text = "${sortedApps.size}",
+                    color = IceGlowAccent,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                  )
+                }
+              }
+
+              // Hairline separator
+              Box(
+                modifier =
+                  Modifier
+                    .fillMaxWidth()
+                    .height(0.6.dp)
+                    .background(Color(0x1AFFFFFF))
+              )
+            }
+          }
+
+          // B. App List Items (Occupies scrollable middle space)
+          if (tabExpandAnim.value > 0.05f) {
+            val visibleCount = 6
+            val firstVisibleIdx = (currentScrollPx / itemHeightPx).toInt().coerceIn(0, (sortedApps.size - visibleCount).coerceAtLeast(0))
+            val lastVisibleIdx = (firstVisibleIdx + visibleCount).coerceAtMost(sortedApps.size)
+
+            Column(
+              modifier =
+                Modifier
+                  .fillMaxWidth()
+                  .weight(1f)
+                  .alpha(tabExpandAnim.value)
+                  .padding(horizontal = 8.dp, vertical = 2.dp),
+              verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+              for (idx in firstVisibleIdx until lastVisibleIdx) {
+                val app = sortedApps[idx]
+                val isHovered = (idx == hoveredAppIndex)
+
+                CompactTabAppItem(
+                  app = app,
+                  isHovered = isHovered,
+                  dwellProgress = if (isHovered) dwellProgress else 0f,
+                )
+              }
+            }
+          } else {
+            Spacer(modifier = Modifier.weight(1f))
+          }
+
+          // C. Card Base Footer ("App List" Card, always anchored at bottom of container)
+          Box(
             modifier =
               Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .height(baseHeight)
+                .background(
+                  if (isCardHovered || tabExpandAnim.value > 0.1f) Color(0x2538BDF8) else Color(0x0AFFFFFF)
+                ),
+            contentAlignment = Alignment.Center,
           ) {
-            Text(
-              text = "APPLICATIONS",
-              color = TextSilver,
-              fontSize = 10.sp,
-              fontWeight = FontWeight.Bold,
-              letterSpacing = 1.2.sp,
-              fontFamily = FontFamily.SansSerif,
-            )
+            // Hairline top border for footer when tab is open
+            if (tabExpandAnim.value > 0.05f) {
+              Box(
+                modifier =
+                  Modifier
+                    .fillMaxWidth()
+                    .height(0.6.dp)
+                    .align(Alignment.TopCenter)
+                    .background(Color(0x20FFFFFF))
+              )
+            }
 
-            Box(
-              modifier =
-                Modifier
-                  .clip(RoundedCornerShape(8.dp))
-                  .background(Color(0x28FFFFFF))
-                  .padding(horizontal = 6.dp, vertical = 2.dp)
+            // Reactive Glass Shimmer Sweep Canvas
+            if (cardShimmerAnim.value > 0.01f && cardShimmerAnim.value < 0.99f) {
+              val sweepPos = cardShimmerAnim.value * (panelWidthPx + 100f) - 50f
+              Canvas(modifier = Modifier.matchParentSize()) {
+                drawRect(
+                  brush =
+                    Brush.linearGradient(
+                      colors =
+                        listOf(
+                          Color.Transparent,
+                          Color(0x30FFFFFF),
+                          Color(0x85FFFFFF),
+                          Color(0x30FFFFFF),
+                          Color.Transparent,
+                        ),
+                      start = Offset(sweepPos - 40.dp.toPx(), 0f),
+                      end = Offset(sweepPos + 40.dp.toPx(), size.height),
+                    )
+                )
+              }
+            }
+
+            // Card Content: App grid glyph + "App List" label + indicator pip
+            Row(
+              modifier = Modifier.padding(horizontal = 14.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+              // App Grid Glyph
+              Canvas(modifier = Modifier.size(17.dp)) {
+                val stroke = 1.0.dp.toPx()
+                val s = 6.0.dp.toPx()
+                val gap = 2.4.dp.toPx()
+                val c = if (isCardHovered || tabExpandAnim.value > 0.1f) IceGlowAccent else Color.White
+
+                drawRoundRect(color = c, topLeft = Offset(0f, 0f), size = Size(s, s), style = Stroke(stroke))
+                drawRoundRect(color = c, topLeft = Offset(s + gap, 0f), size = Size(s, s), style = Stroke(stroke))
+                drawRoundRect(color = c, topLeft = Offset(0f, s + gap), size = Size(s, s), style = Stroke(stroke))
+                drawRoundRect(color = c, topLeft = Offset(s + gap, s + gap), size = Size(s, s), style = Stroke(stroke))
+              }
+
               Text(
-                text = "${sortedApps.size}",
-                color = IceGlowAccent,
-                fontSize = 9.sp,
+                text = "App List",
+                color = if (isCardHovered || tabExpandAnim.value > 0.1f) IceGlowAccent else TextPureWhite,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = FontFamily.SansSerif,
+                letterSpacing = 0.4.sp,
+              )
+
+              Spacer(modifier = Modifier.weight(1f))
+
+              // Orbital pip
+              Text(
+                text = if (isCardHovered || tabExpandAnim.value > 0.1f) "◈" else "›",
+                color = if (isCardHovered || tabExpandAnim.value > 0.1f) IceGlowAccent else TextSilver,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
               )
             }
           }
-
-          Spacer(modifier = Modifier.height(6.dp))
-
-          // Visible App Items Slice based on current scroll offset
-          val visibleCount = 6
-          val firstVisibleIdx = (currentScrollPx / itemHeightPx).toInt().coerceIn(0, (sortedApps.size - visibleCount).coerceAtLeast(0))
-          val lastVisibleIdx = (firstVisibleIdx + visibleCount).coerceAtMost(sortedApps.size)
-
-          Column(
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.weight(1f),
-          ) {
-            for (idx in firstVisibleIdx until lastVisibleIdx) {
-              val app = sortedApps[idx]
-              val isHovered = (idx == hoveredAppIndex)
-
-              CompactTabAppItem(
-                app = app,
-                isHovered = isHovered,
-                dwellProgress = if (isHovered) dwellProgress else 0f,
-              )
-            }
-          }
         }
-      }
-    }
-
-    // 2. Sliding "App List" Card (Emerges from directly under MFB icon)
-    val cardCurOffsetPx = -cardSlideDistance * cardSlideAnim.value
-
-    Box(
-      modifier =
-        Modifier
-          .offset { IntOffset(cardCurOffsetPx.roundToInt(), 0) }
-          .width(cardWidth)
-          .height(buttonSize)
-          .alpha(cardSlideAnim.value)
-          .scale(0.85f + 0.15f * cardSlideAnim.value)
-          .zIndex(1f) // Drawn beneath MFB icon (zIndex 2f) so it literally slides out from under it
-          .clip(RoundedCornerShape(16.dp))
-          .background(
-            Brush.linearGradient(
-              colors =
-                listOf(
-                  Color(0x38FFFFFF),
-                  Color(0x14FFFFFF),
-                  Color(0x0E0F172A),
-                  if (isCardHovered) Color(0x5038BDF8) else Color(0x2838BDF8),
-                ),
-              start = Offset(0f, 0f),
-              end = Offset(cardWidthPx, cardHeightPx),
-            )
-          )
-          .border(
-            width = if (isCardHovered) 1.2.dp else 0.9.dp,
-            brush =
-              Brush.linearGradient(
-                colors =
-                  if (isCardHovered) listOf(
-                    Color(0xFF38BDF8),
-                    Color(0x8038BDF8),
-                    Color(0xFF38BDF8),
-                  ) else listOf(
-                    Color(0x99FFFFFF),
-                    Color(0x4038BDF8),
-                    Color(0x18FFFFFF),
-                    Color(0x70FFFFFF),
-                  ),
-                start = Offset(0f, 0f),
-                end = Offset(cardWidthPx, cardHeightPx),
-              ),
-            shape = RoundedCornerShape(16.dp),
-          ),
-      contentAlignment = Alignment.Center,
-    ) {
-      // Meniscus highlight along top edge of card
-      Box(
-        modifier =
-          Modifier
-            .fillMaxWidth()
-            .height(buttonSize * 0.30f)
-            .align(Alignment.TopCenter)
-            .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-            .background(
-              Brush.verticalGradient(
-                colors =
-                  listOf(
-                    Color(0x55FFFFFF),
-                    Color(0x18FFFFFF),
-                    Color.Transparent,
-                  )
-              )
-            )
-      )
-
-      // Reactive Glass Shimmer Sweep Canvas
-      if (cardShimmerAnim.value > 0.01f && cardShimmerAnim.value < 0.99f) {
-        val sweepPos = cardShimmerAnim.value * (cardWidthPx + 100f) - 50f
-        Canvas(modifier = Modifier.matchParentSize()) {
-          drawRect(
-            brush =
-              Brush.linearGradient(
-                colors =
-                  listOf(
-                    Color.Transparent,
-                    Color(0x35FFFFFF),
-                    Color(0x95FFFFFF),
-                    Color(0x35FFFFFF),
-                    Color.Transparent,
-                  ),
-                start = Offset(sweepPos - 40.dp.toPx(), 0f),
-                end = Offset(sweepPos + 40.dp.toPx(), size.height),
-              )
-          )
-        }
-      }
-
-      // Card Content: App grid glyph + "App List" label + indicator dot
-      Row(
-        modifier = Modifier.padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        // App Grid Glyph
-        Canvas(modifier = Modifier.size(18.dp)) {
-          val stroke = 1.0.dp.toPx()
-          val s = 6.5.dp.toPx()
-          val gap = 2.5.dp.toPx()
-          val c = if (isCardHovered) IceGlowAccent else Color.White
-
-          // 2x2 grid squares
-          drawRoundRect(color = c, topLeft = Offset(0f, 0f), size = Size(s, s), style = Stroke(stroke))
-          drawRoundRect(color = c, topLeft = Offset(s + gap, 0f), size = Size(s, s), style = Stroke(stroke))
-          drawRoundRect(color = c, topLeft = Offset(0f, s + gap), size = Size(s, s), style = Stroke(stroke))
-          drawRoundRect(color = c, topLeft = Offset(s + gap, s + gap), size = Size(s, s), style = Stroke(stroke))
-        }
-
-        Text(
-          text = "App List",
-          color = if (isCardHovered) IceGlowAccent else TextPureWhite,
-          fontSize = 12.sp,
-          fontWeight = FontWeight.SemiBold,
-          fontFamily = FontFamily.SansSerif,
-          letterSpacing = 0.4.sp,
-        )
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        // Right orbital chevron pip
-        Text(
-          text = if (isCardHovered) "◈" else "›",
-          color = if (isCardHovered) IceGlowAccent else TextSilver,
-          fontSize = 13.sp,
-          fontWeight = FontWeight.Bold,
-        )
       }
     }
 
@@ -584,38 +579,35 @@ fun MultiFunctionGestureDeck(
 
                 // If hold triggered, evaluate card and tab interactions
                 if (deckState >= MfbDeckState.CARD_EXPANDED) {
-                  // 1. Hit-test Card: Card spans dx in [-160dp, -20dp], dy in [-30dp, 30dp]
-                  val isOverCard = dx in (-cardSlideDistance - 20f)..(-20f) && abs(dy) < 38.dp.toPx()
+                  // 1. Hit-test Card Base Footer: dx in [-232dp..-20dp], dy in [-32dp..32dp]
+                  val isOverCardBase = dx in (-232.dp.toPx()..-20.dp.toPx()) && abs(dy) < 32.dp.toPx()
 
-                  if (isOverCard && !isCardHovered) {
+                  if (isOverCardBase && !isCardHovered) {
                     isCardHovered = true
                     deckState = MfbDeckState.TAB_EXPANDED
                   }
 
-                  // 2. If Tab is open, hit-test Tab items
+                  // 2. If Tab is open, hit-test Tab items & handle scrubbing
                   if (deckState == MfbDeckState.TAB_EXPANDED) {
-                    val tabLeftPx = with(density) { -164.dp.toPx() }
-                    val tabTopPx = with(density) { -374.dp.toPx() }
+                    // List spans dy from -295dp (top of list) to -25dp (bottom of list, above card base)
+                    val listTopY = with(density) { -295.dp.toPx() }
+                    val listBottomY = with(density) { -25.dp.toPx() }
+                    val listHeightPx = listBottomY - listTopY // ~270dp
 
-                    val relTabX = curPos.x - tabLeftPx
-                    val relTabY = curPos.y - tabTopPx
+                    if (dy in listTopY..listBottomY && sortedApps.isNotEmpty()) {
+                      val relY = dy - listTopY
 
-                    // If finger is inside tab vertical list zone (header ~38dp, items zone ~320dp)
-                    val listTopOffset = 38.dp.toPx()
-                    val listHeight = tabHeightPx - listTopOffset
-
-                    if (relTabY > listTopOffset && relTabY < tabHeightPx && sortedApps.isNotEmpty()) {
                       // Edge auto-scroll
-                      val edgeThreshold = 42.dp.toPx()
-                      if (relTabY < listTopOffset + edgeThreshold && currentScrollPx > 0f) {
+                      val edgeThreshold = with(density) { 36.dp.toPx() }
+                      if (relY < edgeThreshold && currentScrollPx > 0f) {
                         currentScrollPx = (currentScrollPx - 4.dp.toPx()).coerceAtLeast(0f)
-                      } else if (relTabY > tabHeightPx - edgeThreshold) {
+                      } else if (relY > listHeightPx - edgeThreshold) {
                         val maxScroll = (sortedApps.size - 6).coerceAtLeast(0) * itemHeightPx
                         currentScrollPx = (currentScrollPx + 4.dp.toPx()).coerceAtMost(maxScroll)
                       }
 
                       // Compute hovered index
-                      val yInsideList = relTabY - listTopOffset + currentScrollPx
+                      val yInsideList = relY + currentScrollPx
                       val newHoverIdx = (yInsideList / itemHeightPx).toInt().coerceIn(0, sortedApps.lastIndex)
 
                       if (newHoverIdx != hoveredAppIndex) {
@@ -623,6 +615,13 @@ fun MultiFunctionGestureDeck(
                         view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                         stationaryStartTime = now
                         dwellProgress = 0f
+                      }
+                    } else if (dy > listBottomY) {
+                      // Finger moved down onto the Card Base Footer
+                      if (hoveredAppIndex != -1) {
+                        hoveredAppIndex = -1
+                        dwellProgress = 0f
+                        stationaryStartTime = 0L
                       }
                     }
                   }
@@ -715,6 +714,8 @@ fun MultiFunctionGestureDeck(
 
 /**
  * Compact App List Item with 1.0s Dwell Auto-Launch Indicator.
+ * Idle items are clean and transparent without clunky gray box tiles.
+ * The hovered item receives a frosted glass specular pill background and the 1.0s charging ring.
  */
 @Composable
 private fun CompactTabAppItem(
@@ -726,15 +727,26 @@ private fun CompactTabAppItem(
     modifier =
       Modifier
         .fillMaxWidth()
-        .height(48.dp)
-        .clip(RoundedCornerShape(12.dp))
+        .height(42.dp)
+        .clip(RoundedCornerShape(10.dp))
         .background(
-          if (isHovered) Color(0x3538BDF8) else Color(0x18FFFFFF)
+          if (isHovered) Brush.linearGradient(
+            colors = listOf(
+              Color(0x3538BDF8),
+              Color(0x1838BDF8),
+              Color(0x10FFFFFF),
+            )
+          ) else Brush.linearGradient(
+            colors = listOf(
+              Color.Transparent,
+              Color.Transparent,
+            )
+          )
         )
         .border(
-          width = if (isHovered) 1.2.dp else 0.6.dp,
-          color = if (isHovered) IceGlowAccent else Color(0x22FFFFFF),
-          shape = RoundedCornerShape(12.dp),
+          width = if (isHovered) 1.0.dp else 0.dp,
+          color = if (isHovered) IceGlowAccent.copy(alpha = 0.8f) else Color.Transparent,
+          shape = RoundedCornerShape(10.dp),
         )
         .padding(horizontal = 8.dp),
     contentAlignment = Alignment.CenterStart,
@@ -744,20 +756,21 @@ private fun CompactTabAppItem(
       horizontalArrangement = Arrangement.spacedBy(8.dp),
       modifier = Modifier.fillMaxWidth(),
     ) {
-      // App Icon
+      // Liquid Glass App Icon
       LiquidGlassAppIcon(
         packageName = app.packageName,
         label = app.label,
         icon = app.icon,
-        size = 32.dp,
+        size = 28.dp,
       )
 
       // App Label
       Text(
         text = app.label,
-        color = if (isHovered) TextPureWhite else Color(0xD0FFFFFF),
+        color = if (isHovered) TextPureWhite else Color(0xD5FFFFFF),
         fontSize = 12.sp,
-        fontWeight = if (isHovered) FontWeight.Bold else FontWeight.Medium,
+        letterSpacing = 0.2.sp,
+        fontWeight = if (isHovered) FontWeight.SemiBold else FontWeight.Medium,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.weight(1f),
@@ -766,15 +779,15 @@ private fun CompactTabAppItem(
       // Dwell Auto-Launch Ring Indicator
       if (isHovered && dwellProgress > 0.02f) {
         Box(
-          modifier = Modifier.size(20.dp),
+          modifier = Modifier.size(18.dp),
           contentAlignment = Alignment.Center,
         ) {
-          Canvas(modifier = Modifier.size(16.dp)) {
-            // Background track
+          Canvas(modifier = Modifier.size(15.dp)) {
+            // Track
             drawCircle(
-              color = Color(0x40FFFFFF),
+              color = Color(0x35FFFFFF),
               radius = size.width / 2f,
-              style = Stroke(width = 1.6.dp.toPx()),
+              style = Stroke(width = 1.4.dp.toPx()),
             )
 
             // Progress Arc
