@@ -219,6 +219,9 @@ fun RotaryClockDial(
           innerR = r1In,
           outerR = r1Out,
           liveHour24 = liveHour24,
+          liveMinute = liveMinute,
+          liveSecond = liveSecond,
+          millisFraction = millisFraction,
           use24Hour = use24Hour,
         )
       }
@@ -690,17 +693,21 @@ private fun makeDiscPath(r: Float, cy: Float): Path {
 }
 
 /**
- * 1. Inner Ring: Hours Track (hh)
+ * 1. Inner Ring: Hours Track (hh) with smooth rotation
  */
 private fun DrawScope.drawGlassHourTrack(
   cy: Float,
   innerR: Float,
   outerR: Float,
   liveHour24: Int,
+  liveMinute: Int,
+  liveSecond: Int,
+  millisFraction: Float,
   use24Hour: Boolean,
 ) {
   val textRadius = (innerR + outerR) * 0.50f
   val stepDegrees = if (use24Hour) 15f else 26f
+  val fractionalShift = (liveMinute + (liveSecond + millisFraction) / 60f) / 60f
 
   val textPaint =
     Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -709,42 +716,89 @@ private fun DrawScope.drawGlassHourTrack(
       typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
 
-  // Intermediate micro-ticks spanning -84° to 84° with smooth distance fade
-  for (deg in -84..84 step 4) {
-    val rad = deg * (PI / 180.0)
+  val baseHour = if (use24Hour) liveHour24 else (liveHour24 % 12)
+  val deltaRange = if (use24Hour) -7..7 else -5..5
+
+  // 1. Rotating Hour Graduation Ticks (Synchronized with hour rotation)
+  for (delta in deltaRange) {
+    for (fracStep in 0..3) {
+      val frac = fracStep * 0.25f
+      val angleDeg = -(delta + frac - fractionalShift) * stepDegrees
+      if (angleDeg < -84f || angleDeg > 84f) continue
+
+      val absDeg = abs(angleDeg)
+      if (absDeg < 8f) continue // Directly behind active hour in capsule
+
+      val isHourMark = (fracStep == 0)
+      val isHalfHour = (fracStep == 2)
+
+      val tickLen = when {
+        isHourMark -> 5.2.dp.toPx()
+        isHalfHour -> 3.2.dp.toPx()
+        else -> 2.0.dp.toPx()
+      }
+      val tickStroke = when {
+        isHourMark -> 1.1.dp.toPx()
+        isHalfHour -> 0.8.dp.toPx()
+        else -> 0.5.dp.toPx()
+      }
+      val baseAlpha = when {
+        isHourMark -> 0.55f
+        isHalfHour -> 0.30f
+        else -> 0.16f
+      }
+
+      val centerFade = ((absDeg - 8f) / 6f).coerceIn(0f, 1f)
+      val edgeFade = ((85f - absDeg) / 85f).coerceIn(0f, 1f).pow(1.2f)
+      val alpha = baseAlpha * centerFade * edgeFade
+      if (alpha <= 0.01f) continue
+
+      val rad = angleDeg * (PI / 180.0)
+      val cosA = cos(rad).toFloat()
+      val sinA = sin(rad).toFloat()
+      val startR = outerR - tickLen
+
+      drawLine(
+        color = Color.White.copy(alpha = alpha),
+        start = Offset(startR * cosA, cy + startR * sinA),
+        end = Offset(outerR * cosA, cy + outerR * sinA),
+        strokeWidth = tickStroke,
+        cap = StrokeCap.Round,
+      )
+    }
+  }
+
+  // 2. Rotating Bezel Serrations along Inner Ring Outer Rim (r1Out)
+  for (deltaBezel in -32..32) {
+    val bezelAngle = -(deltaBezel * 0.125f - fractionalShift) * stepDegrees
+    if (bezelAngle < -84f || bezelAngle > 84f) continue
+    val absAngle = abs(bezelAngle)
+    val edgeFade = ((85f - absAngle) / 85f).coerceIn(0f, 1f).pow(1.2f)
+    val alpha = 0.18f * edgeFade
+    if (alpha <= 0.01f) continue
+
+    val rad = bezelAngle * (PI / 180.0)
     val cosA = cos(rad).toFloat()
     val sinA = sin(rad).toFloat()
-    val isMajor = deg % 12 == 0
-    val tickLen = if (isMajor) 5.dp.toPx() else 2.5.dp.toPx()
-    val startR = outerR - tickLen
-    val absDeg = abs(deg)
-    val centerFade = ((absDeg - 8f) / 6f).coerceIn(0f, 1f)
-    val edgeFade = ((85f - absDeg) / 85f).coerceIn(0f, 1f).pow(1.2f)
-    val alpha = (if (isMajor) 0.45f else 0.18f) * centerFade * edgeFade
-    if (alpha <= 0.01f) continue
+    val startR = outerR - 1.2.dp.toPx()
+
     drawLine(
       color = Color.White.copy(alpha = alpha),
       start = Offset(startR * cosA, cy + startR * sinA),
       end = Offset(outerR * cosA, cy + outerR * sinA),
-      strokeWidth = if (isMajor) 1.0.dp.toPx() else 0.6.dp.toPx(),
-      cap = StrokeCap.Round,
+      strokeWidth = 0.6.dp.toPx(),
     )
   }
 
-  // Render visible hours across the ring with smooth distance fade
-  val baseHour = if (use24Hour) liveHour24 else (liveHour24 % 12)
-  val deltaRange = if (use24Hour) -7..7 else -5..5
+  // 3. Rotating Whole Hour Numerals
   for (delta in deltaRange) {
-    val angleDeg = -delta * stepDegrees
+    val angleDeg = -(delta - fractionalShift) * stepDegrees
     if (angleDeg < -84f || angleDeg > 84f) continue
 
     val absAngle = abs(angleDeg)
     if (absAngle < 8f) continue // Directly behind active hour in capsule
 
-    // Smooth fade in as it exits the active line (8° -> 14°)
     val centerFade = ((absAngle - 8f) / 6f).coerceIn(0f, 1f)
-
-    // Smooth fade out as it travels away toward the edges (14° -> 84°)
     val edgeFade = ((84f - absAngle) / (84f - 14f)).coerceIn(0f, 1f).pow(1.25f)
     val alpha = 0.85f * centerFade * edgeFade
     if (alpha <= 0.01f) continue
@@ -779,7 +833,7 @@ private fun DrawScope.drawGlassHourTrack(
 }
 
 /**
- * 2. Middle Ring: Minutes Track (mm)
+ * 2. Middle Ring: Minutes Track (mm) with smooth rotation
  */
 private fun DrawScope.drawGlassMinutesTrack(
   cy: Float,
@@ -800,29 +854,79 @@ private fun DrawScope.drawGlassMinutesTrack(
       typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
 
-  // Minute ticks spanning -84° to 84° with smooth distance fade
-  for (deg in -84..84 step 3) {
-    val rad = deg * (PI / 180.0)
+  // 1. Rotating Minute Graduation Ticks (Synchronized with minute rotation)
+  for (delta in -16..16) {
+    for (fracStep in 0..1) {
+      val frac = fracStep * 0.5f
+      val angleDeg = -(delta + frac - fractionalShift) * stepDegrees
+      if (angleDeg < -84f || angleDeg > 84f) continue
+
+      val absDeg = abs(angleDeg)
+      if (absDeg < 6.8f) continue // Directly behind active minute in capsule
+
+      val minuteVal = ((liveMinute + delta) % 60 + 60) % 60
+      val isMinuteMark = (fracStep == 0)
+      val isMultipleOf5 = isMinuteMark && (minuteVal % 5 == 0)
+
+      val tickLen = when {
+        isMultipleOf5 -> 4.8.dp.toPx()
+        isMinuteMark -> 3.2.dp.toPx()
+        else -> 1.8.dp.toPx()
+      }
+      val tickStroke = when {
+        isMultipleOf5 -> 1.1.dp.toPx()
+        isMinuteMark -> 0.75.dp.toPx()
+        else -> 0.5.dp.toPx()
+      }
+      val baseAlpha = when {
+        isMultipleOf5 -> 0.55f
+        isMinuteMark -> 0.28f
+        else -> 0.14f
+      }
+
+      val centerFade = ((absDeg - 6.8f) / 3.2f).coerceIn(0f, 1f)
+      val edgeFade = ((85f - absDeg) / 85f).coerceIn(0f, 1f).pow(1.2f)
+      val alpha = baseAlpha * centerFade * edgeFade
+      if (alpha <= 0.01f) continue
+
+      val rad = angleDeg * (PI / 180.0)
+      val cosA = cos(rad).toFloat()
+      val sinA = sin(rad).toFloat()
+      val startR = outerR - tickLen
+
+      drawLine(
+        color = Color.White.copy(alpha = alpha),
+        start = Offset(startR * cosA, cy + startR * sinA),
+        end = Offset(outerR * cosA, cy + outerR * sinA),
+        strokeWidth = tickStroke,
+        cap = StrokeCap.Round,
+      )
+    }
+  }
+
+  // 2. Rotating Bezel Serrations along Middle Ring Outer Rim (r2Out)
+  for (deltaBezel in -42..42) {
+    val bezelAngle = -(deltaBezel * 0.333f - fractionalShift) * stepDegrees
+    if (bezelAngle < -84f || bezelAngle > 84f) continue
+    val absAngle = abs(bezelAngle)
+    val edgeFade = ((85f - absAngle) / 85f).coerceIn(0f, 1f).pow(1.2f)
+    val alpha = 0.16f * edgeFade
+    if (alpha <= 0.01f) continue
+
+    val rad = bezelAngle * (PI / 180.0)
     val cosA = cos(rad).toFloat()
     val sinA = sin(rad).toFloat()
-    val isMajor = deg % 6 == 0
-    val tickLen = if (isMajor) 4.5.dp.toPx() else 2.2.dp.toPx()
-    val startR = outerR - tickLen
-    val absDeg = abs(deg)
-    val centerFade = ((absDeg - 7f) / 7f).coerceIn(0f, 1f)
-    val edgeFade = ((85f - absDeg) / 85f).coerceIn(0f, 1f).pow(1.2f)
-    val alpha = (if (isMajor) 0.45f else 0.18f) * centerFade * edgeFade
-    if (alpha <= 0.01f) continue
+    val startR = outerR - 1.2.dp.toPx()
+
     drawLine(
       color = Color.White.copy(alpha = alpha),
       start = Offset(startR * cosA, cy + startR * sinA),
       end = Offset(outerR * cosA, cy + outerR * sinA),
-      strokeWidth = if (isMajor) 1.0.dp.toPx() else 0.6.dp.toPx(),
-      cap = StrokeCap.Round,
+      strokeWidth = 0.6.dp.toPx(),
     )
   }
 
-  // Render whole numbers in the minutes ring across visible arc, fading away from center
+  // 3. Rotating Whole Minute Numerals
   for (delta in -14..14) {
     val minuteVal = ((liveMinute + delta) % 60 + 60) % 60
     val angleDeg = -(delta - fractionalShift) * stepDegrees
@@ -831,10 +935,7 @@ private fun DrawScope.drawGlassMinutesTrack(
     val absAngle = abs(angleDeg)
     if (absAngle < 6.8f) continue // Directly behind active minute in capsule
 
-    // Smooth fade in as it exits the capsule (6.8° -> 10.0°)
     val centerFade = ((absAngle - 6.8f) / 3.2f).coerceIn(0f, 1f)
-
-    // Smooth fade out as it travels away toward the edges (10° -> 84°)
     val edgeFade = ((84f - absAngle) / (84f - 10f)).coerceIn(0f, 1f).pow(1.25f)
 
     val isMultipleOf5 = minuteVal % 5 == 0
@@ -863,7 +964,7 @@ private fun DrawScope.drawGlassMinutesTrack(
 }
 
 /**
- * 3. Outer Ring: Seconds Track (ss) with 120Hz smooth progression
+ * 3. Outer Ring: Seconds Track (ss) with 120Hz smooth continuous rotation
  */
 private fun DrawScope.drawGlassSecondsTrack(
   cy: Float,
@@ -883,29 +984,79 @@ private fun DrawScope.drawGlassSecondsTrack(
       typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
 
-  // Seconds ticks every second spanning -84° to 84° with smooth distance fade
-  for (deg in -84..84 step 3) {
-    val rad = deg * (PI / 180.0)
+  // 1. Rotating Seconds Graduation Ticks (Synchronized with seconds rotation)
+  for (delta in -16..16) {
+    for (fracStep in 0..1) {
+      val frac = fracStep * 0.5f
+      val angleDeg = -(delta + frac - fractionalShift) * stepDegrees
+      if (angleDeg < -84f || angleDeg > 84f) continue
+
+      val absDeg = abs(angleDeg)
+      if (absDeg < 5.2f) continue // Directly behind active second in capsule
+
+      val secondVal = ((liveSecond + delta) % 60 + 60) % 60
+      val isSecondMark = (fracStep == 0)
+      val isMultipleOf5 = isSecondMark && (secondVal % 5 == 0)
+
+      val tickLen = when {
+        isMultipleOf5 -> 5.0.dp.toPx()
+        isSecondMark -> 3.2.dp.toPx()
+        else -> 1.8.dp.toPx()
+      }
+      val tickStroke = when {
+        isMultipleOf5 -> 1.2.dp.toPx()
+        isSecondMark -> 0.75.dp.toPx()
+        else -> 0.5.dp.toPx()
+      }
+      val baseAlpha = when {
+        isMultipleOf5 -> 0.60f
+        isSecondMark -> 0.28f
+        else -> 0.15f
+      }
+
+      val centerFade = ((absDeg - 5.2f) / 3.3f).coerceIn(0f, 1f)
+      val edgeFade = ((85f - absDeg) / 85f).coerceIn(0f, 1f).pow(1.2f)
+      val alpha = baseAlpha * centerFade * edgeFade
+      if (alpha <= 0.01f) continue
+
+      val rad = angleDeg * (PI / 180.0)
+      val cosA = cos(rad).toFloat()
+      val sinA = sin(rad).toFloat()
+      val startR = outerR - tickLen
+
+      drawLine(
+        color = Color.White.copy(alpha = alpha),
+        start = Offset(startR * cosA, cy + startR * sinA),
+        end = Offset(outerR * cosA, cy + outerR * sinA),
+        strokeWidth = tickStroke,
+        cap = StrokeCap.Round,
+      )
+    }
+  }
+
+  // 2. Rotating Bezel Serrations along Outer Ring Outer Rim (r3Out)
+  for (deltaBezel in -54..54) {
+    val bezelAngle = -(deltaBezel * 0.25f - fractionalShift) * stepDegrees
+    if (bezelAngle < -84f || bezelAngle > 84f) continue
+    val absAngle = abs(bezelAngle)
+    val edgeFade = ((85f - absAngle) / 85f).coerceIn(0f, 1f).pow(1.2f)
+    val alpha = 0.18f * edgeFade
+    if (alpha <= 0.01f) continue
+
+    val rad = bezelAngle * (PI / 180.0)
     val cosA = cos(rad).toFloat()
     val sinA = sin(rad).toFloat()
-    val isMajor = deg % 6 == 0
-    val tickLen = if (isMajor) 4.5.dp.toPx() else 2.2.dp.toPx()
-    val startR = outerR - tickLen
-    val absDeg = abs(deg)
-    val centerFade = ((absDeg - 5.2f) / 3.3f).coerceIn(0f, 1f)
-    val edgeFade = ((85f - absDeg) / 85f).coerceIn(0f, 1f).pow(1.2f)
-    val alpha = (if (isMajor) 0.50f else 0.20f) * centerFade * edgeFade
-    if (alpha <= 0.01f) continue
+    val startR = outerR - 1.2.dp.toPx()
+
     drawLine(
       color = Color.White.copy(alpha = alpha),
       start = Offset(startR * cosA, cy + startR * sinA),
       end = Offset(outerR * cosA, cy + outerR * sinA),
-      strokeWidth = if (isMajor) 1.0.dp.toPx() else 0.6.dp.toPx(),
-      cap = StrokeCap.Round,
+      strokeWidth = 0.6.dp.toPx(),
     )
   }
 
-  // Render whole numbers in the seconds ring across visible arc, fading away from center
+  // 3. Rotating Whole Second Numerals
   for (delta in -14..14) {
     val secondVal = ((liveSecond + delta) % 60 + 60) % 60
     val angleDeg = -(delta - fractionalShift) * stepDegrees
@@ -914,10 +1065,7 @@ private fun DrawScope.drawGlassSecondsTrack(
     val absAngle = abs(angleDeg)
     if (absAngle < 5.2f) continue // Directly behind active second in capsule
 
-    // Smooth fade in as it exits the capsule (5.2° -> 8.5°)
     val centerFade = ((absAngle - 5.2f) / 3.3f).coerceIn(0f, 1f)
-
-    // Smooth fade out as it travels away toward the edges (8.5° -> 84°)
     val edgeFade = ((84f - absAngle) / (84f - 8.5f)).coerceIn(0f, 1f).pow(1.25f)
 
     val isMultipleOf5 = secondVal % 5 == 0
