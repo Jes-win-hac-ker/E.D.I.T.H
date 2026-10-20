@@ -188,45 +188,7 @@ fun RotaryClockDial(
           ),
       )
 
-      // 2. Rotary Chronometer Tracks inside the 3 Rings (Clipped cleanly to each annular band)
-      // 2a. Outer Ring: Seconds Track (ss)
-      clipPath(outerRingPath) {
-        drawGlassSecondsTrack(
-          cy = cy,
-          innerR = r3In,
-          outerR = r3Out,
-          liveSecond = liveSecond,
-          millisFraction = millisFraction,
-        )
-      }
-
-      // 2b. Middle Ring: Minutes Track (mm)
-      clipPath(middleRingPath) {
-        drawGlassMinutesTrack(
-          cy = cy,
-          innerR = r2In,
-          outerR = r2Out,
-          liveMinute = liveMinute,
-          liveSecond = liveSecond,
-          millisFraction = millisFraction,
-        )
-      }
-
-      // 2c. Inner Ring: Hours Track (hh)
-      clipPath(innerRingPath) {
-        drawGlassHourTrack(
-          cy = cy,
-          innerR = r1In,
-          outerR = r1Out,
-          liveHour24 = liveHour24,
-          liveMinute = liveMinute,
-          liveSecond = liveSecond,
-          millisFraction = millisFraction,
-          use24Hour = use24Hour,
-        )
-      }
-
-      // 3. Multi-stop Specular White Glass Rim Strokes for all Rings & Hub
+      // 2. Multi-stop Specular White Glass Rim Strokes for all Rings & Hub
       // Outer Ring outer rim (r3Out)
       drawArc(
         brush =
@@ -346,7 +308,7 @@ fun RotaryClockDial(
         style = Stroke(width = 1.0.dp.toPx()),
       )
 
-      // 4. Diagonal Specular Glass Light Sheen Across Crystal Face
+      // 3. Diagonal Specular Glass Light Sheen Across Crystal Face
       clipPath(fullDialArc) {
         drawRect(
           brush =
@@ -366,9 +328,9 @@ fun RotaryClockDial(
         )
       }
 
-      // 5. Liquid Glass Time Capsule / Optical Loupe framing [ HH : MM : SS ]
-      val barHalfH = 19.5.dp.toPx()
-      val barRight = r3Out + 2.dp.toPx() // perfectly aligned with outer ring rim
+      // 4. Liquid Glass Time Capsule / Optical Loupe Chamber Backdrop & Backlight
+      val barHalfH = 14.5.dp.toPx()
+      val barRight = r3Out + 2.dp.toPx() // aligned with outer ring rim
       val capsulePath =
         Path().apply {
           addRoundRect(
@@ -388,7 +350,7 @@ fun RotaryClockDial(
           )
         }
 
-      // Frosted liquid monochrome glass backdrop with subtle occlusion
+      // Frosted liquid monochrome glass backdrop chamber fill
       drawPath(
         path = capsulePath,
         brush =
@@ -405,6 +367,85 @@ fun RotaryClockDial(
           ),
       )
 
+      // Time Presentation Coordinates in [hh : mm : ss] across the 3 rings
+      val hourCenterX = (r1In + r1Out) * 0.5f // ~89.5dp
+      val minCenterX = (r2In + r2Out) * 0.5f // ~129.5dp
+      val secCenterX = (r3In + r3Out) * 0.5f // ~169.5dp
+      val colon1X = (hourCenterX + minCenterX) * 0.5f // ~109.5dp
+      val colon2X = (minCenterX + secCenterX) * 0.5f // ~149.5dp
+      val badgeCenterX = 36.dp.toPx() // centered in Inner Hub
+
+      // Optical white radiance backlight behind active digits
+      drawCircle(
+        brush =
+          Brush.radialGradient(
+            colors = listOf(Color.White.copy(alpha = 0.16f), Color.Transparent),
+            center = Offset(hourCenterX, cy),
+            radius = 13.dp.toPx(),
+          ),
+        radius = 13.dp.toPx(),
+        center = Offset(hourCenterX, cy),
+      )
+      drawCircle(
+        brush =
+          Brush.radialGradient(
+            colors = listOf(Color.White.copy(alpha = 0.16f), Color.Transparent),
+            center = Offset(minCenterX, cy),
+            radius = 13.dp.toPx(),
+          ),
+        radius = 13.dp.toPx(),
+        center = Offset(minCenterX, cy),
+      )
+      drawCircle(
+        brush =
+          Brush.radialGradient(
+            colors = listOf(Color.White.copy(alpha = 0.24f), Color.Transparent),
+            center = Offset(secCenterX, cy),
+            radius = 13.dp.toPx(),
+          ),
+        radius = 13.dp.toPx(),
+        center = Offset(secCenterX, cy),
+      )
+
+      // 5. Rotary Chronometer Tracks inside the 3 Rings (Continuous Glide with Loupe Magnification)
+      // 5a. Outer Ring: Seconds Track (ss)
+      clipPath(outerRingPath) {
+        drawGlassSecondsTrack(
+          cy = cy,
+          innerR = r3In,
+          outerR = r3Out,
+          liveSecond = liveSecond,
+          millisFraction = millisFraction,
+        )
+      }
+
+      // 5b. Middle Ring: Minutes Track (mm)
+      clipPath(middleRingPath) {
+        drawGlassMinutesTrack(
+          cy = cy,
+          innerR = r2In,
+          outerR = r2Out,
+          liveMinute = liveMinute,
+          liveSecond = liveSecond,
+          millisFraction = millisFraction,
+        )
+      }
+
+      // 5c. Inner Ring: Hours Track (hh)
+      clipPath(innerRingPath) {
+        drawGlassHourTrack(
+          cy = cy,
+          innerR = r1In,
+          outerR = r1Out,
+          liveHour24 = liveHour24,
+          liveMinute = liveMinute,
+          liveSecond = liveSecond,
+          millisFraction = millisFraction,
+          use24Hour = use24Hour,
+        )
+      }
+
+      // 6. Loupe Specular Framing, Punctuation & Hub Mode Badge (Foreground Overlay)
       // Specular white border around capsule
       drawPath(
         path = capsulePath,
@@ -458,14 +499,6 @@ fun RotaryClockDial(
           ),
       )
 
-      // 6. Time Presentation Coordinates in [hh : mm : ss] across the 3 rings
-      val hourCenterX = (r1In + r1Out) * 0.5f // ~89.5dp
-      val minCenterX = (r2In + r2Out) * 0.5f // ~129.5dp
-      val secCenterX = (r3In + r3Out) * 0.5f // ~169.5dp
-      val colon1X = (hourCenterX + minCenterX) * 0.5f // ~109.5dp
-      val colon2X = (minCenterX + secCenterX) * 0.5f // ~149.5dp
-      val badgeCenterX = 36.dp.toPx() // neatly centered in Inner Hub
-
       // Vertical glass hairline dividers between cells
       val divTop = cy - barHalfH * 0.60f
       val divBottom = cy + barHalfH * 0.60f
@@ -492,69 +525,6 @@ fun RotaryClockDial(
         strokeWidth = 0.8.dp.toPx(),
       )
 
-      // Active hour calculation
-      val activeRawHour = liveHour24
-      val wrapped24 = ((activeRawHour % 24) + 24) % 24
-      val activeDisplayHour =
-        if (use24Hour) {
-          if (wrapped24 == 0) 24 else wrapped24
-        } else {
-          val h12 = wrapped24 % 12
-          if (h12 == 0) 12 else h12
-        }
-      val hourStr = if (use24Hour) String.format(Locale.US, "%02d", activeDisplayHour) else activeDisplayHour.toString()
-      val minStr = String.format(Locale.US, "%02d", liveMinute)
-      val secStr = String.format(Locale.US, "%02d", liveSecond)
-
-      // Optical white radiance behind active digits
-      drawCircle(
-        brush =
-          Brush.radialGradient(
-            colors = listOf(Color.White.copy(alpha = 0.16f), Color.Transparent),
-            center = Offset(hourCenterX, cy),
-            radius = 16.dp.toPx(),
-          ),
-        radius = 16.dp.toPx(),
-        center = Offset(hourCenterX, cy),
-      )
-      drawCircle(
-        brush =
-          Brush.radialGradient(
-            colors = listOf(Color.White.copy(alpha = 0.16f), Color.Transparent),
-            center = Offset(minCenterX, cy),
-            radius = 16.dp.toPx(),
-          ),
-        radius = 16.dp.toPx(),
-        center = Offset(minCenterX, cy),
-      )
-      drawCircle(
-        brush =
-          Brush.radialGradient(
-            colors = listOf(Color.White.copy(alpha = 0.24f), Color.Transparent),
-            center = Offset(secCenterX, cy),
-            radius = 16.dp.toPx(),
-          ),
-        radius = 16.dp.toPx(),
-        center = Offset(secCenterX, cy),
-      )
-
-      // Typography for time presentation (pure white monochrome)
-      val numberPaint =
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-          color = android.graphics.Color.WHITE
-          textSize = 15.dp.toPx()
-          textAlign = Paint.Align.CENTER
-          typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-        }
-
-      val secPaint =
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-          color = android.graphics.Color.WHITE
-          textSize = 15.dp.toPx()
-          textAlign = Paint.Align.CENTER
-          typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-        }
-
       val colonPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
           color = android.graphics.Color.WHITE
@@ -572,26 +542,14 @@ fun RotaryClockDial(
         }
 
       drawContext.canvas.nativeCanvas.apply {
-        val nFm = numberPaint.fontMetrics
-        val nBaseline = cy - (nFm.ascent + nFm.descent) / 2f
-
         val cFm = colonPaint.fontMetrics
         val cBaseline = cy - (cFm.ascent + cFm.descent) / 2f - 0.5.dp.toPx()
 
-        // Draw Hour
-        drawText(hourStr, hourCenterX, nBaseline, numberPaint)
-
-        // Draw Colon 1
+        // Stationary Colon 1 between Hours and Minutes
         drawText(":", colon1X, cBaseline, colonPaint)
 
-        // Draw Minute
-        drawText(minStr, minCenterX, nBaseline, numberPaint)
-
-        // Draw Colon 2
+        // Stationary Colon 2 between Minutes and Seconds
         drawText(":", colon2X, cBaseline, colonPaint)
-
-        // Draw Second
-        drawText(secStr, secCenterX, nBaseline, secPaint)
 
         // Draw Mode Tag (AM / PM / 24H) Badge in Hub
         val modeTag =
@@ -693,7 +651,7 @@ private fun makeDiscPath(r: Float, cy: Float): Path {
 }
 
 /**
- * 1. Inner Ring: Hours Track (hh) with smooth rotation
+ * 1. Inner Ring: Hours Track (hh) with smooth rotation and continuous optical loupe pass-through
  */
 private fun DrawScope.drawGlassHourTrack(
   cy: Float,
@@ -713,13 +671,13 @@ private fun DrawScope.drawGlassHourTrack(
     Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = android.graphics.Color.WHITE
       textAlign = Paint.Align.CENTER
-      typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+      typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
 
   val baseHour = if (use24Hour) liveHour24 else (liveHour24 % 12)
   val deltaRange = if (use24Hour) -7..7 else -5..5
 
-  // 1. Rotating Hour Graduation Ticks (Synchronized with hour rotation)
+  // 1. Rotating Hour Graduation Ticks (Continuous rotation across full arc)
   for (delta in deltaRange) {
     for (fracStep in 0..3) {
       val frac = fracStep * 0.25f
@@ -727,8 +685,6 @@ private fun DrawScope.drawGlassHourTrack(
       if (angleDeg < -84f || angleDeg > 84f) continue
 
       val absDeg = abs(angleDeg)
-      if (absDeg < 8f) continue // Directly behind active hour in capsule
-
       val isHourMark = (fracStep == 0)
       val isHalfHour = (fracStep == 2)
 
@@ -748,9 +704,8 @@ private fun DrawScope.drawGlassHourTrack(
         else -> 0.16f
       }
 
-      val centerFade = ((absDeg - 8f) / 6f).coerceIn(0f, 1f)
       val edgeFade = ((85f - absDeg) / 85f).coerceIn(0f, 1f).pow(1.2f)
-      val alpha = baseAlpha * centerFade * edgeFade
+      val alpha = baseAlpha * edgeFade
       if (alpha <= 0.01f) continue
 
       val rad = angleDeg * (PI / 180.0)
@@ -790,18 +745,15 @@ private fun DrawScope.drawGlassHourTrack(
     )
   }
 
-  // 3. Rotating Whole Hour Numerals
+  // 3. Rotating Whole Hour Numerals with Dynamic Optical Loupe Magnification
   for (delta in deltaRange) {
     val angleDeg = -(delta - fractionalShift) * stepDegrees
     if (angleDeg < -84f || angleDeg > 84f) continue
 
     val absAngle = abs(angleDeg)
-    if (absAngle < 8f) continue // Directly behind active hour in capsule
-
-    val centerFade = ((absAngle - 8f) / 6f).coerceIn(0f, 1f)
     val edgeFade = ((84f - absAngle) / (84f - 14f)).coerceIn(0f, 1f).pow(1.25f)
-    val alpha = 0.85f * centerFade * edgeFade
-    if (alpha <= 0.01f) continue
+    val baseAlpha = 0.85f * edgeFade
+    val baseTextSize = 11.5.dp.toPx()
 
     val rawHour = baseHour + delta
     val wrapped24 = ((rawHour % 24) + 24) % 24
@@ -813,27 +765,46 @@ private fun DrawScope.drawGlassHourTrack(
         if (h12 == 0) 12 else h12
       }
 
+    // Dynamic Optical Loupe Magnification as hour glides through center capsule
+    val loupeSpan = if (use24Hour) 10.0f else 14.0f
+    val lensFactor = if (absAngle < loupeSpan) {
+      val t = 1f - (absAngle / loupeSpan)
+      t * t * (3f - 2f * t)
+    } else 0f
+
+    val targetSize = 14.5.dp.toPx()
+    val currentSize = baseTextSize + (targetSize - baseTextSize) * lensFactor
+    val currentAlpha = baseAlpha + (1.0f - baseAlpha) * lensFactor
+    if (currentAlpha <= 0.01f) continue
+
     val rad = angleDeg * (PI / 180.0)
     val tx = textRadius * cos(rad).toFloat()
     val ty = cy + textRadius * sin(rad).toFloat()
 
-    textPaint.textSize = 11.5.dp.toPx()
-    textPaint.alpha = (alpha * 255).roundToInt().coerceIn(0, 255)
+    // Smoothly levels out to 0° horizontally within the optical loupe
+    val currentRotation = angleDeg * 0.70f * (1f - lensFactor * 0.85f)
+
+    textPaint.textSize = currentSize
+    textPaint.alpha = (currentAlpha * 255).roundToInt().coerceIn(0, 255)
+    textPaint.color = android.graphics.Color.WHITE
+    textPaint.isFakeBoldText = (lensFactor > 0.35f)
+
+    val textStr = if (use24Hour) String.format(Locale.US, "%02d", displayHour) else displayHour.toString()
 
     drawContext.canvas.nativeCanvas.apply {
       save()
       translate(tx, ty)
-      rotate(angleDeg * 0.70f)
+      rotate(currentRotation)
       val fm = textPaint.fontMetrics
       val baselineY = -(fm.ascent + fm.descent) / 2f
-      drawText(displayHour.toString(), 0f, baselineY, textPaint)
+      drawText(textStr, 0f, baselineY, textPaint)
       restore()
     }
   }
 }
 
 /**
- * 2. Middle Ring: Minutes Track (mm) with smooth rotation
+ * 2. Middle Ring: Minutes Track (mm) with smooth rotation and continuous optical loupe pass-through
  */
 private fun DrawScope.drawGlassMinutesTrack(
   cy: Float,
@@ -851,10 +822,10 @@ private fun DrawScope.drawGlassMinutesTrack(
     Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = android.graphics.Color.WHITE
       textAlign = Paint.Align.CENTER
-      typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+      typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
 
-  // 1. Rotating Minute Graduation Ticks (Synchronized with minute rotation)
+  // 1. Rotating Minute Graduation Ticks (Continuous rotation across full arc)
   for (delta in -16..16) {
     for (fracStep in 0..1) {
       val frac = fracStep * 0.5f
@@ -862,8 +833,6 @@ private fun DrawScope.drawGlassMinutesTrack(
       if (angleDeg < -84f || angleDeg > 84f) continue
 
       val absDeg = abs(angleDeg)
-      if (absDeg < 6.8f) continue // Directly behind active minute in capsule
-
       val minuteVal = ((liveMinute + delta) % 60 + 60) % 60
       val isMinuteMark = (fracStep == 0)
       val isMultipleOf5 = isMinuteMark && (minuteVal % 5 == 0)
@@ -884,9 +853,8 @@ private fun DrawScope.drawGlassMinutesTrack(
         else -> 0.14f
       }
 
-      val centerFade = ((absDeg - 6.8f) / 3.2f).coerceIn(0f, 1f)
       val edgeFade = ((85f - absDeg) / 85f).coerceIn(0f, 1f).pow(1.2f)
-      val alpha = baseAlpha * centerFade * edgeFade
+      val alpha = baseAlpha * edgeFade
       if (alpha <= 0.01f) continue
 
       val rad = angleDeg * (PI / 180.0)
@@ -926,35 +894,48 @@ private fun DrawScope.drawGlassMinutesTrack(
     )
   }
 
-  // 3. Rotating Whole Minute Numerals
+  // 3. Rotating Whole Minute Numerals with Dynamic Optical Loupe Magnification
   for (delta in -14..14) {
     val minuteVal = ((liveMinute + delta) % 60 + 60) % 60
     val angleDeg = -(delta - fractionalShift) * stepDegrees
     if (angleDeg < -84f || angleDeg > 84f) continue
 
     val absAngle = abs(angleDeg)
-    if (absAngle < 6.8f) continue // Directly behind active minute in capsule
-
-    val centerFade = ((absAngle - 6.8f) / 3.2f).coerceIn(0f, 1f)
     val edgeFade = ((84f - absAngle) / (84f - 10f)).coerceIn(0f, 1f).pow(1.25f)
 
     val isMultipleOf5 = minuteVal % 5 == 0
     val baseAlpha = if (isMultipleOf5) 0.90f else 0.45f
-    val alpha = baseAlpha * centerFade * edgeFade
-    if (alpha <= 0.01f) continue
+    val baseTextSize = if (isMultipleOf5) 9.0.dp.toPx() else 7.8.dp.toPx()
+    val baseColor = if (isMultipleOf5) android.graphics.Color.WHITE else 0xFFCBD5E1.toInt()
+
+    // Dynamic Optical Loupe Magnification as minute glides through center capsule
+    val loupeSpan = 4.0f
+    val lensFactor = if (absAngle < loupeSpan) {
+      val t = 1f - (absAngle / loupeSpan)
+      t * t * (3f - 2f * t)
+    } else 0f
+
+    val targetSize = 14.2.dp.toPx()
+    val currentSize = baseTextSize + (targetSize - baseTextSize) * lensFactor
+    val currentAlpha = (baseAlpha * edgeFade) + (1.0f - (baseAlpha * edgeFade)) * lensFactor
+    if (currentAlpha <= 0.01f) continue
 
     val rad = angleDeg * (PI / 180.0)
     val tx = textRadius * cos(rad).toFloat()
     val ty = cy + textRadius * sin(rad).toFloat()
 
-    textPaint.textSize = if (isMultipleOf5) 9.5.dp.toPx() else 8.dp.toPx()
-    textPaint.color = if (isMultipleOf5) android.graphics.Color.WHITE else 0xFFCBD5E1.toInt()
-    textPaint.alpha = (alpha * 255).roundToInt().coerceIn(0, 255)
+    // Smoothly levels out to 0° horizontally within the optical loupe
+    val currentRotation = angleDeg * 0.70f * (1f - lensFactor * 0.85f)
+
+    textPaint.textSize = currentSize
+    textPaint.alpha = (currentAlpha * 255).roundToInt().coerceIn(0, 255)
+    textPaint.color = if (lensFactor > 0.35f) android.graphics.Color.WHITE else baseColor
+    textPaint.isFakeBoldText = (lensFactor > 0.40f)
 
     drawContext.canvas.nativeCanvas.apply {
       save()
       translate(tx, ty)
-      rotate(angleDeg * 0.70f)
+      rotate(currentRotation)
       val fm = textPaint.fontMetrics
       val baselineY = -(fm.ascent + fm.descent) / 2f
       drawText(String.format(Locale.US, "%02d", minuteVal), 0f, baselineY, textPaint)
@@ -964,7 +945,7 @@ private fun DrawScope.drawGlassMinutesTrack(
 }
 
 /**
- * 3. Outer Ring: Seconds Track (ss) with 120Hz smooth continuous rotation
+ * 3. Outer Ring: Seconds Track (ss) with 120Hz smooth continuous rotation and optical loupe pass-through
  */
 private fun DrawScope.drawGlassSecondsTrack(
   cy: Float,
@@ -981,10 +962,10 @@ private fun DrawScope.drawGlassSecondsTrack(
     Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = android.graphics.Color.WHITE
       textAlign = Paint.Align.CENTER
-      typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+      typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
 
-  // 1. Rotating Seconds Graduation Ticks (Synchronized with seconds rotation)
+  // 1. Rotating Seconds Graduation Ticks (Continuous rotation across full arc)
   for (delta in -16..16) {
     for (fracStep in 0..1) {
       val frac = fracStep * 0.5f
@@ -992,8 +973,6 @@ private fun DrawScope.drawGlassSecondsTrack(
       if (angleDeg < -84f || angleDeg > 84f) continue
 
       val absDeg = abs(angleDeg)
-      if (absDeg < 5.2f) continue // Directly behind active second in capsule
-
       val secondVal = ((liveSecond + delta) % 60 + 60) % 60
       val isSecondMark = (fracStep == 0)
       val isMultipleOf5 = isSecondMark && (secondVal % 5 == 0)
@@ -1014,9 +993,8 @@ private fun DrawScope.drawGlassSecondsTrack(
         else -> 0.15f
       }
 
-      val centerFade = ((absDeg - 5.2f) / 3.3f).coerceIn(0f, 1f)
       val edgeFade = ((85f - absDeg) / 85f).coerceIn(0f, 1f).pow(1.2f)
-      val alpha = baseAlpha * centerFade * edgeFade
+      val alpha = baseAlpha * edgeFade
       if (alpha <= 0.01f) continue
 
       val rad = angleDeg * (PI / 180.0)
@@ -1056,35 +1034,48 @@ private fun DrawScope.drawGlassSecondsTrack(
     )
   }
 
-  // 3. Rotating Whole Second Numerals
+  // 3. Rotating Whole Second Numerals with Dynamic Optical Loupe Magnification
   for (delta in -14..14) {
     val secondVal = ((liveSecond + delta) % 60 + 60) % 60
     val angleDeg = -(delta - fractionalShift) * stepDegrees
     if (angleDeg < -84f || angleDeg > 84f) continue
 
     val absAngle = abs(angleDeg)
-    if (absAngle < 5.2f) continue // Directly behind active second in capsule
-
-    val centerFade = ((absAngle - 5.2f) / 3.3f).coerceIn(0f, 1f)
     val edgeFade = ((84f - absAngle) / (84f - 8.5f)).coerceIn(0f, 1f).pow(1.25f)
 
     val isMultipleOf5 = secondVal % 5 == 0
     val baseAlpha = if (isMultipleOf5) 0.95f else 0.45f
-    val alpha = baseAlpha * centerFade * edgeFade
-    if (alpha <= 0.01f) continue
+    val baseTextSize = if (isMultipleOf5) 9.0.dp.toPx() else 7.8.dp.toPx()
+    val baseColor = if (isMultipleOf5) android.graphics.Color.WHITE else 0xFFCBD5E1.toInt()
+
+    // Dynamic Optical Loupe Magnification as second glides through center capsule
+    val loupeSpan = 4.0f
+    val lensFactor = if (absAngle < loupeSpan) {
+      val t = 1f - (absAngle / loupeSpan)
+      t * t * (3f - 2f * t)
+    } else 0f
+
+    val targetSize = 14.2.dp.toPx()
+    val currentSize = baseTextSize + (targetSize - baseTextSize) * lensFactor
+    val currentAlpha = (baseAlpha * edgeFade) + (1.0f - (baseAlpha * edgeFade)) * lensFactor
+    if (currentAlpha <= 0.01f) continue
 
     val rad = angleDeg * (PI / 180.0)
     val tx = textRadius * cos(rad).toFloat()
     val ty = cy + textRadius * sin(rad).toFloat()
 
-    textPaint.textSize = if (isMultipleOf5) 9.5.dp.toPx() else 8.dp.toPx()
-    textPaint.alpha = (alpha * 255).roundToInt().coerceIn(0, 255)
-    textPaint.color = if (isMultipleOf5) android.graphics.Color.WHITE else 0xFFCBD5E1.toInt()
+    // Smoothly levels out to 0° horizontally within the optical loupe
+    val currentRotation = angleDeg * 0.70f * (1f - lensFactor * 0.85f)
+
+    textPaint.textSize = currentSize
+    textPaint.alpha = (currentAlpha * 255).roundToInt().coerceIn(0, 255)
+    textPaint.color = if (lensFactor > 0.35f) android.graphics.Color.WHITE else baseColor
+    textPaint.isFakeBoldText = (lensFactor > 0.40f)
 
     drawContext.canvas.nativeCanvas.apply {
       save()
       translate(tx, ty)
-      rotate(angleDeg * 0.70f)
+      rotate(currentRotation)
       val fm = textPaint.fontMetrics
       val baselineY = -(fm.ascent + fm.descent) / 2f
       drawText(String.format(Locale.US, "%02d", secondVal), 0f, baselineY, textPaint)
