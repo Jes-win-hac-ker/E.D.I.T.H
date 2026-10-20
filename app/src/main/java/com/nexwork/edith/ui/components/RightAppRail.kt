@@ -209,16 +209,15 @@ fun RightAppRail(
       }
     }
 
-    // 2. Continuous Gesture Multi-Function Deck with visible negative space from app list
+    // 2. Corner Multi-Function Button with clear negative space from app list
     Box(
       modifier =
         Modifier
           .align(Alignment.BottomCenter)
           .padding(bottom = 24.dp),
     ) {
-      MultiFunctionGestureDeck(
-        allApps = allApps,
-        onLaunchApp = onLaunchApp,
+      MultiFunctionButton(
+        onClick = {},
       )
     }
   }
