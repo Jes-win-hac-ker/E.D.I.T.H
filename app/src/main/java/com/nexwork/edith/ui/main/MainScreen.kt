@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import kotlin.math.abs
@@ -190,6 +191,7 @@ fun MainScreen(
       modifier = Modifier
         .align(Alignment.CenterEnd)
         .width(124.dp)
+        .fillMaxHeight()
         .graphicsLayer { alpha = railAlpha }
     ) {
       RightAppRail(

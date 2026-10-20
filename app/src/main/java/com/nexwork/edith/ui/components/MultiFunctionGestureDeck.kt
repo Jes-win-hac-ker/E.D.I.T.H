@@ -110,6 +110,7 @@ fun MultiFunctionGestureDeck(
   var isCardHovered by remember { mutableStateOf(false) }
   var hoveredAppIndex by remember { mutableIntStateOf(-1) }
   var dwellProgress by remember { mutableFloatStateOf(0f) }
+  var stationaryStartTime by remember { mutableLongStateOf(0L) }
   var currentScrollPx by remember { mutableFloatStateOf(0f) }
 
   // Drag coordinates relative to MFB center
@@ -120,6 +121,34 @@ fun MultiFunctionGestureDeck(
   val cardSlideAnim = remember { Animatable(0f) } // 0f = under icon, 1f = fully slid out
   val cardShimmerAnim = remember { Animatable(0f) } // 0f..1f reactive glass shimmer sweep
   val tabExpandAnim = remember { Animatable(0f) } // 0f..1f tab height expansion
+
+  // 1.0s Dwell Auto-Launch continuous countdown loop
+  LaunchedEffect(hoveredAppIndex, stationaryStartTime, deckState) {
+    if (deckState == MfbDeckState.TAB_EXPANDED && hoveredAppIndex in sortedApps.indices && stationaryStartTime > 0L) {
+      while (true) {
+        val now = System.currentTimeMillis()
+        val elapsed = now - stationaryStartTime
+        val prog = (elapsed / 1000f).coerceIn(0f, 1f)
+        dwellProgress = prog
+
+        if (prog >= 1.0f) {
+          view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+          val targetApp = sortedApps[hoveredAppIndex]
+          onLaunchApp(targetApp)
+
+          // Reset deck after launch
+          deckState = MfbDeckState.IDLE
+          hoveredAppIndex = -1
+          dwellProgress = 0f
+          stationaryStartTime = 0L
+          break
+        }
+        delay(16L)
+      }
+    } else {
+      dwellProgress = 0f
+    }
+  }
 
   // Target card geometry
   val cardWidth = 138.dp
@@ -506,7 +535,7 @@ fun MultiFunctionGestureDeck(
               dwellProgress = 0f
 
               var lastMoveTime = System.currentTimeMillis()
-              var stationaryStartTime = 0L
+              stationaryStartTime = 0L
               var lastPos = down.position
               var isHoldTriggered = false
 
@@ -522,6 +551,8 @@ fun MultiFunctionGestureDeck(
 
               // Continuous pointer tracking loop (Single unbroken touch session)
               while (true) {
+                if (deckState == MfbDeckState.IDLE) break
+
                 val event = awaitPointerEvent()
                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
 
@@ -561,7 +592,7 @@ fun MultiFunctionGestureDeck(
                     deckState = MfbDeckState.TAB_EXPANDED
                   }
 
-                  // 2. If Tab is open, hit-test Tab items & handle 1.0s dwell
+                  // 2. If Tab is open, hit-test Tab items
                   if (deckState == MfbDeckState.TAB_EXPANDED) {
                     val tabLeftPx = with(density) { -164.dp.toPx() }
                     val tabTopPx = with(density) { -374.dp.toPx() }
@@ -593,27 +624,6 @@ fun MultiFunctionGestureDeck(
                         stationaryStartTime = now
                         dwellProgress = 0f
                       }
-
-                      // 1.0s Dwell Auto-Launch calculation
-                      if (stationaryStartTime > 0L) {
-                        val dwellTime = now - stationaryStartTime
-                        dwellProgress = (dwellTime / 1000f).coerceIn(0f, 1f)
-
-                        if (dwellProgress >= 1.0f && hoveredAppIndex in sortedApps.indices) {
-                          // AUTO LAUNCH TRIGGERED!
-                          view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                          val targetApp = sortedApps[hoveredAppIndex]
-                          onLaunchApp(targetApp)
-
-                          // Clean reset
-                          deckState = MfbDeckState.IDLE
-                          isFingerTouching = false
-                          isCardHovered = false
-                          hoveredAppIndex = -1
-                          dwellProgress = 0f
-                          break
-                        }
-                      }
                     }
                   }
                 }
@@ -626,6 +636,7 @@ fun MultiFunctionGestureDeck(
               isCardHovered = false
               hoveredAppIndex = -1
               dwellProgress = 0f
+              stationaryStartTime = 0L
             }
           },
       contentAlignment = Alignment.Center,
