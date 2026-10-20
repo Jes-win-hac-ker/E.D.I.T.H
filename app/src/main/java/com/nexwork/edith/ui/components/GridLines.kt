@@ -49,6 +49,7 @@ fun GridLines(
   customLineColor: Color = Color.White,
   reactiveColor: Color = Color(0xFF38BDF8),
   railGapHeight: Dp? = 290.dp,
+  solidLineAlpha: Float = 1.0f,
 ) {
   val scope = rememberCoroutineScope()
   var touchPos by remember { mutableStateOf<Offset?>(null) }
@@ -334,21 +335,25 @@ fun GridLines(
             if (touchNearDist < 60.dp.toPx()) (1f - touchNearDist / 60.dp.toPx()) * currentAlpha
             else 0f
 
+          val effectiveAlpha = solidLineAlpha.coerceIn(0f, 1f)
+          val effectiveLineColor = customLineColor.copy(alpha = customLineColor.alpha * effectiveAlpha)
+          val effectiveGlowBoost = nearAlphaBoost * effectiveAlpha
+
           val cy = height / 2f
           val railH = railGapHeight?.toPx() ?: 0f
           val hasGap = railGapHeight != null && railH > 0f
           val gapTop = if (hasGap) cy - railH / 2f else 0f
           val gapBottom = if (hasGap) cy + railH / 2f + 42.dp.toPx() else 0f
 
-          if (nearAlphaBoost > 0.05f) {
+          if (effectiveGlowBoost > 0.05f) {
             val glowWidth = customLineWidth.toPx() + 4.dp.toPx()
             if (hasGap) {
               if (gapTop > 0f) {
                 drawLine(
                   brush = Brush.verticalGradient(
                     0.00f to Color.Transparent,
-                    0.08f to reactiveColor.copy(alpha = nearAlphaBoost * 0.4f),
-                    1.00f to reactiveColor.copy(alpha = nearAlphaBoost * 0.4f),
+                    0.08f to reactiveColor.copy(alpha = effectiveGlowBoost * 0.4f),
+                    1.00f to reactiveColor.copy(alpha = effectiveGlowBoost * 0.4f),
                     startY = 0f,
                     endY = gapTop,
                   ),
@@ -360,8 +365,8 @@ fun GridLines(
               if (gapBottom < height) {
                 drawLine(
                   brush = Brush.verticalGradient(
-                    0.00f to reactiveColor.copy(alpha = nearAlphaBoost * 0.4f),
-                    0.92f to reactiveColor.copy(alpha = nearAlphaBoost * 0.4f),
+                    0.00f to reactiveColor.copy(alpha = effectiveGlowBoost * 0.4f),
+                    0.92f to reactiveColor.copy(alpha = effectiveGlowBoost * 0.4f),
                     1.00f to Color.Transparent,
                     startY = gapBottom,
                     endY = height,
@@ -375,8 +380,8 @@ fun GridLines(
               drawLine(
                 brush = Brush.verticalGradient(
                   0.00f to Color.Transparent,
-                  0.08f to reactiveColor.copy(alpha = nearAlphaBoost * 0.4f),
-                  0.92f to reactiveColor.copy(alpha = nearAlphaBoost * 0.4f),
+                  0.08f to reactiveColor.copy(alpha = effectiveGlowBoost * 0.4f),
+                  0.92f to reactiveColor.copy(alpha = effectiveGlowBoost * 0.4f),
                   1.00f to Color.Transparent,
                 ),
                 start = Offset(targetX, 0f),
@@ -386,49 +391,51 @@ fun GridLines(
             }
           }
 
-          if (hasGap) {
-            // Segment 1: Above Energy Rail docking into top node
-            if (gapTop > 0f) {
+          if (effectiveAlpha > 0.01f) {
+            if (hasGap) {
+              // Segment 1: Above Energy Rail docking into top node
+              if (gapTop > 0f) {
+                drawLine(
+                  brush = Brush.verticalGradient(
+                    0.00f to Color.Transparent,
+                    0.06f to effectiveLineColor,
+                    1.00f to effectiveLineColor,
+                    startY = 0f,
+                    endY = gapTop,
+                  ),
+                  start = Offset(targetX, 0f),
+                  end = Offset(targetX, gapTop),
+                  strokeWidth = customLineWidth.toPx(),
+                )
+              }
+              // Segment 2: Below Telemetry Lozenge running down to screen bottom
+              if (gapBottom < height) {
+                drawLine(
+                  brush = Brush.verticalGradient(
+                    0.00f to effectiveLineColor,
+                    0.94f to effectiveLineColor,
+                    1.00f to Color.Transparent,
+                    startY = gapBottom,
+                    endY = height,
+                  ),
+                  start = Offset(targetX, gapBottom),
+                  end = Offset(targetX, height),
+                  strokeWidth = customLineWidth.toPx(),
+                )
+              }
+            } else {
               drawLine(
                 brush = Brush.verticalGradient(
                   0.00f to Color.Transparent,
-                  0.06f to customLineColor,
-                  1.00f to customLineColor,
-                  startY = 0f,
-                  endY = gapTop,
+                  0.06f to effectiveLineColor,
+                  0.94f to effectiveLineColor,
+                  1.00f to Color.Transparent,
                 ),
                 start = Offset(targetX, 0f),
-                end = Offset(targetX, gapTop),
-                strokeWidth = customLineWidth.toPx(),
-              )
-            }
-            // Segment 2: Below Telemetry Lozenge running down to screen bottom
-            if (gapBottom < height) {
-              drawLine(
-                brush = Brush.verticalGradient(
-                  0.00f to customLineColor,
-                  0.94f to customLineColor,
-                  1.00f to Color.Transparent,
-                  startY = gapBottom,
-                  endY = height,
-                ),
-                start = Offset(targetX, gapBottom),
                 end = Offset(targetX, height),
                 strokeWidth = customLineWidth.toPx(),
               )
             }
-          } else {
-            drawLine(
-              brush = Brush.verticalGradient(
-                0.00f to Color.Transparent,
-                0.06f to customLineColor,
-                0.94f to customLineColor,
-                1.00f to Color.Transparent,
-              ),
-              start = Offset(targetX, 0f),
-              end = Offset(targetX, height),
-              strokeWidth = customLineWidth.toPx(),
-            )
           }
         }
       }

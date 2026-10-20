@@ -160,7 +160,9 @@ fun MainScreen(
           }
         }
     ) {
-      GridLines()
+      GridLines(
+        solidLineAlpha = railAlpha,
+      )
     }
 
     // 2. Liquid Glass Vertical Energy Rail (Battery Telemetry along 4th major grid line)
