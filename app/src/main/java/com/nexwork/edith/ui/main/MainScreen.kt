@@ -192,7 +192,10 @@ fun MainScreen(
         .width(124.dp)
         .graphicsLayer { alpha = railAlpha }
     ) {
-      RightAppRail()
+      RightAppRail(
+        allApps = state.apps,
+        onLaunchApp = viewModel::launchApp,
+      )
     }
 
     // 5. Floating top search bar with matching apps liquid glass horizontal tab

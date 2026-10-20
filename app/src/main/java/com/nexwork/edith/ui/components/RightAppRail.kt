@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.R
 import com.nexwork.edith.theme.GlassBorderHighlight
 import com.nexwork.edith.theme.GlassBorderSubtle
@@ -66,7 +67,8 @@ data class RightRailAppItem(
  */
 @Composable
 fun RightAppRail(
-  onMultiFunctionClick: () -> Unit = {},
+  allApps: List<AppEntry> = emptyList(),
+  onLaunchApp: (AppEntry) -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
   val context = LocalContext.current
@@ -207,15 +209,16 @@ fun RightAppRail(
       }
     }
 
-    // 2. Corner Multi-Function Button with clear negative space from app list
+    // 2. Continuous Gesture Multi-Function Deck with visible negative space from app list
     Box(
       modifier =
         Modifier
           .align(Alignment.BottomCenter)
           .padding(bottom = 24.dp),
     ) {
-      MultiFunctionButton(
-        onClick = onMultiFunctionClick,
+      MultiFunctionGestureDeck(
+        allApps = allApps,
+        onLaunchApp = onLaunchApp,
       )
     }
   }
