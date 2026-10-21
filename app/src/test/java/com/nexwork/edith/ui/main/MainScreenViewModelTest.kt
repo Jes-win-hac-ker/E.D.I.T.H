@@ -101,6 +101,48 @@ class MainScreenViewModelTest {
     assertTrue(com.nexwork.edith.ui.components.filterMatchingApps("", apps).isEmpty())
     assertTrue(com.nexwork.edith.ui.components.filterMatchingApps("   ", apps).isEmpty())
   }
+
+  @Test
+  fun filterMatchingApps_strictlyMatchesDisplayLabel_notPackageName() {
+    val youtube = com.nexwork.edith.model.AppEntry(
+      label = "YouTube",
+      packageName = "com.google.android.youtube",
+      activityName = "",
+      usageTimeMillis14d = 100_000L,
+    )
+    val chrome = com.nexwork.edith.model.AppEntry(
+      label = "Chrome",
+      packageName = "com.android.chrome",
+      activityName = "",
+      usageTimeMillis14d = 80_000L,
+    )
+    val googleApp = com.nexwork.edith.model.AppEntry(
+      label = "Google",
+      packageName = "com.google.android.googlequicksearchbox",
+      activityName = "",
+      usageTimeMillis14d = 50_000L,
+    )
+    val googleDrive = com.nexwork.edith.model.AppEntry(
+      label = "Google Drive",
+      packageName = "com.google.android.apps.docs",
+      activityName = "",
+      usageTimeMillis14d = 60_000L,
+    )
+
+    val apps = listOf(youtube, chrome, googleApp, googleDrive)
+
+    // Searching "google" must only match "Google" and "Google Drive", NOT YouTube or Chrome
+    val googleMatches = com.nexwork.edith.ui.components.filterMatchingApps("google", apps)
+    assertEquals(2, googleMatches.size)
+    // "Google" is an exact match (Tier 1), so it must rank #1 even though Google Drive has more usage
+    assertEquals("Google", googleMatches[0].label)
+    assertEquals("Google Drive", googleMatches[1].label)
+
+    // Searching "chrome" must only match Chrome
+    val chromeMatches = com.nexwork.edith.ui.components.filterMatchingApps("chrome", apps)
+    assertEquals(1, chromeMatches.size)
+    assertEquals("Chrome", chromeMatches[0].label)
+  }
 }
 
 private class FakeMyModelRepository : DataRepository {

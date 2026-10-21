@@ -347,12 +347,22 @@ fun FullAppListGlassOverlay(
 
   val filteredApps =
     remember(apps, searchQuery) {
-      if (searchQuery.isBlank()) apps
+      val q = searchQuery.trim()
+      if (q.isBlank()) apps
       else {
         apps.filter {
-          it.label.contains(searchQuery.trim(), ignoreCase = true) ||
-            it.packageName.contains(searchQuery.trim(), ignoreCase = true)
-        }
+          it.label.contains(q, ignoreCase = true)
+        }.sortedWith(
+          compareBy<AppEntry> { app ->
+            when {
+              app.label.equals(q, ignoreCase = true) -> 0
+              app.label.startsWith(q, ignoreCase = true) -> 1
+              app.label.split(" ").any { it.startsWith(q, ignoreCase = true) } -> 2
+              else -> 3
+            }
+          }.thenByDescending { it.usageTimeMillis14d }
+            .thenBy { it.label.lowercase() }
+        )
       }
     }
 
