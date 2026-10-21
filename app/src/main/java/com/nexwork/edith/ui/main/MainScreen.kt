@@ -249,7 +249,6 @@ fun MainScreen(
     // C. Corner Multi-Function Controls (Elevated above frosted glass overlay)
     CornerMenuControls(
       isOpen = isCornerMenuOpen,
-      onToggle = { isCornerMenuOpen = !isCornerMenuOpen },
       onOpen = { isCornerMenuOpen = true },
       onAppListClick = {
         // Step 1: Sliding icon clicked

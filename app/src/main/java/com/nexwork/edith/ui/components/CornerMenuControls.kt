@@ -41,12 +41,11 @@ import kotlin.math.roundToInt
  * 1. Corner MFB anchor button (50dp squircle with precision reticle glyph).
  * 2. Sliding App List icon (50dp squircle with 3 vertical dots + 3 horizontal bars)
  *    that slides out to the left from beneath the MFB icon.
- * 3. Supports BOTH Single Tap and Press & Hold (Long Press) triggers.
+ * 3. Triggered exclusively via Press & Hold (Long Press).
  */
 @Composable
 fun CornerMenuControls(
   isOpen: Boolean,
-  onToggle: () -> Unit,
   onOpen: () -> Unit,
   onAppListClick: () -> Unit = {},
   modifier: Modifier = Modifier,
@@ -210,10 +209,6 @@ fun CornerMenuControls(
         )
         .pointerInput(Unit) {
           detectTapGestures(
-            onTap = {
-              view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-              onToggle()
-            },
             onLongPress = {
               view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
               onOpen()
