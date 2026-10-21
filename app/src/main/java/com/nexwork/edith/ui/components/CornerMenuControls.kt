@@ -8,7 +8,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,6 +18,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -28,12 +31,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.nexwork.edith.theme.IceGlowAccent
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
@@ -41,17 +47,34 @@ import kotlin.math.roundToInt
  * 1. Corner MFB anchor button (50dp squircle with precision reticle glyph).
  * 2. Sliding App List icon (50dp squircle with 3 vertical dots + 3 horizontal bars)
  *    that slides out to the left from beneath the MFB icon.
- * 3. Triggered exclusively via Press & Hold (Long Press).
+ * 3. Option A Interaction Model:
+ *    - Snappy ~200ms press & hold trigger with haptic confirmation.
+ *    - Single tap is ignored.
+ *    - Holding opens the sliding icon and frosted glass backdrop.
+ *    - Releasing automatically dismisses back to normal state.
+ *    - Sliding finger left onto the sliding icon before release triggers app list selection.
  */
 @Composable
 fun CornerMenuControls(
   isOpen: Boolean,
   onOpen: () -> Unit,
+  onDismiss: () -> Unit = {},
   onAppListClick: () -> Unit = {},
   modifier: Modifier = Modifier,
   size: Dp = 50.dp,
 ) {
   val view = LocalView.current
+  val density = LocalDensity.current
+  val coroutineScope = rememberCoroutineScope()
+
+  val currentOnOpen by rememberUpdatedState(onOpen)
+  val currentOnDismiss by rememberUpdatedState(onDismiss)
+  val currentOnAppListClick by rememberUpdatedState(onAppListClick)
+
+  val sizePx = with(density) { size.toPx() }
+  val slideDistanceDp = 62.dp
+  val slideDistancePx = with(density) { slideDistanceDp.toPx() }
+  val tolerancePx = with(density) { 14.dp.toPx() }
 
   // Slide animation progress (0f = hidden under MFB, 1f = fully slid to the left)
   val slideProgress by animateFloatAsState(
@@ -62,9 +85,6 @@ fun CornerMenuControls(
     ),
     label = "cornerSlideProgress",
   )
-
-  // Distance the sliding icon travels to the left (50dp button size + 12dp spacing)
-  val slideDistanceDp = 62.dp
 
   Box(
     modifier = modifier.size(size),
@@ -208,12 +228,44 @@ fun CornerMenuControls(
           shape = RoundedCornerShape(size * 0.308f),
         )
         .pointerInput(Unit) {
-          detectTapGestures(
-            onLongPress = {
+          awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            var isHoldTriggered = false
+            var lastPos = down.position
+
+            val holdJob = coroutineScope.launch {
+              delay(200L) // Snappy 200ms hold trigger
+              isHoldTriggered = true
               view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-              onOpen()
-            },
-          )
+              currentOnOpen()
+            }
+
+            while (true) {
+              val event = awaitPointerEvent()
+              val change = event.changes.firstOrNull { it.id == down.id } ?: break
+              lastPos = change.position
+              if (!change.pressed) {
+                break
+              }
+            }
+
+            holdJob.cancel()
+
+            // Option A: Auto-dismissal when finger is released
+            if (isHoldTriggered) {
+              // Sliding icon sits to the left by slideDistancePx (-62dp)
+              val minX = -slideDistancePx - tolerancePx
+              val maxX = -slideDistancePx + sizePx + tolerancePx
+              val minY = -tolerancePx
+              val maxY = sizePx + tolerancePx
+
+              if (lastPos.x in minX..maxX && lastPos.y in minY..maxY) {
+                view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                currentOnAppListClick()
+              }
+              currentOnDismiss()
+            }
+          }
         },
       contentAlignment = Alignment.Center,
     ) {

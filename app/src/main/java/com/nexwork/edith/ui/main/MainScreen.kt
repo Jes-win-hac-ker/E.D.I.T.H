@@ -250,6 +250,7 @@ fun MainScreen(
     CornerMenuControls(
       isOpen = isCornerMenuOpen,
       onOpen = { isCornerMenuOpen = true },
+      onDismiss = { isCornerMenuOpen = false },
       onAppListClick = {
         // Step 1: Sliding icon clicked
       },
