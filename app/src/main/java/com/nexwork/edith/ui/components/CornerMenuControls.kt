@@ -51,8 +51,8 @@ import kotlin.math.roundToInt
  * 2. Sliding App List icon (50dp squircle with 3 vertical dots + 3 horizontal bars)
  *    that slides out to the left from beneath the MFB icon.
  * 3. Option A Interaction Model:
- *    - Snappy ~200ms press & hold trigger with haptic confirmation.
- *    - Single tap is ignored.
+ *    - Snappy ~50ms press & hold trigger with haptic confirmation.
+ *    - Single tap is ignored or briefly peeks.
  *    - Holding opens the sliding icon and frosted glass backdrop.
  *    - Releasing automatically dismisses back to normal state.
  *    - Sliding finger left onto the sliding icon before release triggers app list selection.
@@ -255,7 +255,7 @@ fun CornerMenuControls(
             var lastPos = down.position
 
             val holdJob = coroutineScope.launch {
-              delay(120L) // Ultra-snappy 120ms hold trigger
+              delay(50L) // Ultra-responsive 50ms hold trigger (~6 frames at 120Hz)
               isHoldTriggered = true
               view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
               currentOnOpen()
