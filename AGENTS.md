@@ -29,6 +29,8 @@ All UI/UX decisions, performance targets, and system integrations in this reposi
    - Essential apps (**Phone, GPay, Camera**) and the user's most-used apps over the **past 14 days** (queried via `UsageStatsManager.queryAndAggregateUsageStats`) are surfaced on the home screen for instant one-tap launch.
 4. **Corner-Swipe Gesture with Background Blur (`ui/components/AppListRail.kt` & `ui/main/MainScreen.kt`)**:
    - Starting a swipe from the right corner progressively blurs the underlying home screen (`Modifier.blur`) and unlocks `FullAppListGlassOverlay` (searchable 4-column grid, 14-day frequent strip, and A–Z fast scrubber).
+5. **Proactive Feature Suggestions & Plausibility Consultation**:
+   - When asked to add or modify features, controls, or gestures, proactively pitch 1–2 practical enhancements or ergonomic options (e.g., natural dismissal mechanics, tactile compression, timing thresholds, haptic confirmation, or GPU optimization) to ensure maximum utility and 120Hz smooth plausibility before implementing.
 
 ---
 
