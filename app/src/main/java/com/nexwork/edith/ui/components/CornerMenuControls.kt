@@ -18,8 +18,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -76,12 +79,28 @@ fun CornerMenuControls(
   val slideDistancePx = with(density) { slideDistanceDp.toPx() }
   val tolerancePx = with(density) { 14.dp.toPx() }
 
+  var isPressed by remember { mutableStateOf(false) }
+
+  // MFB squircle compression: 0ms instant tactile visual feedback on touch-down
+  val mfbScale by animateFloatAsState(
+    targetValue = when {
+      isOpen -> 1.05f
+      isPressed -> 0.91f
+      else -> 1.0f
+    },
+    animationSpec = spring(
+      dampingRatio = Spring.DampingRatioMediumBouncy,
+      stiffness = Spring.StiffnessMedium,
+    ),
+    label = "mfbScale",
+  )
+
   // Slide animation progress (0f = hidden under MFB, 1f = fully slid to the left)
   val slideProgress by animateFloatAsState(
     targetValue = if (isOpen) 1f else 0f,
     animationSpec = spring(
       dampingRatio = Spring.DampingRatioMediumBouncy,
-      stiffness = Spring.StiffnessMediumLow,
+      stiffness = Spring.StiffnessMedium, // High-velocity 120fps spring
     ),
     label = "cornerSlideProgress",
   )
@@ -195,6 +214,7 @@ fun CornerMenuControls(
       modifier = Modifier
         .zIndex(2f)
         .size(size)
+        .scale(mfbScale)
         .clip(RoundedCornerShape(size * 0.308f))
         .background(
           Brush.linearGradient(
@@ -202,16 +222,16 @@ fun CornerMenuControls(
               Color(0x38FFFFFF),
               Color(0x14FFFFFF),
               Color(0x0E0F172A),
-              if (isOpen) Color(0x4038BDF8) else Color(0x2838BDF8),
+              if (isOpen || isPressed) Color(0x4538BDF8) else Color(0x2838BDF8),
             ),
             start = Offset(0f, 0f),
             end = Offset.Infinite,
           )
         )
         .border(
-          width = if (isOpen) 1.2.dp else 1.0.dp,
+          width = if (isOpen || isPressed) 1.2.dp else 1.0.dp,
           brush = Brush.linearGradient(
-            colors = if (isOpen) listOf(
+            colors = if (isOpen || isPressed) listOf(
               Color(0xFF38BDF8),
               Color(0x8038BDF8),
               Color(0xFF38BDF8),
@@ -230,26 +250,30 @@ fun CornerMenuControls(
         .pointerInput(Unit) {
           awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
+            isPressed = true // Instant 0ms tactile visual compression
             var isHoldTriggered = false
             var lastPos = down.position
 
             val holdJob = coroutineScope.launch {
-              delay(200L) // Snappy 200ms hold trigger
+              delay(120L) // Ultra-snappy 120ms hold trigger
               isHoldTriggered = true
               view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
               currentOnOpen()
             }
 
-            while (true) {
-              val event = awaitPointerEvent()
-              val change = event.changes.firstOrNull { it.id == down.id } ?: break
-              lastPos = change.position
-              if (!change.pressed) {
-                break
+            try {
+              while (true) {
+                val event = awaitPointerEvent()
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                lastPos = change.position
+                if (!change.pressed) {
+                  break
+                }
               }
+            } finally {
+              isPressed = false
+              holdJob.cancel()
             }
-
-            holdJob.cancel()
 
             // Option A: Auto-dismissal when finger is released
             if (isHoldTriggered) {
@@ -295,7 +319,7 @@ fun CornerMenuControls(
           .background(
             Brush.radialGradient(
               colors = listOf(
-                if (isOpen) Color(0x4538BDF8) else Color(0x3338BDF8),
+                if (isOpen || isPressed) Color(0x4538BDF8) else Color(0x3338BDF8),
                 Color.Transparent,
               )
             )
@@ -320,7 +344,7 @@ fun CornerMenuControls(
         // Center glowing core dot
         drawCircle(
           color = IceGlowAccent,
-          radius = if (isOpen) 2.2.dp.toPx() else 1.6.dp.toPx(),
+          radius = if (isOpen || isPressed) 2.2.dp.toPx() else 1.6.dp.toPx(),
           center = Offset(cx, cy),
         )
 

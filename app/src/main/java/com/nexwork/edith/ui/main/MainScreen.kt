@@ -1,7 +1,7 @@
 package com.nexwork.edith.ui.main
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.ui.draw.blur
 import kotlin.math.abs
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -63,14 +62,8 @@ fun MainScreen(
 
   val cornerOverlayAlpha by animateFloatAsState(
     targetValue = if (isCornerMenuOpen) 1f else 0f,
-    animationSpec = tween(durationMillis = 280),
+    animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing),
     label = "cornerOverlayAlpha",
-  )
-
-  val bgBlurRadius by animateDpAsState(
-    targetValue = if (isCornerMenuOpen) 18.dp else 0.dp,
-    animationSpec = tween(durationMillis = 280),
-    label = "cornerMenuBlur",
   )
 
   // Intercept back gestures: dismiss spotlight search or corner menu if open; consume at root so launcher never exits/refreshes
@@ -173,11 +166,10 @@ fun MainScreen(
       }
   ) {
     // A. Home screen background content (Grid, Energy Rail, Clock Dial, Right App Rail)
-    // Progressively blurred by 18dp when corner menu opens
+    // Pure 120fps hardware rendering (zero dynamic GPU blur kernel load)
     Box(
       modifier = Modifier
         .fillMaxSize()
-        .blur(bgBlurRadius)
     ) {
       // 1. Reactive Grid Lines (tapping outside search bar dismisses search)
       Box(
@@ -231,13 +223,13 @@ fun MainScreen(
       }
     }
 
-    // B. Frosted Glass Backdrop Overlay (Dims background and dismisses on tap)
+    // B. Obsidian Frosted Scrim Backdrop Overlay (Dims background with zero GPU blur jank)
     if (cornerOverlayAlpha > 0.005f) {
       Box(
         modifier = Modifier
           .fillMaxSize()
           .graphicsLayer { alpha = cornerOverlayAlpha }
-          .background(Color(0x750B0D12))
+          .background(Color(0xD00B0D12))
           .pointerInput(Unit) {
             detectTapGestures {
               isCornerMenuOpen = false
