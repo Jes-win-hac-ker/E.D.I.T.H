@@ -1,19 +1,25 @@
 package com.nexwork.edith.ui.main
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.blur
 import kotlin.math.abs
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -26,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
+import com.nexwork.edith.ui.components.CornerMenuControls
 import com.nexwork.edith.ui.components.GridLines
 import com.nexwork.edith.ui.components.RightAppRail
 import com.nexwork.edith.ui.components.RotaryClockDial
@@ -52,9 +59,25 @@ fun MainScreen(
 
   val state by viewModel.launcherState.collectAsStateWithLifecycle()
 
-  // Intercept back gestures: dismiss spotlight search if open; consume at root so launcher never exits/refreshes
+  var isCornerMenuOpen by remember { mutableStateOf(false) }
+
+  val cornerOverlayAlpha by animateFloatAsState(
+    targetValue = if (isCornerMenuOpen) 1f else 0f,
+    animationSpec = tween(durationMillis = 280),
+    label = "cornerOverlayAlpha",
+  )
+
+  val bgBlurRadius by animateDpAsState(
+    targetValue = if (isCornerMenuOpen) 18.dp else 0.dp,
+    animationSpec = tween(durationMillis = 280),
+    label = "cornerMenuBlur",
+  )
+
+  // Intercept back gestures: dismiss spotlight search or corner menu if open; consume at root so launcher never exits/refreshes
   BackHandler(enabled = true) {
-    if (state.isSpotlightSearchOpen) {
+    if (isCornerMenuOpen) {
+      isCornerMenuOpen = false
+    } else if (state.isSpotlightSearchOpen) {
       viewModel.closeSpotlightSearch()
     }
   }
@@ -149,56 +172,93 @@ fun MainScreen(
         }
       }
   ) {
-    // 1. Reactive Grid Lines (tapping outside search bar dismisses search)
+    // A. Home screen background content (Grid, Energy Rail, Clock Dial, Right App Rail)
+    // Progressively blurred by 18dp when corner menu opens
     Box(
       modifier = Modifier
         .fillMaxSize()
-        .pointerInput(state.isSpotlightSearchOpen) {
-          if (state.isSpotlightSearchOpen) {
-            detectTapGestures {
-              viewModel.closeSpotlightSearch()
+        .blur(bgBlurRadius)
+    ) {
+      // 1. Reactive Grid Lines (tapping outside search bar dismisses search)
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .pointerInput(state.isSpotlightSearchOpen) {
+            if (state.isSpotlightSearchOpen) {
+              detectTapGestures {
+                viewModel.closeSpotlightSearch()
+              }
             }
           }
-        }
-    ) {
-      GridLines(
-        solidLineAlpha = railAlpha,
+      ) {
+        GridLines(
+          solidLineAlpha = railAlpha,
+        )
+      }
+
+      // 2. Liquid Glass Vertical Energy Rail (Battery Telemetry along 4th major grid line)
+      VerticalEnergyRail(
+        batteryPct = state.telemetry.batteryPct,
+        isCharging = state.telemetry.isCharging,
+        modifier = Modifier
+          .fillMaxSize()
+          .graphicsLayer { alpha = railAlpha },
+      )
+
+      // 3. Sleek Dark Glass Rotary Clock & Weather Dial (anchored on the left)
+      Box(
+        modifier = Modifier
+          .align(Alignment.CenterStart)
+          .graphicsLayer { alpha = railAlpha }
+      ) {
+        RotaryClockDial(
+          use24Hour = state.use24Hour,
+        )
+      }
+
+      // 4. Right-side app rail placed in the 4-square right column (dimmed when search is open)
+      Box(
+        modifier = Modifier
+          .align(Alignment.CenterEnd)
+          .width(124.dp)
+          .fillMaxHeight()
+          .graphicsLayer { alpha = railAlpha }
+      ) {
+        RightAppRail(
+          allApps = state.apps,
+          onLaunchApp = viewModel::launchApp,
+        )
+      }
+    }
+
+    // B. Frosted Glass Backdrop Overlay (Dims background and dismisses on tap)
+    if (cornerOverlayAlpha > 0.005f) {
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .graphicsLayer { alpha = cornerOverlayAlpha }
+          .background(Color(0x750B0D12))
+          .pointerInput(Unit) {
+            detectTapGestures {
+              isCornerMenuOpen = false
+            }
+          }
       )
     }
 
-    // 2. Liquid Glass Vertical Energy Rail (Battery Telemetry along 4th major grid line)
-    VerticalEnergyRail(
-      batteryPct = state.telemetry.batteryPct,
-      isCharging = state.telemetry.isCharging,
+    // C. Corner Multi-Function Controls (Elevated above frosted glass overlay)
+    CornerMenuControls(
+      isOpen = isCornerMenuOpen,
+      onToggle = { isCornerMenuOpen = !isCornerMenuOpen },
+      onOpen = { isCornerMenuOpen = true },
+      onAppListClick = {
+        // Step 1: Sliding icon clicked
+      },
       modifier = Modifier
-        .fillMaxSize()
-        .graphicsLayer { alpha = railAlpha },
+        .align(Alignment.BottomEnd)
+        .navigationBarsPadding()
+        .padding(bottom = 24.dp, end = 37.dp),
     )
-
-    // 3. Sleek Dark Glass Rotary Clock & Weather Dial (anchored on the left)
-    Box(
-      modifier = Modifier
-        .align(Alignment.CenterStart)
-        .graphicsLayer { alpha = railAlpha }
-    ) {
-      RotaryClockDial(
-        use24Hour = state.use24Hour,
-      )
-    }
-
-    // 4. Right-side app rail placed in the 4-square right column (dimmed when search is open)
-    Box(
-      modifier = Modifier
-        .align(Alignment.CenterEnd)
-        .width(124.dp)
-        .fillMaxHeight()
-        .graphicsLayer { alpha = railAlpha }
-    ) {
-      RightAppRail(
-        allApps = state.apps,
-        onLaunchApp = viewModel::launchApp,
-      )
-    }
 
     // 5. Floating top search bar with matching apps liquid glass horizontal tab
     TopSearchBar(

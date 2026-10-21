@@ -208,18 +208,6 @@ fun RightAppRail(
         }
       }
     }
-
-    // 2. Corner Multi-Function Button with clear negative space from app list
-    Box(
-      modifier =
-        Modifier
-          .align(Alignment.BottomCenter)
-          .padding(bottom = 24.dp),
-    ) {
-      MultiFunctionButton(
-        onClick = {},
-      )
-    }
   }
 }
 
