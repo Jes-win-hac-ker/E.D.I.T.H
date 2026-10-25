@@ -40,6 +40,7 @@ import com.nexwork.edith.theme.IceGlowAccent
 import com.nexwork.edith.theme.TextMutedSlate
 import com.nexwork.edith.theme.TextPureWhite
 import com.nexwork.edith.theme.TextSilver
+import com.nexwork.edith.ui.hud.HudPanel
 
 /**
  * Top-left sleek glass section (padded away from the top edge):
@@ -58,6 +59,11 @@ fun LeftTopMostUsedSection(
   onUninstallClick: (AppEntry) -> Unit,
   onSetDefaultLauncher: () -> Unit,
   onGrantUsageAccess: () -> Unit,
+  railPackages: List<String> = emptyList(),
+  onToggleRail: (AppEntry) -> Unit = {},
+  notificationCounts: Map<String, Int> = emptyMap(),
+  hasNotificationAccess: Boolean = true,
+  onGrantNotificationAccess: () -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
   Column(
@@ -65,7 +71,7 @@ fun LeftTopMostUsedSection(
     verticalArrangement = Arrangement.spacedBy(10.dp),
   ) {
     // Subtle action pills row if either Default Launcher or 14-day Usage Stats isn't enabled yet
-    if (!isDefaultLauncher || !telemetry.hasUsageAccess) {
+    if (!isDefaultLauncher || !telemetry.hasUsageAccess || !hasNotificationAccess) {
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -108,45 +114,36 @@ fun LeftTopMostUsedSection(
             )
           }
         }
+
+        if (!hasNotificationAccess) {
+          Box(
+            modifier =
+              Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(GlassSurfaceElevated.copy(alpha = 0.7f))
+                .border(0.8.dp, GlassBorderSubtle, RoundedCornerShape(12.dp))
+                .clickable { onGrantNotificationAccess() }
+                .padding(horizontal = 10.dp, vertical = 5.dp)
+          ) {
+            Text(
+              text = "Enable Badges",
+              color = TextSilver,
+              fontSize = 10.sp,
+              fontWeight = FontWeight.Medium,
+            )
+          }
+        }
       }
     }
 
     // Floating Frosted Glass Card for 14-Day Most Used Apps
     if (mostUsedApps.isNotEmpty()) {
-      Column(
-        modifier =
-          Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(GlassSurface.copy(alpha = 0.52f))
-            .border(0.8.dp, GlassBorderSubtle, RoundedCornerShape(20.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp)
+      HudPanel(
+        title = "FREQ//14D",
+        modifier = Modifier.fillMaxWidth(),
       ) {
         Row(
-          modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Text(
-            text = "FREQUENT · 14 DAYS",
-            color = TextMutedSlate,
-            fontSize = 9.5.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 1.sp,
-          )
-          Box(
-            modifier =
-              Modifier
-                .size(5.dp)
-                .clip(CircleShape)
-                .background(IceGlowAccent.copy(alpha = 0.7f))
-          )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(
-          modifier = Modifier.fillMaxWidth(),
+          modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
           horizontalArrangement = Arrangement.SpaceEvenly,
           verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -167,14 +164,23 @@ fun LeftTopMostUsedSection(
                     )
                     .padding(vertical = 4.dp, horizontal = 2.dp),
               ) {
-                AppIconBadge(
-                  label = app.label,
-                  packageName = app.packageName,
-                  icon = app.icon,
-                  iconBitmap = iconBmp,
-                  isMotoApp = app.isMotoApp,
-                  size = 44.dp,
-                )
+                Box {
+                  AppIconBadge(
+                    label = app.label,
+                    packageName = app.packageName,
+                    icon = app.icon,
+                    iconBitmap = iconBmp,
+                    isMotoApp = app.isMotoApp,
+                    size = 44.dp,
+                  )
+                  if ((notificationCounts[app.packageName] ?: 0) > 0) {
+                    NotificationBadgeDot(
+                      modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(2.dp),
+                    )
+                  }
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                   text = app.label,
@@ -193,6 +199,8 @@ fun LeftTopMostUsedSection(
                 onTogglePin = { onTogglePinApp(app) },
                 onAppInfo = { onAppInfoClick(app) },
                 onUninstall = { onUninstallClick(app) },
+                isOnRail = app.packageName in railPackages,
+                onToggleRail = { onToggleRail(app) },
               )
             }
           }
@@ -214,6 +222,9 @@ fun LeftBottomQuickAccessDock(
   onTogglePinApp: (AppEntry) -> Unit,
   onAppInfoClick: (AppEntry) -> Unit,
   onUninstallClick: (AppEntry) -> Unit,
+  railPackages: List<String> = emptyList(),
+  onToggleRail: (AppEntry) -> Unit = {},
+  notificationCounts: Map<String, Int> = emptyMap(),
   modifier: Modifier = Modifier,
 ) {
   Column(
@@ -257,14 +268,23 @@ fun LeftBottomQuickAccessDock(
                 )
                 .padding(vertical = 4.dp, horizontal = 2.dp),
           ) {
-            AppIconBadge(
-              label = app.label,
-              packageName = app.packageName,
-              icon = app.icon,
-              iconBitmap = iconBmp,
-              isMotoApp = app.isMotoApp,
-              size = 46.dp,
-            )
+            Box {
+              AppIconBadge(
+                label = app.label,
+                packageName = app.packageName,
+                icon = app.icon,
+                iconBitmap = iconBmp,
+                isMotoApp = app.isMotoApp,
+                size = 46.dp,
+              )
+              if ((notificationCounts[app.packageName] ?: 0) > 0) {
+                NotificationBadgeDot(
+                  modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(2.dp),
+                )
+              }
+            }
             Spacer(modifier = Modifier.height(5.dp))
             Text(
               text = app.label,
@@ -284,6 +304,8 @@ fun LeftBottomQuickAccessDock(
             onTogglePin = { onTogglePinApp(app) },
             onAppInfo = { onAppInfoClick(app) },
             onUninstall = { onUninstallClick(app) },
+            isOnRail = app.packageName in railPackages,
+            onToggleRail = { onToggleRail(app) },
           )
         }
       }

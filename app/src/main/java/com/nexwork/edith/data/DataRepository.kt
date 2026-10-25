@@ -1,8 +1,10 @@
 package com.nexwork.edith.data
 
+import android.app.ActivityOptions
 import android.app.ActivityManager
 import android.app.AppOpsManager
 import android.app.role.RoleManager
+import android.app.usage.StorageStatsManager
 import android.app.usage.UsageStatsManager
 import android.content.BroadcastReceiver
 import android.content.ComponentName
@@ -16,11 +18,15 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Process
+import android.os.storage.StorageManager
 import android.provider.Settings
 import android.view.WindowManager
 import com.nexwork.edith.model.AppEntry
+import com.nexwork.edith.model.AppFootprint
 import com.nexwork.edith.model.DeviceTelemetry
+import java.util.Collections
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +55,9 @@ class LauncherRepository(private var context: Context? = null) {
 
   fun hasContext(): Boolean = this.context != null
 
+  private val footprintCache: MutableMap<String, AppFootprint?> =
+    Collections.synchronizedMap(hashMapOf<String, AppFootprint?>())
+
   private val prefs: SharedPreferences?
     get() = context?.getSharedPreferences("edith_launcher_prefs", Context.MODE_PRIVATE)
 
@@ -66,6 +75,29 @@ class LauncherRepository(private var context: Context? = null) {
       current.add(packageName)
     }
     prefs?.edit()?.putStringSet(KEY_PINNED_PACKAGES, current)?.apply()
+    return current
+  }
+
+  /** Ordered right-rail package list (top to bottom); falls back to the curated defaults. */
+  fun getRailPackages(): List<String> {
+    val saved = prefs?.getString(KEY_RAIL_PACKAGES, null)
+    if (saved != null) return saved.split('\n').filter { it.isNotBlank() }
+    return DEFAULT_RAIL_PACKAGES
+  }
+
+  fun setRailPackages(packages: List<String>) {
+    prefs?.edit()?.putString(KEY_RAIL_PACKAGES, packages.joinToString("\n"))?.apply()
+  }
+
+  fun toggleRailPackage(packageName: String): List<String> {
+    val current = getRailPackages().toMutableList()
+    if (current.contains(packageName)) {
+      current.remove(packageName)
+    } else {
+      if (current.size >= MAX_RAIL_APPS) return current
+      current.add(packageName)
+    }
+    setRailPackages(current)
     return current
   }
 
@@ -362,19 +394,47 @@ class LauncherRepository(private var context: Context? = null) {
     }
   }
 
+  /**
+   * APK / user-data / cache bytes for a package. Gated by the same usage-access
+   * app-op as the 14-day stats, so it yields null when access is off. Results — including
+   * misses — are cached: the query costs tens of milliseconds and the deck asks per card.
+   */
+  fun footprint(packageName: String): AppFootprint? {
+    if (footprintCache.containsKey(packageName)) return footprintCache[packageName]
+    val ctx = context ?: return null
+    val stats = try {
+      (ctx.getSystemService(Context.STORAGE_STATS_SERVICE) as? StorageStatsManager)
+        ?.queryStatsForPackage(StorageManager.UUID_DEFAULT, packageName, Process.myUserHandle())
+    } catch (_: Exception) {
+      null
+    }
+    val footprint = stats?.let {
+      AppFootprint(appBytes = it.appBytes, dataBytes = it.dataBytes, cacheBytes = it.cacheBytes)
+    }
+    footprintCache[packageName] = footprint
+    return footprint
+  }
+
+  /**
+   * Hands the system an explicit empty transition: no zoom-from-icon, no cross-fade, and no exit
+   * animation on our own window either. The app appears at full size on the frame it is ready.
+   */
+  private fun noTransition(ctx: Context): Bundle =
+    ActivityOptions.makeCustomAnimation(ctx, 0, 0).toBundle()
+
   fun launchApp(app: AppEntry): Boolean {
     val ctx = context ?: return false
     return try {
       val launcherApps = ctx.getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
       if (launcherApps != null && app.activityName.isNotBlank()) {
         val component = ComponentName(app.packageName, app.activityName)
-        launcherApps.startMainActivity(component, Process.myUserHandle(), null, null)
+        launcherApps.startMainActivity(component, Process.myUserHandle(), null, noTransition(ctx))
         true
       } else {
         val launchIntent = ctx.packageManager.getLaunchIntentForPackage(app.packageName)
         if (launchIntent != null) {
           launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-          ctx.startActivity(launchIntent)
+          ctx.startActivity(launchIntent, noTransition(ctx))
           true
         } else {
           false
@@ -385,7 +445,7 @@ class LauncherRepository(private var context: Context? = null) {
         val fallback = ctx.packageManager.getLaunchIntentForPackage(app.packageName)
         if (fallback != null) {
           fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-          ctx.startActivity(fallback)
+          ctx.startActivity(fallback, noTransition(ctx))
           true
         } else {
           false
@@ -478,6 +538,22 @@ class LauncherRepository(private var context: Context? = null) {
     }
   }
 
+  fun hasNotificationListenerAccess(): Boolean {
+    val ctx = context ?: return false
+    return com.nexwork.edith.notifications.EdithNotificationListener.isAccessGranted(ctx)
+  }
+
+  fun openNotificationListenerSettings() {
+    val ctx = context ?: return
+    runCatching {
+      ctx.startActivity(
+        Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+      )
+    }
+  }
+
   fun expandNotificationShade() {
     val ctx = context ?: return
     runCatching {
@@ -490,6 +566,20 @@ class LauncherRepository(private var context: Context? = null) {
 
   companion object {
     private const val KEY_PINNED_PACKAGES = "pinned_packages"
+    private const val KEY_RAIL_PACKAGES = "rail_packages"
+    const val MAX_RAIL_APPS = 8
+
+    val DEFAULT_RAIL_PACKAGES =
+      listOf(
+        "ai.qwenlm.chat.android",
+        "com.google.android.apps.bard",
+        "com.whatsapp",
+        "com.motorola.camera3",
+        "com.google.android.dialer",
+        "com.google.android.apps.nbu.paisa.user",
+        "com.google.android.googlequicksearchbox",
+      )
+
     private val DEFAULT_ESSENTIAL_KEYWORDS =
       setOf(
         "com.google.android.dialer",

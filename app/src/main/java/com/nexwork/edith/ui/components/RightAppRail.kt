@@ -6,9 +6,11 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,9 +23,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,9 +51,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.R
+import com.nexwork.edith.data.LauncherRepository
+import com.nexwork.edith.theme.DangerRose
 import com.nexwork.edith.theme.GlassBorderHighlight
 import com.nexwork.edith.theme.GlassBorderSubtle
 import com.nexwork.edith.theme.GlassSurface
+import com.nexwork.edith.theme.GlassSurfaceElevated
 import com.nexwork.edith.theme.IceGlowAccent
 import com.nexwork.edith.theme.TextPureWhite
 
@@ -53,29 +64,12 @@ data class RightRailAppItem(
   val label: String,
   val packageName: String,
   @param:DrawableRes val iconRes: Int,
+  val entry: AppEntry? = null,
   val launchFallback: (Context) -> Unit,
 )
 
-/**
- * Custom right-side app column positioned in the 4-square right margin:
- * Arranged from bottom to top:
- * - Google (at the bottom)
- * - GPay (above Google)
- * - Phone (above GPay)
- * - Camera (above Phone)
- * - WhatsApp (above Camera)
- */
-@Composable
-fun RightAppRail(
-  allApps: List<AppEntry> = emptyList(),
-  onLaunchApp: (AppEntry) -> Unit = {},
-  modifier: Modifier = Modifier,
-) {
-  val context = LocalContext.current
-
-  // From top to bottom (so Google is at the bottom):
-  // Qwen Code -> Gemini -> WhatsApp -> Camera -> Phone -> GPay -> Google
-  val apps = listOf(
+private fun curatedRailItems(): Map<String, RightRailAppItem> =
+  listOf(
     RightRailAppItem(
       label = "Qwen Code",
       packageName = "ai.qwenlm.chat.android",
@@ -180,7 +174,39 @@ fun RightAppRail(
         }
       },
     ),
-  )
+  ).associateBy { it.packageName }
+
+/**
+ * User-editable right-side app column positioned in the 4-square right margin.
+ * Renders [railPackages] top-to-bottom: curated packages keep their custom icons and
+ * smart launch fallbacks; any other installed app resolves from [allApps].
+ * Long-press an icon to remove it from the rail.
+ */
+@Composable
+fun RightAppRail(
+  railPackages: List<String> = LauncherRepository.DEFAULT_RAIL_PACKAGES,
+  allApps: List<AppEntry> = emptyList(),
+  onLaunchApp: (AppEntry) -> Unit = {},
+  onToggleRailPackage: (String) -> Unit = {},
+  notificationCounts: Map<String, Int> = emptyMap(),
+  modifier: Modifier = Modifier,
+) {
+  val context = LocalContext.current
+  val curated = remember { curatedRailItems() }
+
+  val items = remember(railPackages, allApps) {
+    railPackages.mapNotNull { pkg ->
+      curated[pkg] ?: allApps.firstOrNull { it.packageName == pkg }?.let { app ->
+        RightRailAppItem(
+          label = app.label,
+          packageName = app.packageName,
+          iconRes = CustomAppIcons.getCustomIconRes(app.packageName) ?: 0,
+          entry = app,
+          launchFallback = { ctx -> launchOrFallback(ctx, app.packageName) },
+        )
+      }
+    }
+  }
 
   Box(
     modifier =
@@ -198,12 +224,17 @@ fun RightAppRail(
       verticalArrangement = Arrangement.Center,
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-      apps.forEachIndexed { index, app ->
+      items.forEachIndexed { index, app ->
         CustomAppItem(
           app = app,
-          onClick = { app.launchFallback(context) },
+          showBadge = (notificationCounts[app.packageName] ?: 0) > 0,
+          onClick = {
+            val entry = app.entry
+            if (entry != null) onLaunchApp(entry) else app.launchFallback(context)
+          },
+          onRemove = { onToggleRailPackage(app.packageName) },
         )
-        if (index < apps.lastIndex) {
+        if (index < items.lastIndex) {
           Spacer(modifier = Modifier.height(10.dp))
         }
       }
@@ -356,39 +387,72 @@ fun MultiFunctionButton(
   }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CustomAppItem(
   app: RightRailAppItem,
+  showBadge: Boolean = false,
   onClick: () -> Unit,
+  onRemove: () -> Unit,
 ) {
-  Column(
-    horizontalAlignment = Alignment.CenterHorizontally,
-    modifier =
-      Modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(16.dp))
-        .clickable { onClick() }
-        .padding(vertical = 4.dp),
-  ) {
-    LiquidGlassAppIcon(
-      packageName = app.packageName,
-      label = app.label,
-      customIconResOverride = app.iconRes,
-      size = 52.dp,
-    )
+  var menuExpanded by remember { mutableStateOf(false) }
 
-    Spacer(modifier = Modifier.height(5.dp))
+  Box {
+    Column(
+      horizontalAlignment = Alignment.CenterHorizontally,
+      modifier =
+        Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(16.dp))
+          .combinedClickable(
+            onClick = onClick,
+            onLongClick = { menuExpanded = true },
+          )
+          .padding(vertical = 4.dp),
+    ) {
+      Box {
+        LiquidGlassAppIcon(
+          packageName = app.packageName,
+          label = app.label,
+          customIconResOverride = app.iconRes.takeIf { it != 0 },
+          size = 52.dp,
+        )
+        if (showBadge) {
+          NotificationBadgeDot(
+            modifier = Modifier
+              .align(Alignment.TopEnd)
+              .padding(3.dp),
+          )
+        }
+      }
 
-    Text(
-      text = app.label,
-      color = TextPureWhite.copy(alpha = 0.92f),
-      fontSize = 11.sp,
-      fontWeight = FontWeight.Medium,
-      fontFamily = FontFamily.SansSerif,
-      maxLines = 1,
-      overflow = TextOverflow.Ellipsis,
-      textAlign = TextAlign.Center,
-    )
+      Spacer(modifier = Modifier.height(5.dp))
+
+      Text(
+        text = app.label,
+        color = TextPureWhite.copy(alpha = 0.92f),
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Medium,
+        fontFamily = FontFamily.SansSerif,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = TextAlign.Center,
+      )
+    }
+
+    DropdownMenu(
+      expanded = menuExpanded,
+      onDismissRequest = { menuExpanded = false },
+      modifier = Modifier.background(GlassSurfaceElevated),
+    ) {
+      DropdownMenuItem(
+        text = { Text(text = "Remove from Rail", color = DangerRose, fontSize = 12.sp) },
+        onClick = {
+          menuExpanded = false
+          onRemove()
+        },
+      )
+    }
   }
 }
 

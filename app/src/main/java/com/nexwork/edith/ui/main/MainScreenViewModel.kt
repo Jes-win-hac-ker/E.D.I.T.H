@@ -6,9 +6,12 @@ import com.nexwork.edith.data.DataRepository
 import com.nexwork.edith.data.DefaultDataRepository
 import com.nexwork.edith.data.LauncherRepository
 import com.nexwork.edith.model.AppEntry
+import com.nexwork.edith.model.AppFootprint
 import com.nexwork.edith.model.DeviceTelemetry
 import com.nexwork.edith.model.WeatherCondition
+import com.nexwork.edith.notifications.EdithNotificationListener
 import com.nexwork.edith.ui.main.MainScreenUiState.Success
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -19,6 +22,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class LauncherHomeState(
   val apps: List<AppEntry> = LauncherRepository.sampleApps(),
@@ -26,6 +30,7 @@ data class LauncherHomeState(
   val mostUsed14dApps: List<AppEntry> = LauncherRepository.sampleApps().drop(3).take(4),
   val quickRailApps: List<AppEntry> = LauncherRepository.sampleApps().take(7),
   val searchQuery: String = "",
+  val railPackages: List<String> = LauncherRepository.DEFAULT_RAIL_PACKAGES,
   val isFullOverlayOpen: Boolean = false,
   val isSpotlightSearchOpen: Boolean = false,
   val cornerSwipeProgress: Float = 0f,
@@ -33,6 +38,8 @@ data class LauncherHomeState(
   val isDefaultLauncher: Boolean = true,
   val weather: WeatherCondition = WeatherCondition.PARTLY_CLOUDY,
   val telemetry: DeviceTelemetry = DeviceTelemetry(),
+  val notificationCounts: Map<String, Int> = emptyMap(),
+  val hasNotificationAccess: Boolean = false,
 )
 
 class MainScreenViewModel(
@@ -56,6 +63,11 @@ class MainScreenViewModel(
     if (launcherRepository.hasContext()) {
       startTelemetryObservation()
     }
+    viewModelScope.launch {
+      EdithNotificationListener.activeCounts.collect { counts ->
+        _launcherState.update { it.copy(notificationCounts = counts) }
+      }
+    }
   }
 
   fun initContext(context: android.content.Context) {
@@ -78,6 +90,7 @@ class MainScreenViewModel(
       val apps = launcherRepository.loadInstalledApps()
       val telemetry = launcherRepository.readTelemetry()
       val isDefault = launcherRepository.isDefaultLauncher()
+      val notifAccess = launcherRepository.hasNotificationListenerAccess()
       val quickAll = launcherRepository.selectQuickAccessApps(apps, maxCount = 20)
       val essentials = quickAll.take(4)
       val essentialPkgs = essentials.map { it.packageName }.toSet()
@@ -109,8 +122,10 @@ class MainScreenViewModel(
           essentialApps = essentials,
           mostUsed14dApps = mostUsed14d,
           quickRailApps = railApps,
+          railPackages = launcherRepository.getRailPackages(),
           telemetry = telemetry,
           isDefaultLauncher = isDefault,
+          hasNotificationAccess = notifAccess,
         )
       }
     }
@@ -174,9 +189,17 @@ class MainScreenViewModel(
     launcherRepository.launchApp(app)
   }
 
+  suspend fun footprintOf(app: AppEntry): AppFootprint? =
+    withContext(Dispatchers.IO) { launcherRepository.footprint(app.packageName) }
+
   fun togglePinApp(app: AppEntry) {
     launcherRepository.togglePinPackage(app.packageName)
     refreshLauncherData()
+  }
+
+  fun toggleRailPackage(packageName: String) {
+    val updated = launcherRepository.toggleRailPackage(packageName)
+    _launcherState.update { it.copy(railPackages = updated) }
   }
 
   fun openAppInfo(app: AppEntry) {
@@ -193,6 +216,10 @@ class MainScreenViewModel(
 
   fun openUsageAccessSettings() {
     launcherRepository.openUsageAccessSettings()
+  }
+
+  fun openNotificationAccessSettings() {
+    launcherRepository.openNotificationListenerSettings()
   }
 
   fun openClockOrAlarms() {

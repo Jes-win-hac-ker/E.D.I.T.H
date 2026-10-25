@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexwork.edith.theme.IceGlowAccent
+import com.nexwork.edith.theme.ObsidianBgTop
 import com.nexwork.edith.theme.TextPureWhite
 
 /**
@@ -195,4 +196,16 @@ fun LiquidGlassAppIcon(
       }
     }
   }
+}
+
+/** Ice-blue unread-notification dot with an obsidian keyline ring. */
+@Composable
+fun NotificationBadgeDot(modifier: Modifier = Modifier) {
+  Box(
+    modifier = modifier
+      .size(12.dp)
+      .clip(CircleShape)
+      .background(IceGlowAccent)
+      .border(1.5.dp, ObsidianBgTop, CircleShape),
+  )
 }

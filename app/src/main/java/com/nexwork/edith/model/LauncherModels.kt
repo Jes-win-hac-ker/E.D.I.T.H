@@ -17,8 +17,16 @@ data class AppEntry(
     get() = label.trim().firstOrNull()?.uppercaseChar()?.takeIf { it in 'A'..'Z' } ?: '#'
 }
 
-enum class WeatherCondition(val label: String, val tempCelsius: Int) {
-  PARTLY_CLOUDY("Partly Cloudy", 25),
+/** On-device storage split for one package, from StorageStatsManager. */
+data class AppFootprint(
+  val appBytes: Long,
+  val dataBytes: Long,
+  val cacheBytes: Long,
+) {
+  val totalBytes: Long get() = appBytes + dataBytes + cacheBytes
+}
+
+enum class WeatherCondition(val label: String, val tempCelsius: Int) {  PARTLY_CLOUDY("Partly Cloudy", 25),
   CLEAR_SKY("Clear Sky", 28),
   OVERCAST("Overcast", 22),
   LIGHT_RAIN("Light Rain", 20),

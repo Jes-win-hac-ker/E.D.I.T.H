@@ -626,6 +626,8 @@ fun AppContextDropdown(
   onTogglePin: () -> Unit,
   onAppInfo: () -> Unit,
   onUninstall: () -> Unit,
+  isOnRail: Boolean = false,
+  onToggleRail: (() -> Unit)? = null,
 ) {
   DropdownMenu(
     expanded = expanded,
@@ -645,6 +647,21 @@ fun AppContextDropdown(
         onTogglePin()
       },
     )
+    if (onToggleRail != null) {
+      DropdownMenuItem(
+        text = {
+          Text(
+            text = if (isOnRail) "Remove from Right Rail" else "Add to Right Rail",
+            color = TextPureWhite,
+            fontSize = 12.sp,
+          )
+        },
+        onClick = {
+          onDismiss()
+          onToggleRail()
+        },
+      )
+    }
     DropdownMenuItem(
       text = { Text(text = "App Info", color = TextPureWhite, fontSize = 12.sp) },
       onClick = {

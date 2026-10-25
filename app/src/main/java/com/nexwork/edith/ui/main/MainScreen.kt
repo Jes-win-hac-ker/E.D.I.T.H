@@ -1,19 +1,19 @@
 package com.nexwork.edith.ui.main
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import kotlin.math.abs
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -31,20 +32,22 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
-import com.nexwork.edith.ui.components.CornerMenuControls
 import com.nexwork.edith.ui.components.GridLines
 import com.nexwork.edith.ui.components.RightAppRail
 import com.nexwork.edith.ui.components.RotaryClockDial
-import com.nexwork.edith.ui.components.TopSearchBar
 import com.nexwork.edith.ui.components.VerticalEnergyRail
+import com.nexwork.edith.ui.hud.CrimeSceneFocusOverlay
+import com.nexwork.edith.ui.hud.HudCardDeck
+import com.nexwork.edith.ui.hud.HudClock
+import com.nexwork.edith.ui.hud.HudSearchBar
+import kotlin.math.abs
 
 /**
- * Main Home Launcher screen:
- * - Reactive micro-grid lines with touch glow bloom.
- * - Solid line along the 4th major square line from the right.
- * - Custom-icon right app rail (Google, GPay, Phone, Camera, WhatsApp, Gemini, Qwen Code).
- * - Swipe Down on home screen reveals the top search bar directly over the grid without overlay.
+ * Home screen — Stark HUD void with the flat search line.
+ * Swipe down anywhere (outside system gesture edges) opens the search; swipe up or
+ * tap outside dismisses it. Auto-launch logic lives in HudSearchBar.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MainScreen(
   onItemClick: (NavKey) -> Unit = {},
@@ -58,21 +61,8 @@ fun MainScreen(
 
   val state by viewModel.launcherState.collectAsStateWithLifecycle()
 
-  var isCornerMenuOpen by remember { mutableStateOf(false) }
-
-  val cornerOverlayAlpha by animateFloatAsState(
-    targetValue = if (isCornerMenuOpen) 1f else 0f,
-    animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing),
-    label = "cornerOverlayAlpha",
-  )
-
-  // Intercept back gestures: dismiss spotlight search or corner menu if open; consume at root so launcher never exits/refreshes
-  BackHandler(enabled = true) {
-    if (isCornerMenuOpen) {
-      isCornerMenuOpen = false
-    } else if (state.isSpotlightSearchOpen) {
-      viewModel.closeSpotlightSearch()
-    }
+  BackHandler(enabled = state.isSpotlightSearchOpen) {
+    viewModel.closeSpotlightSearch()
   }
 
   var totalVerticalDrag by remember { mutableFloatStateOf(0f) }
@@ -80,15 +70,9 @@ fun MainScreen(
   var dragStartY by remember { mutableFloatStateOf(0f) }
   var dragStartX by remember { mutableFloatStateOf(0f) }
 
-  val railAlpha by animateFloatAsState(
-    targetValue = if (state.isSpotlightSearchOpen) 0.22f else 1f,
-    label = "RightRailAlpha",
-  )
-
-  Box(
+  BoxWithConstraints(
     modifier = modifier
       .fillMaxSize()
-      .background(Color(0xFF0B0D12))
       .pointerInput(state.isSpotlightSearchOpen) {
         if (!state.isSpotlightSearchOpen) {
           detectDragGestures(
@@ -100,10 +84,7 @@ fun MainScreen(
             },
             onDrag = { change, dragAmount ->
               val screenWidth = size.width
-              // Exclusion zones:
-              // 1. Left system back gesture edge (0..40dp)
-              // 2. Right app rail and right back edge (screenWidth - 124dp .. screenWidth)
-              // 3. Extreme top margin (0..40dp)
+              // Exclusion zones: left system back edge, right edge, extreme top
               val isExcludedZone = dragStartX < 40.dp.toPx() ||
                 dragStartX > (screenWidth - 124.dp.toPx()) ||
                 dragStartY < 40.dp.toPx()
@@ -112,8 +93,6 @@ fun MainScreen(
                 totalVerticalDrag += dragAmount.y
                 totalHorizontalDrag += dragAmount.x
 
-                // Only activate search if gesture is strictly vertical downward (not horizontal or diagonal)
-                // and displacement exceeds threshold
                 val thresholdPx = 40.dp.toPx()
                 val isStrictlyVerticalDown = totalVerticalDrag > 0f &&
                   totalVerticalDrag > abs(totalHorizontalDrag) * 1.5f
@@ -145,7 +124,6 @@ fun MainScreen(
               totalVerticalDrag += dragAmount.y
               totalHorizontalDrag += dragAmount.x
 
-              // Dismiss search on upward swipe
               if (totalVerticalDrag < -28.dp.toPx() && abs(totalVerticalDrag) > abs(totalHorizontalDrag)) {
                 change.consume()
                 viewModel.closeSpotlightSearch()
@@ -165,117 +143,89 @@ fun MainScreen(
         }
       }
   ) {
-    // A. Home screen background content (Grid, Energy Rail, Clock Dial, Right App Rail)
-    // Pure 120fps hardware rendering (zero dynamic GPU blur kernel load)
+    val searchOpen = state.isSpotlightSearchOpen
+    val bgZoom by animateFloatAsState(
+      targetValue = if (searchOpen) 1.08f else 1.0f,
+      animationSpec = tween(500),
+      label = "bgZoom",
+    )
+
+    // Cleared: pure black void backdrop with rack focus dolly zoom
+    Box(
+      Modifier
+        .fillMaxSize()
+        .graphicsLayer {
+          scaleX = bgZoom
+          scaleY = bgZoom
+          if (searchOpen && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            renderEffect = android.graphics.RenderEffect.createBlurEffect(
+              12f,
+              12f,
+              android.graphics.Shader.TileMode.CLAMP
+            ).asComposeRenderEffect()
+          }
+        }
+        .background(Color.Black)
+    )
+
+    // Crime scene intro camera lens depth overlay
+    CrimeSceneFocusOverlay(
+      isOpen = searchOpen,
+      modifier = Modifier.fillMaxSize(),
+    )
+
+    // The clock owns the top bay until the console is summoned into it.
+    HudClock(
+      isOpen = state.isSpotlightSearchOpen,
+      modifier = Modifier.align(Alignment.TopStart),
+    )
+
+    // Tap outside the search line dismisses it
     Box(
       modifier = Modifier
         .fillMaxSize()
-    ) {
-      // 1. Reactive Grid Lines (tapping outside search bar dismisses search)
-      Box(
-        modifier = Modifier
-          .fillMaxSize()
-          .pointerInput(state.isSpotlightSearchOpen) {
-            if (state.isSpotlightSearchOpen) {
-              detectTapGestures {
-                viewModel.closeSpotlightSearch()
-              }
-            }
-          }
-      ) {
-        GridLines(
-          solidLineAlpha = railAlpha,
-        )
-      }
-
-      // 2. Liquid Glass Vertical Energy Rail (Battery Telemetry along 4th major grid line)
-      VerticalEnergyRail(
-        batteryPct = state.telemetry.batteryPct,
-        isCharging = state.telemetry.isCharging,
-        modifier = Modifier
-          .fillMaxSize()
-          .graphicsLayer { alpha = railAlpha },
-      )
-
-      // 3. Sleek Dark Glass Rotary Clock & Weather Dial (anchored on the left)
-      Box(
-        modifier = Modifier
-          .align(Alignment.CenterStart)
-          .graphicsLayer { alpha = railAlpha }
-      ) {
-        RotaryClockDial(
-          use24Hour = state.use24Hour,
-        )
-      }
-
-      // 4. Right-side app rail placed in the 4-square right column (dimmed when search is open)
-      Box(
-        modifier = Modifier
-          .align(Alignment.CenterEnd)
-          .width(124.dp)
-          .fillMaxHeight()
-          .graphicsLayer { alpha = railAlpha }
-      ) {
-        RightAppRail(
-          allApps = state.apps,
-          onLaunchApp = viewModel::launchApp,
-        )
-      }
-    }
-
-    // B. Obsidian Frosted Scrim Backdrop Overlay (Dims background with zero GPU blur jank)
-    if (cornerOverlayAlpha > 0.005f) {
-      Box(
-        modifier = Modifier
-          .fillMaxSize()
-          .graphicsLayer { alpha = cornerOverlayAlpha }
-          .background(Color(0xD00B0D12))
-          .pointerInput(Unit) {
+        .pointerInput(state.isSpotlightSearchOpen) {
+          if (state.isSpotlightSearchOpen) {
             detectTapGestures {
-              isCornerMenuOpen = false
+              viewModel.closeSpotlightSearch()
             }
-          }
-      )
-    }
-
-    // C. Corner Multi-Function Controls (Elevated above frosted glass overlay)
-    CornerMenuControls(
-      isOpen = isCornerMenuOpen,
-      onOpen = { isCornerMenuOpen = true },
-      onDismiss = { isCornerMenuOpen = false },
-      onAppListClick = {
-        // Step 1: Sliding icon clicked
-      },
-      modifier = Modifier
-        .align(Alignment.BottomEnd)
-        .navigationBarsPadding()
-        .padding(bottom = 24.dp, end = 37.dp),
-    )
-
-    // 5. Floating top search bar with matching apps liquid glass horizontal tab
-    TopSearchBar(
-      isOpen = state.isSpotlightSearchOpen,
-      searchQuery = state.searchQuery,
-      apps = state.apps,
-      onSearchQueryChange = viewModel::onSearchQueryChange,
-      onLaunchApp = viewModel::launchApp,
-      onDismiss = viewModel::closeSpotlightSearch,
-      singleAppAutoLaunchDelayMs = 320L,
-      multipleAppsAutoLaunchDelayMs = 3000L,
-      onSearch = { query ->
-        val q = query.trim()
-        if (q.isNotEmpty()) {
-          val match = state.apps.firstOrNull {
-            it.label.equals(q, ignoreCase = true)
-          } ?: state.apps.firstOrNull {
-            it.label.contains(q, ignoreCase = true)
-          }
-          if (match != null) {
-            viewModel.launchApp(match)
-            viewModel.closeSpotlightSearch()
           }
         }
-      },
+    )
+
+    HudSearchBar(
+      isOpen = state.isSpotlightSearchOpen,
+      searchQuery = state.searchQuery,
+      onSearchQueryChange = viewModel::onSearchQueryChange,
+      onDismiss = viewModel::closeSpotlightSearch,
+      apps = state.apps,
+      onLaunchApp = viewModel::launchApp,
+      modifier = Modifier.align(Alignment.TopStart),
+    )
+
+    // Results as a cascading deck; the leader is sharp, the rest defocus.
+    // Once the IME retracts the leader card parks with its centre at half screen height,
+    // and the deck's gesture column runs from just under the stack to the bottom pad.
+    val cardHeight = (maxWidth - 36.dp) * 124f / 312f
+    val deckResting = maxHeight * 0.5f - cardHeight / 2f
+    val keyboardUp = state.isSpotlightSearchOpen && WindowInsets.isImeVisible
+    val deckShift by animateFloatAsState(
+      targetValue = if (keyboardUp) 0f else 1f,
+      animationSpec = tween(260),
+      label = "deckShift",
+    )
+    val deckTop = 236.dp + (deckResting - 236.dp) * deckShift
+
+    HudCardDeck(
+      isOpen = state.isSpotlightSearchOpen,
+      searchQuery = state.searchQuery,
+      onDismiss = viewModel::closeSpotlightSearch,
+      apps = state.apps,
+      onLaunchApp = viewModel::launchApp,
+      footprintOf = viewModel::footprintOf,
+      modifier = Modifier
+        .align(Alignment.TopStart)
+        .padding(start = 18.dp, end = 18.dp, top = deckTop, bottom = 28.dp),
     )
   }
 }
