@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -26,26 +25,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
-import com.nexwork.edith.ui.components.GridLines
-import com.nexwork.edith.ui.components.RightAppRail
-import com.nexwork.edith.ui.components.RotaryClockDial
-import com.nexwork.edith.ui.components.VerticalEnergyRail
 import com.nexwork.edith.ui.hud.CrimeSceneFocusOverlay
 import com.nexwork.edith.ui.hud.HudCardDeck
 import com.nexwork.edith.ui.hud.HudClock
 import com.nexwork.edith.ui.hud.HudSearchBar
+import com.nexwork.edith.ui.hud.groupApps
 import kotlin.math.abs
 
 /**
  * Home screen — Stark HUD void with the flat search line.
- * Swipe down anywhere (outside system gesture edges) opens the search; swipe up or
- * tap outside dismisses it. Auto-launch logic lives in HudSearchBar.
+ * Swipe down opens search; swipe up opens the same console over the full app deck, so browsing
+ * and searching are one surface. Back, a tap outside, or an upward swipe dismisses it.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -60,10 +58,14 @@ fun MainScreen(
   }
 
   val state by viewModel.launcherState.collectAsStateWithLifecycle()
-
-  BackHandler(enabled = state.isSpotlightSearchOpen) {
-    viewModel.closeSpotlightSearch()
+  val haptic = LocalHapticFeedback.current
+  val consoleOpen = state.isSpotlightSearchOpen || state.isAppBrowseOpen
+  val dismissConsole: () -> Unit = {
+    if (state.isSpotlightSearchOpen) viewModel.closeSpotlightSearch() else viewModel.closeAppBrowse()
   }
+
+  // Back climbs one level: a category back to the categories, then the console closed.
+  BackHandler(enabled = consoleOpen) { viewModel.handleBackPress() }
 
   var totalVerticalDrag by remember { mutableFloatStateOf(0f) }
   var totalHorizontalDrag by remember { mutableFloatStateOf(0f) }
@@ -73,8 +75,8 @@ fun MainScreen(
   BoxWithConstraints(
     modifier = modifier
       .fillMaxSize()
-      .pointerInput(state.isSpotlightSearchOpen) {
-        if (!state.isSpotlightSearchOpen) {
+      .pointerInput(state.isSpotlightSearchOpen, state.isAppBrowseOpen) {
+        if (!consoleOpen) {
           detectDragGestures(
             onDragStart = { offset ->
               totalVerticalDrag = 0f
@@ -103,6 +105,22 @@ fun MainScreen(
                   totalVerticalDrag = 0f
                   totalHorizontalDrag = 0f
                 }
+
+                // The browse deck stays clear of the thin system back edges.
+                val edge = 24.dp.toPx()
+                val isUpExcludedZone = dragStartX < edge ||
+                  dragStartX > screenWidth - edge ||
+                  dragStartY < 40.dp.toPx()
+                val isStrictlyVerticalUp = totalVerticalDrag < 0f &&
+                  -totalVerticalDrag > abs(totalHorizontalDrag) * 1.5f
+
+                if (!isUpExcludedZone && isStrictlyVerticalUp && -totalVerticalDrag > thresholdPx) {
+                  change.consume()
+                  haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                  viewModel.openAppBrowse()
+                  totalVerticalDrag = 0f
+                  totalHorizontalDrag = 0f
+                }
               }
             },
             onDragEnd = {
@@ -126,7 +144,7 @@ fun MainScreen(
 
               if (totalVerticalDrag < -28.dp.toPx() && abs(totalVerticalDrag) > abs(totalHorizontalDrag)) {
                 change.consume()
-                viewModel.closeSpotlightSearch()
+                dismissConsole()
                 totalVerticalDrag = 0f
                 totalHorizontalDrag = 0f
               }
@@ -144,8 +162,12 @@ fun MainScreen(
       }
   ) {
     val searchOpen = state.isSpotlightSearchOpen
+    val browseGroupCount = remember(state.apps, state.browseGroup) {
+      val name = state.browseGroup ?: return@remember 0
+      groupApps(state.apps).firstOrNull { it.name == name }?.apps?.size ?: 0
+    }
     val bgZoom by animateFloatAsState(
-      targetValue = if (searchOpen) 1.08f else 1.0f,
+      targetValue = if (consoleOpen) 1.08f else 1.0f,
       animationSpec = tween(500),
       label = "bgZoom",
     )
@@ -157,7 +179,7 @@ fun MainScreen(
         .graphicsLayer {
           scaleX = bgZoom
           scaleY = bgZoom
-          if (searchOpen && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+          if (consoleOpen && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
             renderEffect = android.graphics.RenderEffect.createBlurEffect(
               12f,
               12f,
@@ -170,45 +192,49 @@ fun MainScreen(
 
     // Crime scene intro camera lens depth overlay
     CrimeSceneFocusOverlay(
-      isOpen = searchOpen,
+      isOpen = consoleOpen,
       modifier = Modifier.fillMaxSize(),
     )
 
     // The clock owns the top bay until the console is summoned into it.
     HudClock(
-      isOpen = state.isSpotlightSearchOpen,
+      isOpen = consoleOpen,
       modifier = Modifier.align(Alignment.TopStart),
     )
 
-    // Tap outside the search line dismisses it
+    // Tap outside the console dismisses it
     Box(
       modifier = Modifier
         .fillMaxSize()
-        .pointerInput(state.isSpotlightSearchOpen) {
-          if (state.isSpotlightSearchOpen) {
-            detectTapGestures {
-              viewModel.closeSpotlightSearch()
-            }
+        .pointerInput(state.isSpotlightSearchOpen, state.isAppBrowseOpen) {
+          if (consoleOpen) {
+            detectTapGestures { dismissConsole() }
           }
         }
     )
 
     HudSearchBar(
-      isOpen = state.isSpotlightSearchOpen,
+      isOpen = consoleOpen,
       searchQuery = state.searchQuery,
       onSearchQueryChange = viewModel::onSearchQueryChange,
-      onDismiss = viewModel::closeSpotlightSearch,
+      onDismiss = dismissConsole,
       apps = state.apps,
       onLaunchApp = viewModel::launchApp,
+      autoFocus = searchOpen,
+      idleDismiss = searchOpen,
+      scopeLabel = state.browseGroup,
+      scopeCount = browseGroupCount,
+      onExitGroup = viewModel::closeAppGroup,
       modifier = Modifier.align(Alignment.TopStart),
     )
 
-    // Results as a cascading deck; the leader is sharp, the rest defocus.
-    // Once the IME retracts the leader card parks with its centre at half screen height,
-    // and the deck's gesture column runs from just under the stack to the bottom pad.
+    // Results as a cascading deck; the leader is sharp, the rest defocus. Browse mode opens on
+    // category plates and drills into one category's app deck; the strip's drag walks the window
+    // past the five dealt cards, and a pull past the head of a category climbs back out.
+    // Once the IME retracts the leader card parks with its centre at half screen height.
     val cardHeight = (maxWidth - 36.dp) * 124f / 312f
     val deckResting = maxHeight * 0.5f - cardHeight / 2f
-    val keyboardUp = state.isSpotlightSearchOpen && WindowInsets.isImeVisible
+    val keyboardUp = consoleOpen && WindowInsets.isImeVisible
     val deckShift by animateFloatAsState(
       targetValue = if (keyboardUp) 0f else 1f,
       animationSpec = tween(260),
@@ -217,49 +243,19 @@ fun MainScreen(
     val deckTop = 236.dp + (deckResting - 236.dp) * deckShift
 
     HudCardDeck(
-      isOpen = state.isSpotlightSearchOpen,
+      isOpen = consoleOpen,
       searchQuery = state.searchQuery,
-      onDismiss = viewModel::closeSpotlightSearch,
+      onDismiss = dismissConsole,
       apps = state.apps,
       onLaunchApp = viewModel::launchApp,
+      browse = state.isAppBrowseOpen,
+      browseGroup = state.browseGroup,
+      onEnterGroup = viewModel::openAppGroup,
+      onExitGroup = viewModel::closeAppGroup,
       footprintOf = viewModel::footprintOf,
       modifier = Modifier
         .align(Alignment.TopStart)
         .padding(start = 18.dp, end = 18.dp, top = deckTop, bottom = 28.dp),
     )
-  }
-}
-
-@Composable
-internal fun MainScreen(data: List<String>, modifier: Modifier = Modifier) {
-  Box(
-    modifier = modifier
-      .fillMaxSize()
-      .background(Color(0xFF0B0D12))
-  ) {
-    GridLines()
-
-    VerticalEnergyRail(
-      batteryPct = 84,
-      isCharging = false,
-      modifier = Modifier.fillMaxSize(),
-    )
-
-    Box(
-      modifier = Modifier
-        .align(Alignment.CenterStart)
-    ) {
-      RotaryClockDial(
-        use24Hour = false,
-      )
-    }
-
-    Box(
-      modifier = Modifier
-        .align(Alignment.CenterEnd)
-        .width(124.dp)
-    ) {
-      RightAppRail()
-    }
   }
 }

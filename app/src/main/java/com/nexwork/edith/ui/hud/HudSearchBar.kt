@@ -2,7 +2,6 @@ package com.nexwork.edith.ui.hud
 
 import android.graphics.Paint
 import android.graphics.Typeface
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
@@ -10,6 +9,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import com.nexwork.edith.theme.Crimson
@@ -62,7 +63,6 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexwork.edith.model.AppEntry
-import com.nexwork.edith.ui.components.filterMatchingApps
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
@@ -88,9 +88,12 @@ fun HudSearchBar(
   apps: List<AppEntry>,
   onLaunchApp: (AppEntry) -> Unit,
   modifier: Modifier = Modifier,
+  autoFocus: Boolean = true,
+  idleDismiss: Boolean = true,
+  scopeLabel: String? = null,
+  scopeCount: Int = 0,
+  onExitGroup: () -> Unit = {},
 ) {
-  BackHandler(enabled = isOpen) { onDismiss() }
-
   val density = LocalDensity.current
   val focusRequester = remember { FocusRequester() }
   val focusManager = LocalFocusManager.current
@@ -121,9 +124,24 @@ fun HudSearchBar(
   }
 
   val typing = shownQuery.trim().isNotEmpty()
-  val statusText = if (typing) "QUERY" else "STANDBY"
-  val countValue = if (typing) matchingApps.size else apps.size
-  val captionText = if (typing) "HITS" else "IN INDEX"
+  // A drill-down reads the category in the status slot; a query always reports the flat index,
+  // because typing searches everything regardless of which level is underneath.
+  val scope = scopeLabel?.takeIf { !typing }
+  val statusText = when {
+    typing -> "QUERY"
+    scope != null -> "◀ $scope"
+    else -> "STANDBY"
+  }
+  val countValue = when {
+    typing -> matchingApps.size
+    scope != null -> scopeCount
+    else -> apps.size
+  }
+  val captionText = when {
+    typing -> "HITS"
+    scope != null -> "APPS"
+    else -> "IN INDEX"
+  }
 
   val statusPaint = remember(density) {
     monoPaint(density, 7.5f, 1.1f, Paint.Align.LEFT, 107)
@@ -159,7 +177,7 @@ fun HudSearchBar(
   )
 
   LaunchedEffect(isOpen) {
-    if (isOpen) {
+    if (isOpen && autoFocus) {
       delay(160L)
       focusRequester.requestFocus()
       keyboardController?.show()
@@ -172,6 +190,7 @@ fun HudSearchBar(
     if (!isOpen) return@LaunchedEffect
     if (textFieldValue.composition != null) return@LaunchedEffect
     if (textFieldValue.text.isEmpty()) {
+      if (!idleDismiss) return@LaunchedEffect
       delay(4000L)
       if (isOpen && textFieldValue.text.isEmpty() && textFieldValue.composition == null) {
         keyboardController?.hide()
@@ -195,6 +214,15 @@ fun HudSearchBar(
       .padding(horizontal = 18.dp, vertical = 84.dp)
       .height(64.dp)
       .graphicsLayer { alpha = phase(revealAnim.value, 0f, 0.22f) }
+      // The plate itself is the hit target: in browse mode there is no keyboard yet, so a tap
+      // on the ruled field has to summon the cursor instead of falling through to the dismiss
+      // layer behind it.
+      .pointerInput(Unit) {
+        detectTapGestures {
+          focusRequester.requestFocus()
+          keyboardController?.show()
+        }
+      }
       .background(bgBrush),
   ) {
     Box(
@@ -406,6 +434,18 @@ fun HudSearchBar(
     BoxWithConstraints(Modifier.fillMaxSize()) {
       val sx = maxWidth / 312f
       val sy = maxHeight / 64f
+      if (scope != null) {
+        Box(
+          modifier = Modifier
+            .offset(x = 0.dp, y = 0.dp)
+            .size(width = sx * 130f, height = sy * 26f)
+            .pointerInput(scope) {
+              detectTapGestures {
+                onExitGroup()
+              }
+            }
+        )
+      }
       Box(
         modifier = Modifier
           .offset(x = sx * 33f, y = sy * 26f)
