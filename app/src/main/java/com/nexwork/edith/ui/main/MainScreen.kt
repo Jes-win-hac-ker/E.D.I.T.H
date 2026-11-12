@@ -37,6 +37,7 @@ import com.nexwork.edith.ui.hud.CrimeSceneFocusOverlay
 import com.nexwork.edith.ui.hud.HudCardDeck
 import com.nexwork.edith.ui.hud.HudClock
 import com.nexwork.edith.ui.hud.HudSearchBar
+import com.nexwork.edith.ui.hud.GlobeController
 import com.nexwork.edith.ui.hud.InteractiveWireframeGlobe
 import com.nexwork.edith.ui.hud.groupApps
 import kotlin.math.abs
@@ -64,6 +65,7 @@ fun MainScreen(
   val dismissConsole: () -> Unit = {
     if (state.isSpotlightSearchOpen) viewModel.closeSpotlightSearch() else viewModel.closeAppBrowse()
   }
+  val globeController = remember { GlobeController() }
 
   // Back climbs one level: a category back to the categories, then the console closed.
   BackHandler(enabled = consoleOpen) { viewModel.handleBackPress() }
@@ -100,14 +102,6 @@ fun MainScreen(
                 val isStrictlyVerticalDown = totalVerticalDrag > 0f &&
                   totalVerticalDrag > abs(totalHorizontalDrag) * 1.5f
 
-                if (isStrictlyVerticalDown && totalVerticalDrag > thresholdPx) {
-                  change.consume()
-                  viewModel.openSpotlightSearch()
-                  totalVerticalDrag = 0f
-                  totalHorizontalDrag = 0f
-                }
-
-                // The browse deck stays clear of the thin system back edges.
                 val edge = 24.dp.toPx()
                 val isUpExcludedZone = dragStartX < edge ||
                   dragStartX > screenWidth - edge ||
@@ -115,12 +109,19 @@ fun MainScreen(
                 val isStrictlyVerticalUp = totalVerticalDrag < 0f &&
                   -totalVerticalDrag > abs(totalHorizontalDrag) * 1.5f
 
-                if (!isUpExcludedZone && isStrictlyVerticalUp && -totalVerticalDrag > thresholdPx) {
+                if (isStrictlyVerticalDown && totalVerticalDrag > thresholdPx) {
+                  change.consume()
+                  viewModel.openSpotlightSearch()
+                  totalVerticalDrag = 0f
+                  totalHorizontalDrag = 0f
+                } else if (!isUpExcludedZone && isStrictlyVerticalUp && -totalVerticalDrag > thresholdPx) {
                   change.consume()
                   haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                   viewModel.openAppBrowse()
                   totalVerticalDrag = 0f
                   totalHorizontalDrag = 0f
+                } else {
+                  globeController.rotate(dragAmount.x, dragAmount.y)
                 }
               }
             },
@@ -191,6 +192,7 @@ fun MainScreen(
         .background(Color.Black)
     ) {
       InteractiveWireframeGlobe(
+        controller = globeController,
         modifier = Modifier.fillMaxSize(),
       )
     }
@@ -214,6 +216,8 @@ fun MainScreen(
         .pointerInput(state.isSpotlightSearchOpen, state.isAppBrowseOpen) {
           if (consoleOpen) {
             detectTapGestures { dismissConsole() }
+          } else {
+            detectTapGestures { globeController.tap() }
           }
         }
     )

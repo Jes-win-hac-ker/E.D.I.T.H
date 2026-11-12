@@ -30,20 +30,9 @@
             height: 100% !important;
             display: block;
         }
-
-        /* Subtle ambient radial vignette */
-        .cinematic-haze {
-            position: absolute;
-            inset: 0;
-            pointer-events: none;
-            z-index: 2;
-            background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.015) 0%, rgba(10, 15, 24, 0.12) 55%, rgba(0, 0, 0, 0.85) 100%);
-        }
     </style>
 </head>
 <body>
-    <div class="cinematic-haze"></div>
-
     <script src="./three.min.js"></script>
     <script src="./globe.bundle.js"></script>
     <script>
@@ -51,24 +40,25 @@
             const W = window.WireframeGlobe;
             if (!W) return;
 
-            // 1. Scene & Depth Fog
+            // 1. Scene & Void Space Fog
             const scene = new THREE.Scene();
             scene.fog = new THREE.FogExp2(0x000000, 0.0016);
 
-            // 2. Camera setup with vertical FOV 45
+            // 2. Camera setup
             const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
 
-            // 3. WebGL Renderer configured for high performance on mobile GPU
+            // 3. WebGL Renderer: crisp, dark, anti-aliased with subdued exposure
             const renderer = new THREE.WebGLRenderer({
                 antialias: true,
                 powerPreference: 'high-performance',
                 alpha: false
             });
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.0));
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 2, 2.5));
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.outputColorSpace = THREE.SRGBColorSpace;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            renderer.toneMappingExposure = 1.15;
+            // Tone down brightness from 1.15 to 0.70 for sleek Stark HUD aesthetic
+            renderer.toneMappingExposure = 0.70;
 
             const canvas = renderer.domElement;
             canvas.id = 'webgl-canvas';
@@ -80,13 +70,14 @@
             globeGroup.name = 'minimized-wireframe-globe';
             globeGroup.rotation.z = (23.4 * Math.PI) / 180;
             scene.add(globeGroup);
+            window.globeGroup = globeGroup;
 
-            // 5. Modular components from your Firefox dashboard
-            // A. Neon wireframe graticule (parallels, meridians & depth occluder)
+            // 5. Build Sub-Components
+            // A. Neon wireframe graticule
             const graticule = W.createGraticule(radius);
             globeGroup.add(graticule);
 
-            // B. Glowing Fibonacci landmass points & coastlines (23,500 particles)
+            // B. Glowing continent landmass point cloud
             const landmass = W.createLandmass(radius);
             globeGroup.add(landmass);
 
@@ -98,7 +89,7 @@
             const nodes = W.createNodes(radius);
             globeGroup.add(nodes.group);
 
-            // E. 3D great-circle flight network arcs
+            // E. 3D great-circle flight arcs
             const arcs = W.createArcs(radius);
             globeGroup.add(arcs.group);
 
@@ -106,7 +97,7 @@
             const userLocation = W.createUserLocationBeacon(radius);
             globeGroup.add(userLocation.group);
 
-            // G. Geodesic pulse manager for radar sweeps
+            // G. Geodesic pulse manager (only triggered on explicit user tap)
             const geodesicPulse = W.createGeodesicPulseManager({
                 radius: radius,
                 camera: camera,
@@ -115,40 +106,26 @@
                 landmass: landmass
             });
 
-            // 6. Touch Drag Interaction (spin & orbit directly with inertia)
-            let isDragging = false;
-            let prevPointer = { x: 0, y: 0 };
-            let rotVelocity = { x: 0, y: 0 };
-
-            function onPointerDown(e) {
-                isDragging = true;
-                const p = e.touches ? e.touches[0] : e;
-                prevPointer = { x: p.clientX, y: p.clientY };
-                rotVelocity = { x: 0, y: 0 };
-            }
-
-            function onPointerMove(e) {
-                if (!isDragging) return;
-                const p = e.touches ? e.touches[0] : e;
-                const dx = p.clientX - prevPointer.x;
-                const dy = p.clientY - prevPointer.y;
-                prevPointer = { x: p.clientX, y: p.clientY };
-
-                globeGroup.rotation.y += dx * 0.005;
-                globeGroup.rotation.x += dy * 0.003;
-                rotVelocity = { x: dx * 0.005, y: dy * 0.003 };
-            }
-
-            function onPointerUp() {
-                isDragging = false;
-            }
-
-            canvas.addEventListener('mousedown', onPointerDown);
-            window.addEventListener('mousemove', onPointerMove);
-            window.addEventListener('mouseup', onPointerUp);
-            canvas.addEventListener('touchstart', onPointerDown, { passive: true });
-            window.addEventListener('touchmove', onPointerMove, { passive: true });
-            window.addEventListener('touchend', onPointerUp);
+            // 6. DE-BLUR & MUTE BRIGHTNESS:
+            // Remove blurry haze point duplicates and sharpen particle points into needle-fine dots
+            globeGroup.traverse((obj) => {
+                if (obj.isPoints) {
+                    if (obj.name && obj.name.includes('haze')) {
+                        // Completely hide blurry haze layer
+                        obj.visible = false;
+                    } else if (obj.material) {
+                        // Subdued, sharp, crisp dots
+                        obj.material.size = 1.1;
+                        obj.material.opacity = 0.50;
+                        obj.material.transparent = true;
+                    }
+                }
+                if (obj.isLine || obj.isLineSegments) {
+                    if (obj.material) {
+                        obj.material.opacity = Math.min(obj.material.opacity || 0.2, 0.22);
+                    }
+                }
+            });
 
             // 7. Dynamic Scaling: MINIMIZE and fit the globe to the phone screen
             function resize() {
@@ -160,15 +137,11 @@
                 camera.updateProjectionMatrix();
                 renderer.setSize(width, height);
 
-                // Fit globe comfortably inside phone screen width (~64% of screen width)
-                // Visible width at Z=280: 2 * 280 * tan(22.5 deg) * aspect = 231.9 * aspect
-                // Target diameter = 0.64 * 231.9 * aspect = 148.4 * aspect
-                // Since base diameter is 150 (2 * 75):
-                // scale = (148.4 * aspect) / 150 = 0.99 * aspect
-                const scale = Math.min(0.68, Math.max(0.32, aspect * 1.02));
+                // Diameter of globe occupies ~62% of screen width (no edge overflow)
+                const scale = Math.min(0.66, Math.max(0.32, aspect * 1.0));
                 globeGroup.scale.set(scale, scale, scale);
 
-                // Position globe centered, slightly below the clock bay
+                // Center globe vertically slightly below the top HUD clock
                 globeGroup.position.set(0, -10, 0);
                 camera.position.set(0, 15, 280);
                 camera.lookAt(0, -10, 0);
@@ -177,29 +150,71 @@
             resize();
             window.addEventListener('resize', resize);
 
-            // Periodic radar pulse expansion every 7 seconds
-            setInterval(() => {
-                if (geodesicPulse && typeof geodesicPulse.triggerPulse === 'function') {
-                    geodesicPulse.triggerPulse(new THREE.Vector3(0, 0, 1), null, 3.2);
-                }
-            }, 7000);
+            // 8. INTERACTIVE ROTATION ENGINE
+            let rotVelocity = { x: 0, y: 0 };
+            window.rotateGlobe = function(dx, dy) {
+                globeGroup.rotation.y += dx * 0.005;
+                globeGroup.rotation.x = Math.max(-0.6, Math.min(0.6, globeGroup.rotation.x + dy * 0.003));
+                rotVelocity.x = dx * 0.003;
+                rotVelocity.y = dy * 0.0015;
+            };
 
-            // 8. 120Hz Animation Loop
+            window.onGlobeTap = function() {
+                if (geodesicPulse && typeof geodesicPulse.triggerPulse === 'function') {
+                    geodesicPulse.triggerPulse(new THREE.Vector3(0, 0, 1), null, 2.2);
+                }
+            };
+
+            // Touch events directly on canvas
+            let isDragging = false;
+            let lastPos = { x: 0, y: 0 };
+
+            function onTouchStart(e) {
+                isDragging = true;
+                const touch = e.touches ? e.touches[0] : e;
+                lastPos = { x: touch.clientX, y: touch.clientY };
+                rotVelocity = { x: 0, y: 0 };
+            }
+
+            function onTouchMove(e) {
+                if (!isDragging) return;
+                const touch = e.touches ? e.touches[0] : e;
+                const dx = touch.clientX - lastPos.x;
+                const dy = touch.clientY - lastPos.y;
+                lastPos = { x: touch.clientX, y: touch.clientY };
+                window.rotateGlobe(dx, dy);
+            }
+
+            function onTouchEnd() {
+                isDragging = false;
+            }
+
+            canvas.addEventListener('mousedown', onTouchStart);
+            window.addEventListener('mousemove', onTouchMove);
+            window.addEventListener('mouseup', onTouchEnd);
+            canvas.addEventListener('touchstart', onTouchStart, { passive: true });
+            window.addEventListener('touchmove', onTouchMove, { passive: true });
+            window.addEventListener('touchend', onTouchEnd);
+
+            // 9. Smooth 120Hz Render Loop
             const clock = new THREE.Clock();
             function animate() {
                 requestAnimationFrame(animate);
                 const delta = Math.min(clock.getDelta(), 0.05);
                 const elapsed = clock.getElapsedTime();
 
-                // Smooth idle auto-rotation + touch momentum
-                if (!isDragging) {
-                    globeGroup.rotation.y += delta * 0.12 + rotVelocity.x;
-                    globeGroup.rotation.x += rotVelocity.y;
-                    rotVelocity.x *= 0.94;
-                    rotVelocity.y *= 0.94;
+                // Momentum inertia or gentle ambient orbit
+                if (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001) {
+                    globeGroup.rotation.y += rotVelocity.x;
+                    globeGroup.rotation.x = Math.max(-0.6, Math.min(0.6, globeGroup.rotation.x + rotVelocity.y));
+                    rotVelocity.x *= 0.91;
+                    rotVelocity.y *= 0.91;
+                } else if (!isDragging) {
+                    // Very subtle, gentle ambient rotation (0.04)
+                    globeGroup.rotation.y += delta * 0.04;
                 }
 
-                // Update sub-system visualizers
+                // Update dynamic sub-systems
                 if (userLocation && typeof userLocation.update === 'function') userLocation.update(elapsed);
                 if (geodesicPulse && typeof geodesicPulse.update === 'function') geodesicPulse.update(elapsed);
                 if (solarTerminator && typeof solarTerminator.update === 'function') solarTerminator.update(elapsed);
