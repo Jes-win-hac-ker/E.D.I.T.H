@@ -44,7 +44,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.model.AppFootprint
-import com.nexwork.edith.ui.components.toImageBitmap
 import kotlin.math.roundToInt
 
 /**

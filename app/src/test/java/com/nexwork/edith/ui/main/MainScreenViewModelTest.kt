@@ -56,6 +56,17 @@ class MainScreenViewModelTest {
   }
 
   @Test
+  fun handleBackPress_closesAppBrowse() = runTest {
+    val viewModel = MainScreenViewModel(FakeMyModelRepository())
+    viewModel.openAppBrowse()
+    assertTrue(viewModel.launcherState.value.isAppBrowseOpen)
+
+    val handled = viewModel.handleBackPress()
+    assertTrue(handled)
+    assertFalse(viewModel.launcherState.value.isAppBrowseOpen)
+  }
+
+  @Test
   fun filterMatchingApps_prioritizesMostUsedAppForAutoLaunch() {
     val appLeastUsed = com.nexwork.edith.model.AppEntry(
       label = "Calculator",
@@ -78,12 +89,12 @@ class MainScreenViewModelTest {
 
     val apps = listOf(appLeastUsed, appMostUsed, appMediumUsed)
 
-    val matched = com.nexwork.edith.ui.components.filterMatchingApps("cal", apps)
+    val matched = com.nexwork.edith.ui.hud.filterMatchingApps("cal", apps)
     assertEquals(2, matched.size)
     // Between Calendar (10_000L) and Calculator (1_000L), Calendar has higher usage so it must be first
     assertEquals("Calendar", matched.first().label)
 
-    val matchedC = com.nexwork.edith.ui.components.filterMatchingApps("c", apps)
+    val matchedC = com.nexwork.edith.ui.hud.filterMatchingApps("c", apps)
     assertEquals(3, matchedC.size)
     // Camera has highest usage (50_000L), so it is at index 0 for 3-second auto-launch
     assertEquals("Camera", matchedC.first().label)
@@ -98,8 +109,8 @@ class MainScreenViewModelTest {
         activityName = "",
       )
     )
-    assertTrue(com.nexwork.edith.ui.components.filterMatchingApps("", apps).isEmpty())
-    assertTrue(com.nexwork.edith.ui.components.filterMatchingApps("   ", apps).isEmpty())
+    assertTrue(com.nexwork.edith.ui.hud.filterMatchingApps("", apps).isEmpty())
+    assertTrue(com.nexwork.edith.ui.hud.filterMatchingApps("   ", apps).isEmpty())
   }
 
   @Test
@@ -132,14 +143,14 @@ class MainScreenViewModelTest {
     val apps = listOf(youtube, chrome, googleApp, googleDrive)
 
     // Searching "google" must only match "Google" and "Google Drive", NOT YouTube or Chrome
-    val googleMatches = com.nexwork.edith.ui.components.filterMatchingApps("google", apps)
+    val googleMatches = com.nexwork.edith.ui.hud.filterMatchingApps("google", apps)
     assertEquals(2, googleMatches.size)
     // "Google" is an exact match (Tier 1), so it must rank #1 even though Google Drive has more usage
     assertEquals("Google", googleMatches[0].label)
     assertEquals("Google Drive", googleMatches[1].label)
 
     // Searching "chrome" must only match Chrome
-    val chromeMatches = com.nexwork.edith.ui.components.filterMatchingApps("chrome", apps)
+    val chromeMatches = com.nexwork.edith.ui.hud.filterMatchingApps("chrome", apps)
     assertEquals(1, chromeMatches.size)
     assertEquals("Chrome", chromeMatches[0].label)
   }

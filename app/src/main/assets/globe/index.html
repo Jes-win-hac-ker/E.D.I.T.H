@@ -89,9 +89,7 @@
             const nodes = W.createNodes(radius);
             globeGroup.add(nodes.group);
 
-            // E. 3D great-circle flight arcs
-            const arcs = W.createArcs(radius);
-            globeGroup.add(arcs.group);
+            // (3D flight arcs removed per user request)
 
             // F. Real User Location Beacon (customized to user's real location)
             const userLocation = W.createUserLocationBeacon(radius);
@@ -171,22 +169,6 @@
             resize();
             window.addEventListener('resize', resize);
 
-            // Option A: Holographic Laser Tether from active search bar to user beacon
-            const tetherGeo = new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(0, 85, 0),
-                new THREE.Vector3(0, 0, 0)
-            ]);
-            const tetherMat = new THREE.LineBasicMaterial({
-                color: 0x38bdf8,
-                transparent: true,
-                opacity: 0.0,
-                blending: THREE.AdditiveBlending
-            });
-            const tetherLine = new THREE.Line(tetherGeo, tetherMat);
-            tetherLine.name = 'search-tether-beam';
-            tetherLine.visible = false;
-            scene.add(tetherLine);
-
             // 8. REAL USER LOCATION (Defaults to Thrissur, Kerala: 10.516, 76.2157)
             window.setUserLocation = function(lat, lon) {
                 userLat = lat;
@@ -220,16 +202,10 @@
                         // Subtle upward tilt so beacon points directly perpendicular towards top search header
                         targetRotX = -0.16;
                     }
-                    if (tetherLine) {
-                        tetherLine.visible = true;
-                    }
                 } else {
                     targetScale = restingScale;
                     targetPosY = -10;
                     targetRotX = 0;
-                    if (tetherLine) {
-                        tetherLine.visible = false;
-                    }
                 }
             };
 
@@ -363,19 +339,6 @@
                     // Smoothly rotate globe so location beacon aligns perpendicular to the search bar
                     globeGroup.rotation.y = THREE.MathUtils.lerp(globeGroup.rotation.y, targetRotY, 0.08);
                     globeGroup.rotation.x = THREE.MathUtils.lerp(globeGroup.rotation.x, targetRotX, 0.08);
-
-                    // Option A: Update vertical holographic laser tether
-                    if (tetherLine && tetherLine.visible && userLocation && userLocation.group) {
-                        const beaconWorld = new THREE.Vector3();
-                        userLocation.group.getWorldPosition(beaconWorld);
-                        const posAttr = tetherGeo.attributes.position;
-                        // Search bar bottom anchor
-                        posAttr.setXYZ(0, 0, 70, 0);
-                        // Beacon target anchor
-                        posAttr.setXYZ(1, beaconWorld.x, beaconWorld.y, beaconWorld.z);
-                        posAttr.needsUpdate = true;
-                        tetherMat.opacity = 0.45 + Math.sin(elapsed * 6.5) * 0.25;
-                    }
                 } else {
                     // Momentum inertia or subtle idle auto-rotation
                     if (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001) {
@@ -393,7 +356,6 @@
                 if (geodesicPulse && typeof geodesicPulse.update === 'function') geodesicPulse.update(elapsed);
                 if (solarTerminator && typeof solarTerminator.update === 'function') solarTerminator.update(elapsed);
                 if (nodes && typeof nodes.update === 'function') nodes.update(elapsed);
-                if (arcs && typeof arcs.update === 'function') arcs.update(elapsed);
 
                 renderer.render(scene, camera);
             }

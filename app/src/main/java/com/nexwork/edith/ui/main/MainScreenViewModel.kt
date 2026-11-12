@@ -30,10 +30,9 @@ data class LauncherHomeState(
   val mostUsed14dApps: List<AppEntry> = LauncherRepository.sampleApps().drop(3).take(4),
   val quickRailApps: List<AppEntry> = LauncherRepository.sampleApps().take(7),
   val searchQuery: String = "",
-  val railPackages: List<String> = LauncherRepository.DEFAULT_RAIL_PACKAGES,
-  val isFullOverlayOpen: Boolean = false,
+  val isAppBrowseOpen: Boolean = false,
+  val browseGroup: String? = null,
   val isSpotlightSearchOpen: Boolean = false,
-  val cornerSwipeProgress: Float = 0f,
   val use24Hour: Boolean = false,
   val isDefaultLauncher: Boolean = true,
   val weather: WeatherCondition = WeatherCondition.PARTLY_CLOUDY,
@@ -122,7 +121,6 @@ class MainScreenViewModel(
           essentialApps = essentials,
           mostUsed14dApps = mostUsed14d,
           quickRailApps = railApps,
-          railPackages = launcherRepository.getRailPackages(),
           telemetry = telemetry,
           isDefaultLauncher = isDefault,
           hasNotificationAccess = notifAccess,
@@ -134,40 +132,6 @@ class MainScreenViewModel(
   fun onSearchQueryChange(query: String) {
     _launcherState.update { state ->
       state.copy(searchQuery = query)
-    }
-  }
-
-  fun onCornerSwipeProgress(progress: Float) {
-    _launcherState.update { state ->
-      state.copy(cornerSwipeProgress = progress.coerceIn(0f, 1f))
-    }
-  }
-
-  fun onCornerSwipeFinish(shouldUnlock: Boolean) {
-    _launcherState.update { state ->
-      state.copy(
-        isFullOverlayOpen = shouldUnlock,
-        cornerSwipeProgress = if (shouldUnlock) 1f else 0f,
-      )
-    }
-  }
-
-  fun openFullAppListOverlay() {
-    _launcherState.update { state ->
-      state.copy(
-        isFullOverlayOpen = true,
-        cornerSwipeProgress = 1f,
-      )
-    }
-  }
-
-  fun closeFullAppListOverlay() {
-    _launcherState.update { state ->
-      state.copy(
-        isFullOverlayOpen = false,
-        cornerSwipeProgress = 0f,
-        searchQuery = "",
-      )
     }
   }
 
@@ -195,11 +159,6 @@ class MainScreenViewModel(
   fun togglePinApp(app: AppEntry) {
     launcherRepository.togglePinPackage(app.packageName)
     refreshLauncherData()
-  }
-
-  fun toggleRailPackage(packageName: String) {
-    val updated = launcherRepository.toggleRailPackage(packageName)
-    _launcherState.update { it.copy(railPackages = updated) }
   }
 
   fun openAppInfo(app: AppEntry) {
@@ -234,6 +193,8 @@ class MainScreenViewModel(
     _launcherState.update { state ->
       state.copy(
         isSpotlightSearchOpen = true,
+        isAppBrowseOpen = false,
+        browseGroup = null,
         searchQuery = "",
       )
     }
@@ -243,6 +204,40 @@ class MainScreenViewModel(
     _launcherState.update { state ->
       state.copy(
         isSpotlightSearchOpen = false,
+        browseGroup = null,
+        searchQuery = "",
+      )
+    }
+  }
+
+  fun openAppBrowse() {
+    _launcherState.update { state ->
+      state.copy(
+        isAppBrowseOpen = true,
+        isSpotlightSearchOpen = false,
+        browseGroup = null,
+        searchQuery = "",
+      )
+    }
+  }
+
+  /** Drills the browse deck into one category. Typing still searches the flat index. */
+  fun openAppGroup(name: String) {
+    _launcherState.update { state ->
+      if (!state.isAppBrowseOpen) state
+      else state.copy(browseGroup = name, searchQuery = "")
+    }
+  }
+
+  fun closeAppGroup() {
+    _launcherState.update { state -> state.copy(browseGroup = null, searchQuery = "") }
+  }
+
+  fun closeAppBrowse() {
+    _launcherState.update { state ->
+      state.copy(
+        isAppBrowseOpen = false,
+        browseGroup = null,
         searchQuery = "",
       )
     }
@@ -254,8 +249,8 @@ class MainScreenViewModel(
       closeSpotlightSearch()
       return true
     }
-    if (current.isFullOverlayOpen || current.searchQuery.isNotEmpty() || current.cornerSwipeProgress > 0f) {
-      closeFullAppListOverlay()
+    if (current.isAppBrowseOpen) {
+      if (current.browseGroup != null) closeAppGroup() else closeAppBrowse()
       return true
     }
     return false

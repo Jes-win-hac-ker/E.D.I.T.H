@@ -78,29 +78,6 @@ class LauncherRepository(private var context: Context? = null) {
     return current
   }
 
-  /** Ordered right-rail package list (top to bottom); falls back to the curated defaults. */
-  fun getRailPackages(): List<String> {
-    val saved = prefs?.getString(KEY_RAIL_PACKAGES, null)
-    if (saved != null) return saved.split('\n').filter { it.isNotBlank() }
-    return DEFAULT_RAIL_PACKAGES
-  }
-
-  fun setRailPackages(packages: List<String>) {
-    prefs?.edit()?.putString(KEY_RAIL_PACKAGES, packages.joinToString("\n"))?.apply()
-  }
-
-  fun toggleRailPackage(packageName: String): List<String> {
-    val current = getRailPackages().toMutableList()
-    if (current.contains(packageName)) {
-      current.remove(packageName)
-    } else {
-      if (current.size >= MAX_RAIL_APPS) return current
-      current.add(packageName)
-    }
-    setRailPackages(current)
-    return current
-  }
-
   fun hasUsageStatsPermission(): Boolean {
     val ctx = context ?: return true
     return try {
@@ -566,19 +543,6 @@ class LauncherRepository(private var context: Context? = null) {
 
   companion object {
     private const val KEY_PINNED_PACKAGES = "pinned_packages"
-    private const val KEY_RAIL_PACKAGES = "rail_packages"
-    const val MAX_RAIL_APPS = 8
-
-    val DEFAULT_RAIL_PACKAGES =
-      listOf(
-        "ai.qwenlm.chat.android",
-        "com.google.android.apps.bard",
-        "com.whatsapp",
-        "com.motorola.camera3",
-        "com.google.android.dialer",
-        "com.google.android.apps.nbu.paisa.user",
-        "com.google.android.googlequicksearchbox",
-      )
 
     private val DEFAULT_ESSENTIAL_KEYWORDS =
       setOf(
