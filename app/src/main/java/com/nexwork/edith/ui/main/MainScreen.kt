@@ -37,6 +37,7 @@ import com.nexwork.edith.ui.hud.CrimeSceneFocusOverlay
 import com.nexwork.edith.ui.hud.HudCardDeck
 import com.nexwork.edith.ui.hud.HudClock
 import com.nexwork.edith.ui.hud.HudSearchBar
+import com.nexwork.edith.ui.hud.InteractiveWireframeGlobe
 import com.nexwork.edith.ui.hud.groupApps
 import kotlin.math.abs
 
@@ -172,7 +173,7 @@ fun MainScreen(
       label = "bgZoom",
     )
 
-    // Cleared: pure black void backdrop with rack focus dolly zoom
+    // Wireframe Earth backdrop with rack focus dolly zoom and blur
     Box(
       Modifier
         .fillMaxSize()
@@ -188,7 +189,11 @@ fun MainScreen(
           }
         }
         .background(Color.Black)
-    )
+    ) {
+      InteractiveWireframeGlobe(
+        modifier = Modifier.fillMaxSize(),
+      )
+    }
 
     // Crime scene intro camera lens depth overlay
     CrimeSceneFocusOverlay(

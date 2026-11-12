@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="color-scheme" content="dark">
+    <title>Interactive Wireframe Earth</title>
+    <style>
+        :root {
+            color-scheme: dark;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000000;
+        }
+
+        #main-content {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+        }
+
+        #webgl-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100% !important;
+            height: 100% !important;
+            z-index: 1;
+            display: block;
+        }
+
+        /* Subtle cinematic ambient haze */
+        .cinematic-haze {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 2;
+            background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.015) 0%, rgba(10, 15, 24, 0.10) 50%, rgba(0, 0, 0, 0.70) 100%);
+        }
+
+        /* Hide desktop-specific HUD panels so the native Android launcher UI owns HUD readouts */
+        #search-container,
+        .hud-search-bar,
+        .telemetry-strip,
+        #telemetry-strip-container,
+        .rangefinder-hud,
+        .tactical-rangefinder-hud,
+        #globe-node-tooltip {
+            display: none !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+    </style>
+</head>
+<body class="dashboard-body">
+    <main id="main-content">
+        <div class="cinematic-haze"></div>
+    </main>
+
+    <script src="./three.min.js"></script>
+    <script src="./globe.bundle.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            if (window.initGlobeApp) {
+                window.initGlobeApp();
+            }
+        });
+    </script>
+</body>
+</html>
