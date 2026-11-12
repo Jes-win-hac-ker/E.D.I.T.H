@@ -42,6 +42,18 @@ class GlobeController {
   fun setLocation(lat: Double, lon: Double) {
     webViewRef?.evaluateJavascript("if(window.setUserLocation) window.setUserLocation($lat, $lon);", null)
   }
+
+  fun setSearchActive(active: Boolean) {
+    webViewRef?.evaluateJavascript("if(window.setSearchActive) window.setSearchActive($active);", null)
+  }
+
+  fun zoom(factor: Float) {
+    webViewRef?.evaluateJavascript("if(window.applyZoomDelta) window.applyZoomDelta($factor);", null)
+  }
+
+  fun resetZoom() {
+    webViewRef?.evaluateJavascript("if(window.resetZoom) window.resetZoom();", null)
+  }
 }
 
 /**

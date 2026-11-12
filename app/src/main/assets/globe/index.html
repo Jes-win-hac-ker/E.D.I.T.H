@@ -137,7 +137,19 @@
                 }
             });
 
-            // 7. Dynamic Scaling: MINIMIZE and fit the globe to the phone screen
+            // 7. Dynamic Scaling & Search-Active Transitions
+            let restingScale = 0.42;
+            let targetScale = 0.42;
+            let currentScale = 0.42;
+            let targetPosY = -10;
+            let currentPosY = -10;
+            let userZoom = 1.0;
+            let searchModeActive = false;
+            let targetRotY = 0;
+            let targetRotX = 0;
+            let userLat = 10.516;
+            let userLon = 76.2157;
+
             function resize() {
                 const width = window.innerWidth;
                 const height = window.innerHeight;
@@ -147,12 +159,11 @@
                 camera.updateProjectionMatrix();
                 renderer.setSize(width, height);
 
-                // Diameter of globe occupies ~62% of screen width (no edge overflow)
-                const scale = Math.min(0.66, Math.max(0.32, aspect * 1.0));
-                globeGroup.scale.set(scale, scale, scale);
-
-                // Center globe vertically slightly below the top HUD clock
-                globeGroup.position.set(0, -10, 0);
+                // Resting scale fits cleanly below the clock
+                restingScale = Math.min(0.48, Math.max(0.32, aspect * 0.95));
+                if (!searchModeActive) {
+                    targetScale = restingScale;
+                }
                 camera.position.set(0, 15, 280);
                 camera.lookAt(0, -10, 0);
             }
@@ -160,18 +171,76 @@
             resize();
             window.addEventListener('resize', resize);
 
+            // Option A: Holographic Laser Tether from active search bar to user beacon
+            const tetherGeo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 85, 0),
+                new THREE.Vector3(0, 0, 0)
+            ]);
+            const tetherMat = new THREE.LineBasicMaterial({
+                color: 0x38bdf8,
+                transparent: true,
+                opacity: 0.0,
+                blending: THREE.AdditiveBlending
+            });
+            const tetherLine = new THREE.Line(tetherGeo, tetherMat);
+            tetherLine.name = 'search-tether-beam';
+            tetherLine.visible = false;
+            scene.add(tetherLine);
+
             // 8. REAL USER LOCATION (Defaults to Thrissur, Kerala: 10.516, 76.2157)
             window.setUserLocation = function(lat, lon) {
+                userLat = lat;
+                userLon = lon;
                 if (userLocation && typeof userLocation.setPosition === 'function') {
                     userLocation.setPosition(lat, lon);
                 }
                 if (W.latLonToVector3) {
                     const localVec = W.latLonToVector3(lat, lon, radius);
-                    // Orient Earth so user's real location faces directly forward!
-                    globeGroup.rotation.y = -Math.atan2(localVec.x, localVec.z);
+                    targetRotY = -Math.atan2(localVec.x, localVec.z);
+                    if (!searchModeActive) {
+                        globeGroup.rotation.y = targetRotY;
+                    }
                 }
             };
             window.setUserLocation(10.516, 76.2157);
+
+            // 8B. SEARCH ACTIVE STATE: FILL 60% SCREEN & ALIGN BEACON PERPENDICULAR TO SEARCH
+            window.setSearchActive = function(active) {
+                searchModeActive = !!active;
+                if (searchModeActive) {
+                    // Fill 60% of screen width
+                    targetScale = 0.60;
+                    // Lower position so search bar and floating cards have dedicated stage
+                    targetPosY = -28;
+
+                    // Orient Earth so user location beacon (Kerala) is strictly perpendicular to the search bar
+                    if (W.latLonToVector3) {
+                        const localVec = W.latLonToVector3(userLat, userLon, radius);
+                        targetRotY = -Math.atan2(localVec.x, localVec.z);
+                        // Subtle upward tilt so beacon points directly perpendicular towards top search header
+                        targetRotX = -0.16;
+                    }
+                    if (tetherLine) {
+                        tetherLine.visible = true;
+                    }
+                } else {
+                    targetScale = restingScale;
+                    targetPosY = -10;
+                    targetRotX = 0;
+                    if (tetherLine) {
+                        tetherLine.visible = false;
+                    }
+                }
+            };
+
+            // 8C. ZOOM IN / ZOOM OUT CONTROLS
+            window.applyZoomDelta = function(factor) {
+                userZoom = Math.max(0.4, Math.min(1.85, userZoom * factor));
+            };
+
+            window.resetZoom = function() {
+                userZoom = 1.0;
+            };
 
             // 9. RAYCASTING: TRIGGER WAVE AT EXACT TOUCH COORDINATES
             const raycaster = new THREE.Raycaster();
@@ -214,7 +283,7 @@
                 }
             };
 
-            // 10. INTERACTIVE TOUCH ROTATION WITH MOMENTUM
+            // 10. INTERACTIVE TOUCH ROTATION WITH MOMENTUM & TWO-FINGER PINCH ZOOM
             let rotVelocity = { x: 0, y: 0 };
             window.rotateGlobe = function(dx, dy) {
                 globeGroup.rotation.y += dx * 0.005;
@@ -223,11 +292,19 @@
                 rotVelocity.y = dy * 0.0015;
             };
 
-            // Touch events directly on canvas
             let isDragging = false;
             let lastPos = { x: 0, y: 0 };
+            let initialPinchDist = 0;
 
             function onTouchStart(e) {
+                if (e.touches && e.touches.length === 2) {
+                    isDragging = false;
+                    initialPinchDist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    return;
+                }
                 isDragging = true;
                 const touch = e.touches ? e.touches[0] : e;
                 lastPos = { x: touch.clientX, y: touch.clientY };
@@ -235,6 +312,18 @@
             }
 
             function onTouchMove(e) {
+                if (e.touches && e.touches.length === 2) {
+                    const dist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    if (initialPinchDist > 0) {
+                        const factor = dist / initialPinchDist;
+                        window.applyZoomDelta(1 + (factor - 1) * 0.5);
+                        initialPinchDist = dist;
+                    }
+                    return;
+                }
                 if (!isDragging) return;
                 const touch = e.touches ? e.touches[0] : e;
                 const dx = touch.clientX - lastPos.x;
@@ -245,6 +334,7 @@
 
             function onTouchEnd() {
                 isDragging = false;
+                initialPinchDist = 0;
             }
 
             canvas.addEventListener('mousedown', onTouchStart);
@@ -254,22 +344,48 @@
             window.addEventListener('touchmove', onTouchMove, { passive: true });
             window.addEventListener('touchend', onTouchEnd);
 
-            // 11. 120Hz Animation Loop (zero random waves!)
+            // 11. 120Hz Animation Loop (Smooth Lerp Transitions & Option A Tether)
             const clock = new THREE.Clock();
             function animate() {
                 requestAnimationFrame(animate);
                 const delta = Math.min(clock.getDelta(), 0.05);
                 const elapsed = clock.getElapsedTime();
 
-                // Momentum inertia or subtle idle auto-rotation
-                if (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001) {
-                    globeGroup.rotation.y += rotVelocity.x;
-                    globeGroup.rotation.x = Math.max(-0.6, Math.min(0.6, globeGroup.rotation.x + rotVelocity.y));
-                    rotVelocity.x *= 0.91;
-                    rotVelocity.y *= 0.91;
-                } else if (!isDragging) {
-                    // Very slow, subtle ambient drift (0.035)
-                    globeGroup.rotation.y += delta * 0.035;
+                // Smooth scale and vertical position transitions
+                currentScale = THREE.MathUtils.lerp(currentScale, targetScale, 0.075);
+                currentPosY = THREE.MathUtils.lerp(currentPosY, targetPosY, 0.075);
+
+                const effectiveScale = currentScale * userZoom;
+                globeGroup.scale.set(effectiveScale, effectiveScale, effectiveScale);
+                globeGroup.position.set(0, currentPosY, 0);
+
+                if (searchModeActive) {
+                    // Smoothly rotate globe so location beacon aligns perpendicular to the search bar
+                    globeGroup.rotation.y = THREE.MathUtils.lerp(globeGroup.rotation.y, targetRotY, 0.08);
+                    globeGroup.rotation.x = THREE.MathUtils.lerp(globeGroup.rotation.x, targetRotX, 0.08);
+
+                    // Option A: Update vertical holographic laser tether
+                    if (tetherLine && tetherLine.visible && userLocation && userLocation.group) {
+                        const beaconWorld = new THREE.Vector3();
+                        userLocation.group.getWorldPosition(beaconWorld);
+                        const posAttr = tetherGeo.attributes.position;
+                        // Search bar bottom anchor
+                        posAttr.setXYZ(0, 0, 70, 0);
+                        // Beacon target anchor
+                        posAttr.setXYZ(1, beaconWorld.x, beaconWorld.y, beaconWorld.z);
+                        posAttr.needsUpdate = true;
+                        tetherMat.opacity = 0.45 + Math.sin(elapsed * 6.5) * 0.25;
+                    }
+                } else {
+                    // Momentum inertia or subtle idle auto-rotation
+                    if (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001) {
+                        globeGroup.rotation.y += rotVelocity.x;
+                        globeGroup.rotation.x = Math.max(-0.6, Math.min(0.6, globeGroup.rotation.x + rotVelocity.y));
+                        rotVelocity.x *= 0.91;
+                        rotVelocity.y *= 0.91;
+                    } else if (!isDragging) {
+                        globeGroup.rotation.y += delta * 0.035;
+                    }
                 }
 
                 // Update sub-systems

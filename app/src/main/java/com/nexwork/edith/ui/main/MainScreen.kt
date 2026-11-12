@@ -69,6 +69,11 @@ fun MainScreen(
   }
   val globeController = remember { GlobeController() }
 
+  // Sync search state to 3D globe (fills 60% of screen & aligns beacon perpendicularly)
+  LaunchedEffect(consoleOpen) {
+    globeController.setSearchActive(consoleOpen)
+  }
+
   // Back climbs one level: a category back to the categories, then the console closed.
   BackHandler(enabled = consoleOpen) { viewModel.handleBackPress() }
 
@@ -89,13 +94,14 @@ fun MainScreen(
             var totalDx = 0f
             var totalDy = 0f
             var isDrag = false
+            var isPinch = false
+            var prevSpan = 0f
 
             while (true) {
               val event = awaitPointerEvent()
-              val change = event.changes.firstOrNull { it.id == down.id } ?: break
-              if (!change.pressed) {
-                // Finger lifted: if it didn't drag, it was an exact tap!
-                if (!isDrag) {
+              val activeChanges = event.changes.filter { it.pressed }
+              if (activeChanges.isEmpty()) {
+                if (!isDrag && !isPinch) {
                   val normX = (startX / size.width.toFloat()).coerceIn(0f, 1f)
                   val normY = (startY / size.height.toFloat()).coerceIn(0f, 1f)
                   globeController.tap(normX, normY)
@@ -103,6 +109,22 @@ fun MainScreen(
                 break
               }
 
+              // Multi-touch two-finger pinch-to-zoom
+              if (activeChanges.size >= 2) {
+                isPinch = true
+                val p1 = activeChanges[0].position
+                val p2 = activeChanges[1].position
+                val span = kotlin.math.hypot(p1.x - p2.x, p1.y - p2.y)
+                if (prevSpan > 0f) {
+                  val factor = span / prevSpan
+                  globeController.zoom(factor)
+                }
+                prevSpan = span
+                activeChanges.forEach { it.consume() }
+                continue
+              }
+
+              val change = activeChanges.firstOrNull { it.id == down.id } ?: activeChanges.first()
               val dx = change.position.x - change.previousPosition.x
               val dy = change.position.y - change.previousPosition.y
               totalDx += dx
