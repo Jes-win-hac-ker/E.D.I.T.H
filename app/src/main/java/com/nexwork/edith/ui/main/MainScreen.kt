@@ -4,6 +4,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -78,88 +80,65 @@ fun MainScreen(
   BoxWithConstraints(
     modifier = modifier
       .fillMaxSize()
-      .pointerInput(state.isSpotlightSearchOpen, state.isAppBrowseOpen) {
+      .pointerInput(consoleOpen) {
         if (!consoleOpen) {
-          detectDragGestures(
-            onDragStart = { offset ->
-              totalVerticalDrag = 0f
-              totalHorizontalDrag = 0f
-              dragStartX = offset.x
-              dragStartY = offset.y
-            },
-            onDrag = { change, dragAmount ->
-              val screenWidth = size.width
-              // Exclusion zones: left system back edge, right edge, extreme top
-              val isExcludedZone = dragStartX < 40.dp.toPx() ||
-                dragStartX > (screenWidth - 124.dp.toPx()) ||
-                dragStartY < 40.dp.toPx()
+          awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val startX = down.position.x
+            val startY = down.position.y
+            var totalDx = 0f
+            var totalDy = 0f
+            var isDrag = false
 
-              if (!isExcludedZone) {
-                totalVerticalDrag += dragAmount.y
-                totalHorizontalDrag += dragAmount.x
+            while (true) {
+              val event = awaitPointerEvent()
+              val change = event.changes.firstOrNull { it.id == down.id } ?: break
+              if (!change.pressed) {
+                // Finger lifted: if it didn't drag, it was an exact tap!
+                if (!isDrag) {
+                  val normX = (startX / size.width.toFloat()).coerceIn(0f, 1f)
+                  val normY = (startY / size.height.toFloat()).coerceIn(0f, 1f)
+                  globeController.tap(normX, normY)
+                }
+                break
+              }
 
-                val thresholdPx = 40.dp.toPx()
-                val isStrictlyVerticalDown = totalVerticalDrag > 0f &&
-                  totalVerticalDrag > abs(totalHorizontalDrag) * 1.5f
+              val dx = change.position.x - change.previousPosition.x
+              val dy = change.position.y - change.previousPosition.y
+              totalDx += dx
+              totalDy += dy
 
-                val edge = 24.dp.toPx()
-                val isUpExcludedZone = dragStartX < edge ||
-                  dragStartX > screenWidth - edge ||
-                  dragStartY < 40.dp.toPx()
-                val isStrictlyVerticalUp = totalVerticalDrag < 0f &&
-                  -totalVerticalDrag > abs(totalHorizontalDrag) * 1.5f
+              val dragDistance = kotlin.math.hypot(totalDx, totalDy)
+              if (dragDistance > 6.dp.toPx()) {
+                isDrag = true
+              }
 
-                if (isStrictlyVerticalDown && totalVerticalDrag > thresholdPx) {
+              if (isDrag) {
+                val screenWidth = size.width
+                val isExcludedZone = startX < 40.dp.toPx() ||
+                  startX > (screenWidth - 124.dp.toPx()) ||
+                  startY < 40.dp.toPx()
+
+                val thresholdPx = 110.dp.toPx()
+                val isStrictlyVerticalDown = totalDy > 0f && totalDy > kotlin.math.abs(totalDx) * 1.8f
+                val isStrictlyVerticalUp = totalDy < 0f && -totalDy > kotlin.math.abs(totalDx) * 1.8f
+
+                if (!isExcludedZone && isStrictlyVerticalDown && totalDy > thresholdPx) {
                   change.consume()
                   viewModel.openSpotlightSearch()
-                  totalVerticalDrag = 0f
-                  totalHorizontalDrag = 0f
-                } else if (!isUpExcludedZone && isStrictlyVerticalUp && -totalVerticalDrag > thresholdPx) {
+                  break
+                } else if (!isExcludedZone && isStrictlyVerticalUp && -totalDy > thresholdPx) {
                   change.consume()
                   haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                   viewModel.openAppBrowse()
-                  totalVerticalDrag = 0f
-                  totalHorizontalDrag = 0f
+                  break
                 } else {
-                  globeController.rotate(dragAmount.x, dragAmount.y)
+                  change.consume()
+                  globeController.rotate(dx, dy)
                 }
               }
-            },
-            onDragEnd = {
-              totalVerticalDrag = 0f
-              totalHorizontalDrag = 0f
-            },
-            onDragCancel = {
-              totalVerticalDrag = 0f
-              totalHorizontalDrag = 0f
-            },
-          )
-        } else {
-          detectDragGestures(
-            onDragStart = {
-              totalVerticalDrag = 0f
-              totalHorizontalDrag = 0f
-            },
-            onDrag = { change, dragAmount ->
-              totalVerticalDrag += dragAmount.y
-              totalHorizontalDrag += dragAmount.x
-
-              if (totalVerticalDrag < -28.dp.toPx() && abs(totalVerticalDrag) > abs(totalHorizontalDrag)) {
-                change.consume()
-                dismissConsole()
-                totalVerticalDrag = 0f
-                totalHorizontalDrag = 0f
-              }
-            },
-            onDragEnd = {
-              totalVerticalDrag = 0f
-              totalHorizontalDrag = 0f
-            },
-            onDragCancel = {
-              totalVerticalDrag = 0f
-              totalHorizontalDrag = 0f
-            },
-          )
+            }
+          }
         }
       }
   ) {
@@ -179,14 +158,16 @@ fun MainScreen(
       Modifier
         .fillMaxSize()
         .graphicsLayer {
-          scaleX = bgZoom
-          scaleY = bgZoom
-          if (consoleOpen && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            renderEffect = android.graphics.RenderEffect.createBlurEffect(
-              12f,
-              12f,
-              android.graphics.Shader.TileMode.CLAMP
-            ).asComposeRenderEffect()
+          if (consoleOpen) {
+            scaleX = bgZoom
+            scaleY = bgZoom
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+              renderEffect = android.graphics.RenderEffect.createBlurEffect(
+                12f,
+                12f,
+                android.graphics.Shader.TileMode.CLAMP
+              ).asComposeRenderEffect()
+            }
           }
         }
         .background(Color.Black)
@@ -209,18 +190,16 @@ fun MainScreen(
       modifier = Modifier.align(Alignment.TopStart),
     )
 
-    // Tap outside the console dismisses it
-    Box(
-      modifier = Modifier
-        .fillMaxSize()
-        .pointerInput(state.isSpotlightSearchOpen, state.isAppBrowseOpen) {
-          if (consoleOpen) {
+    // Tap outside the console dismisses it when open
+    if (consoleOpen) {
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .pointerInput(Unit) {
             detectTapGestures { dismissConsole() }
-          } else {
-            detectTapGestures { globeController.tap() }
           }
-        }
-    )
+      )
+    }
 
     HudSearchBar(
       isOpen = consoleOpen,

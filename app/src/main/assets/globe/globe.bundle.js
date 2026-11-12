@@ -1830,24 +1830,7 @@ const EARTH_MASK_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAtAAAAFoCAAAAABbTZPFAAAY4UlEQVR4
  * Procedural circular particle texture with glowing radial gradient
  */
 function createParticleTexture() {
-    const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d');
-
-    const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-    gradient.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
-    gradient.addColorStop(0.2, 'rgba(226, 232, 240, 0.85)');
-    gradient.addColorStop(0.5, 'rgba(148, 163, 184, 0.35)');
-    gradient.addColorStop(0.8, 'rgba(71, 85, 105, 0.10)');
-    gradient.addColorStop(1.0, 'rgba(0, 0, 0, 0.0)');
-
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 64, 64);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-    return texture;
+    return null;
 }
 
 /**
@@ -2094,12 +2077,12 @@ function createLandmass(radius = GLOBE_CONFIG.radius, onReady = null) {
         geometry.setAttribute('aCoast', new THREE.Float32BufferAttribute(coast, 1));
 
         const material = new THREE.PointsMaterial({
-            size: 1.6,
-            map: particleTexture,
+            size: 1.0,
+            map: null,
             transparent: true,
-            opacity: 0.75,
+            opacity: 0.35,
             vertexColors: true,
-            blending: THREE.AdditiveBlending,
+            blending: THREE.NormalBlending,
             depthWrite: false,
             sizeAttenuation: true
         });
@@ -2108,23 +2091,6 @@ function createLandmass(radius = GLOBE_CONFIG.radius, onReady = null) {
         const points = new THREE.Points(geometry, material);
         points.name = 'landmass-points';
         group.add(points);
-
-        // 2. Optical Blur / Soft Cinematic Bokeh Haze Layer directly on the globe
-        const hazeMaterial = new THREE.PointsMaterial({
-            size: 4.4,
-            map: particleTexture,
-            transparent: true,
-            opacity: 0.22,
-            vertexColors: true,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            sizeAttenuation: true
-        });
-        attachPulseShader(hazeMaterial, pulseUniforms, radarUniforms, true);
-
-        const hazePoints = new THREE.Points(geometry, hazeMaterial);
-        hazePoints.name = 'landmass-haze-points';
-        group.add(hazePoints);
 
         if (onReady) onReady(points);
     };
@@ -8688,19 +8654,10 @@ function initGlobeApp(container = document.body) {
         rangefinder.update(elapsed);
         telemetryStrip.update(elapsed);
 
-        // 6. Single-pass lightweight adaptive motion blur (0% extra GPU load)
-        // Dynamically tightens the trail decay during rapid moves/resizes (up to 0.48)
-        // so trails don't stretch into 20-frame stepped breaks, then smoothly relaxes
-        // back to 0.16 for the ethereal idle rotation glow.
-        const targetFade = Math.min(0.48, 0.16 + motionEnergy * 0.12);
-        currentFade = lerpVal(currentFade, targetFade, 0.2);
-        fadeMesh.material.opacity = currentFade;
-
         globeGroup.rotation.y = nextRotY;
 
-        // 7. Single clean render pass per frame
-        renderer.clearDepth();
-        renderer.render(fadeScene, fadeCamera);
+        // 7. Single clean render pass per frame (zero blur, zero ghost trails)
+        renderer.clear();
         renderer.render(scene, camera);
 
         // 8. Store frame state for next frame's motion metric

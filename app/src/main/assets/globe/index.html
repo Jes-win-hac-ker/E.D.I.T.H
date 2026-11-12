@@ -40,14 +40,14 @@
             const W = window.WireframeGlobe;
             if (!W) return;
 
-            // 1. Scene & Void Space Fog
+            // 1. Scene & Deep Void Fog
             const scene = new THREE.Scene();
-            scene.fog = new THREE.FogExp2(0x000000, 0.0016);
+            scene.fog = new THREE.FogExp2(0x000000, 0.0018);
 
             // 2. Camera setup
             const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
 
-            // 3. WebGL Renderer: crisp, dark, anti-aliased with subdued exposure
+            // 3. WebGL Renderer: crisp, dark, 1:1 hardware pixel mapping
             const renderer = new THREE.WebGLRenderer({
                 antialias: true,
                 powerPreference: 'high-performance',
@@ -57,8 +57,8 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.outputColorSpace = THREE.SRGBColorSpace;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            // Tone down brightness from 1.15 to 0.70 for sleek Stark HUD aesthetic
-            renderer.toneMappingExposure = 0.70;
+            // Subdued exposure for stealth holographic HUD aesthetic (never glaring)
+            renderer.toneMappingExposure = 0.32;
 
             const canvas = renderer.domElement;
             canvas.id = 'webgl-canvas';
@@ -73,11 +73,11 @@
             window.globeGroup = globeGroup;
 
             // 5. Build Sub-Components
-            // A. Neon wireframe graticule
+            // A. Neon wireframe graticule & occluder
             const graticule = W.createGraticule(radius);
             globeGroup.add(graticule);
 
-            // B. Glowing continent landmass point cloud
+            // B. Continent landmass point cloud
             const landmass = W.createLandmass(radius);
             globeGroup.add(landmass);
 
@@ -93,11 +93,11 @@
             const arcs = W.createArcs(radius);
             globeGroup.add(arcs.group);
 
-            // F. User location beacon
+            // F. Real User Location Beacon (customized to user's real location)
             const userLocation = W.createUserLocationBeacon(radius);
             globeGroup.add(userLocation.group);
 
-            // G. Geodesic pulse manager (only triggered on explicit user tap)
+            // G. Geodesic pulse manager (only triggered on tap)
             const geodesicPulse = W.createGeodesicPulseManager({
                 radius: radius,
                 camera: camera,
@@ -106,7 +106,7 @@
                 landmass: landmass
             });
 
-            // 6. DE-BLUR & MUTE BRIGHTNESS:
+            // 6. TOTAL DE-BLUR & BRIGHTNESS MUTING:
             // Remove blurry haze point duplicates and sharpen particle points into needle-fine dots
             globeGroup.traverse((obj) => {
                 if (obj.isPoints) {
@@ -114,16 +114,26 @@
                         // Completely hide blurry haze layer
                         obj.visible = false;
                     } else if (obj.material) {
-                        // Subdued, sharp, crisp dots
-                        obj.material.size = 1.1;
-                        obj.material.opacity = 0.50;
+                        // Switch from blurry radial gradient to crisp GPU pixels
+                        obj.material.map = null;
+                        obj.material.size = 1.0;
+                        obj.material.sizeAttenuation = true;
+                        // Normal blending prevents additive whiteout blowout
+                        obj.material.blending = THREE.NormalBlending;
+                        obj.material.opacity = 0.35;
                         obj.material.transparent = true;
+                        obj.material.needsUpdate = true;
                     }
                 }
                 if (obj.isLine || obj.isLineSegments) {
                     if (obj.material) {
-                        obj.material.opacity = Math.min(obj.material.opacity || 0.2, 0.22);
+                        obj.material.opacity = Math.min(obj.material.opacity || 0.15, 0.16);
+                        obj.material.transparent = true;
                     }
+                }
+                if (obj.isMesh && obj.material) {
+                    // Deep black inner occluder
+                    obj.material.color.setHex(0x000000);
                 }
             });
 
@@ -150,19 +160,67 @@
             resize();
             window.addEventListener('resize', resize);
 
-            // 8. INTERACTIVE ROTATION ENGINE
+            // 8. REAL USER LOCATION (Defaults to Thrissur, Kerala: 10.516, 76.2157)
+            window.setUserLocation = function(lat, lon) {
+                if (userLocation && typeof userLocation.setPosition === 'function') {
+                    userLocation.setPosition(lat, lon);
+                }
+                if (W.latLonToVector3) {
+                    const localVec = W.latLonToVector3(lat, lon, radius);
+                    // Orient Earth so user's real location faces directly forward!
+                    globeGroup.rotation.y = -Math.atan2(localVec.x, localVec.z);
+                }
+            };
+            window.setUserLocation(10.516, 76.2157);
+
+            // 9. RAYCASTING: TRIGGER WAVE AT EXACT TOUCH COORDINATES
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+
+            window.triggerWaveAt = function(normX, normY) {
+                let ndcX, ndcY;
+                if (normX <= 1.0 && normY <= 1.0 && normX >= 0.0 && normY >= 0.0) {
+                    ndcX = normX * 2.0 - 1.0;
+                    ndcY = -(normY * 2.0 - 1.0);
+                } else {
+                    ndcX = (normX / window.innerWidth) * 2.0 - 1.0;
+                    ndcY = -(normY / window.innerHeight) * 2.0 + 1.0;
+                }
+                raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
+
+                const worldCenter = globeGroup.position.clone();
+                const worldRadius = radius * globeGroup.scale.x;
+                const sphere = new THREE.Sphere(worldCenter, worldRadius);
+                const hitPoint = new THREE.Vector3();
+
+                if (raycaster.ray.intersectSphere(sphere, hitPoint)) {
+                    const localHit = globeGroup.worldToLocal(hitPoint.clone()).normalize();
+                    if (geodesicPulse && typeof geodesicPulse.triggerPulse === 'function') {
+                        geodesicPulse.triggerPulse(localHit, null, 2.8);
+                    }
+                } else {
+                    const ray = raycaster.ray;
+                    const toCenter = worldCenter.clone().sub(ray.origin);
+                    const projectionDistance = toCenter.dot(ray.direction);
+                    if (projectionDistance > 0) {
+                        const closestOnRay = ray.origin.clone().add(ray.direction.clone().multiplyScalar(projectionDistance));
+                        const dirFromCenter = closestOnRay.sub(worldCenter).normalize();
+                        const surfacePoint = worldCenter.clone().add(dirFromCenter.multiplyScalar(worldRadius));
+                        const localHit = globeGroup.worldToLocal(surfacePoint).normalize();
+                        if (geodesicPulse && typeof geodesicPulse.triggerPulse === 'function') {
+                            geodesicPulse.triggerPulse(localHit, null, 2.8);
+                        }
+                    }
+                }
+            };
+
+            // 10. INTERACTIVE TOUCH ROTATION WITH MOMENTUM
             let rotVelocity = { x: 0, y: 0 };
             window.rotateGlobe = function(dx, dy) {
                 globeGroup.rotation.y += dx * 0.005;
                 globeGroup.rotation.x = Math.max(-0.6, Math.min(0.6, globeGroup.rotation.x + dy * 0.003));
                 rotVelocity.x = dx * 0.003;
                 rotVelocity.y = dy * 0.0015;
-            };
-
-            window.onGlobeTap = function() {
-                if (geodesicPulse && typeof geodesicPulse.triggerPulse === 'function') {
-                    geodesicPulse.triggerPulse(new THREE.Vector3(0, 0, 1), null, 2.2);
-                }
             };
 
             // Touch events directly on canvas
@@ -196,25 +254,25 @@
             window.addEventListener('touchmove', onTouchMove, { passive: true });
             window.addEventListener('touchend', onTouchEnd);
 
-            // 9. Smooth 120Hz Render Loop
+            // 11. 120Hz Animation Loop (zero random waves!)
             const clock = new THREE.Clock();
             function animate() {
                 requestAnimationFrame(animate);
                 const delta = Math.min(clock.getDelta(), 0.05);
                 const elapsed = clock.getElapsedTime();
 
-                // Momentum inertia or gentle ambient orbit
+                // Momentum inertia or subtle idle auto-rotation
                 if (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001) {
                     globeGroup.rotation.y += rotVelocity.x;
                     globeGroup.rotation.x = Math.max(-0.6, Math.min(0.6, globeGroup.rotation.x + rotVelocity.y));
                     rotVelocity.x *= 0.91;
                     rotVelocity.y *= 0.91;
                 } else if (!isDragging) {
-                    // Very subtle, gentle ambient rotation (0.04)
-                    globeGroup.rotation.y += delta * 0.04;
+                    // Very slow, subtle ambient drift (0.035)
+                    globeGroup.rotation.y += delta * 0.035;
                 }
 
-                // Update dynamic sub-systems
+                // Update sub-systems
                 if (userLocation && typeof userLocation.update === 'function') userLocation.update(elapsed);
                 if (geodesicPulse && typeof geodesicPulse.update === 'function') geodesicPulse.update(elapsed);
                 if (solarTerminator && typeof solarTerminator.update === 'function') solarTerminator.update(elapsed);
