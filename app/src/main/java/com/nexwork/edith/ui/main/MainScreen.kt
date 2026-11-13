@@ -73,12 +73,14 @@ fun MainScreen(
   val focusManager = LocalFocusManager.current
   val keyboardController = LocalSoftwareKeyboardController.current
   var isResumed by remember { mutableStateOf(true) }
+  var isCardActionArmed by remember { mutableStateOf(false) }
   var lastScreenActivityMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
   LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
     isResumed = true
     lastScreenActivityMs = System.currentTimeMillis()
     viewModel.wakeFromAmbient()
+    viewModel.refreshLauncherData()
     viewModel.checkForUpdates(force = false)
   }
   LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
@@ -112,10 +114,12 @@ fun MainScreen(
     state.searchQuery,
     state.browseGroup,
     state.isAmbientCentered,
+    isCardActionArmed,
     lastScreenActivityMs,
   ) {
     if (!isResumed) return@LaunchedEffect
     if (consoleOpen) {
+      if (isCardActionArmed) return@LaunchedEffect
       val timeoutMs = if (searchOpen && state.searchQuery.isEmpty()) 4_000L else 10_000L
       val remainingMs = (timeoutMs - (System.currentTimeMillis() - lastScreenActivityMs)).coerceAtLeast(0L)
       delay(remainingMs)
@@ -346,6 +350,16 @@ fun MainScreen(
       onEnterGroup = viewModel::openAppGroup,
       onExitGroup = viewModel::closeAppGroup,
       footprintOf = viewModel::footprintOf,
+      onOpenAppInfo = viewModel::openAppInfo,
+      onUninstallApp = viewModel::requestUninstall,
+      onActionArmedChange = { armed ->
+        isCardActionArmed = armed
+        if (armed) {
+          keyboardController?.hide()
+          focusManager.clearFocus()
+        }
+        lastScreenActivityMs = System.currentTimeMillis()
+      },
       modifier = Modifier
         .align(Alignment.TopStart)
         .padding(start = 18.dp, end = 18.dp, top = 236.dp, bottom = 28.dp)
