@@ -3,7 +3,6 @@ package com.nexwork.edith.ui.hud
 import android.graphics.Paint
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -79,27 +78,43 @@ private class ClockFace {
 
 /**
  * Home clock, on the same 312-unit sheet as the console and the cards and in the same bay, so
- * the two read as one instrument panel: at rest the bay shows the clock, on summon the console
- * takes it over and the clock unwinds. It initialises the way everything else here does — the
- * keyline traces itself, the brackets snap on at each corner, the designator decrypts, the time
- * prints out left to right and the seconds comb ticks in last.
+ * the two read as one instrument panel: when active the bay shows the clock, and when the console
+ * takes over or the screen enters ambient center idle the clock unwinds completely off screen,
+ * redrawing itself on screen activity.
  *
  * Seconds are carried three ways: as numerals in the field's right column, as the colon that
  * brightens and drops each second, and as a 60-cell comb that fills through the minute and
- * clears on the stroke. Nothing here moves between second boundaries — the sheet is a permanent
- * home-screen element, so it redraws once a second, on the tick, rather than every frame.
+ * clears on the stroke. The ticker pauses whenever unmounted so idle mode costs zero ticks.
  */
 @Composable
 fun HudClock(
   isOpen: Boolean,
   modifier: Modifier = Modifier,
-  dimmed: Boolean = false,
 ) {
   val density = LocalDensity.current
   val face = remember { ClockFace().apply { tick(System.currentTimeMillis()) } }
   val secondTick = remember { mutableIntStateOf(0) }
-  LaunchedEffect(face) {
-    face.syncStrings(System.currentTimeMillis())
+
+  val revealAnim = remember { Animatable(0f) }
+  var mounted by remember { mutableStateOf(!isOpen) }
+  LaunchedEffect(isOpen) {
+    if (isOpen) {
+      val hideMs = (revealAnim.value.coerceIn(0f, 1f) * 650f).roundToInt().coerceAtLeast(1)
+      revealAnim.animateTo(0f, tween(hideMs, easing = LinearEasing))
+      mounted = false
+    } else {
+      mounted = true
+      val showMs = ((1f - revealAnim.value).coerceIn(0f, 1f) * 900f).roundToInt().coerceAtLeast(180)
+      revealAnim.animateTo(1f, tween(showMs, easing = LinearEasing))
+    }
+  }
+
+  LaunchedEffect(face, mounted) {
+    if (!mounted) return@LaunchedEffect
+    val initNow = System.currentTimeMillis()
+    face.syncStrings(initNow)
+    face.tick(initNow)
+    secondTick.intValue = (initNow / 1000L).toInt()
     while (true) {
       val now = System.currentTimeMillis()
       face.tick(now)
@@ -107,30 +122,13 @@ fun HudClock(
       delay(1000L - now % 1000L + 4L)
     }
   }
-  LaunchedEffect(face) {
+  LaunchedEffect(face, mounted) {
+    if (!mounted) return@LaunchedEffect
     while (true) {
       delay(20_000L - System.currentTimeMillis() % 20_000L)
       face.syncStrings(System.currentTimeMillis())
     }
   }
-
-  val revealAnim = remember { Animatable(0f) }
-  var mounted by remember { mutableStateOf(!isOpen) }
-  LaunchedEffect(isOpen) {
-    if (isOpen) {
-      revealAnim.animateTo(0f, tween(1000, easing = LinearEasing))
-      mounted = false
-    } else {
-      mounted = true
-      revealAnim.animateTo(1f, tween(1200, easing = LinearEasing))
-    }
-  }
-
-  val dimAlpha by animateFloatAsState(
-    targetValue = if (dimmed) 0.40f else 1f,
-    animationSpec = tween(550),
-    label = "hudClockDim",
-  )
 
   if (!mounted) return
 
@@ -147,7 +145,7 @@ fun HudClock(
       .fillMaxWidth()
       .padding(horizontal = 18.dp, vertical = 84.dp)
       .height(64.dp)
-      .graphicsLayer { alpha = phase(revealAnim.value, 0f, 0.22f) * dimAlpha },
+      .graphicsLayer { alpha = phase(revealAnim.value, 0f, 0.22f) },
   ) {
     Box(
       Modifier

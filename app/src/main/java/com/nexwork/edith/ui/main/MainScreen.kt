@@ -278,29 +278,22 @@ fun MainScreen(
       modifier = Modifier.fillMaxSize(),
     )
 
-    // The clock owns the top bay until the console is summoned into it, dimming softly while idle.
+    // The clock owns the top bay when awake on home, unwinding completely once idle or summoned.
+    val topHudHidden = consoleOpen || state.isAmbientCentered
     HudClock(
-      isOpen = consoleOpen,
-      dimmed = state.isAmbientCentered,
+      isOpen = topHudHidden,
       modifier = Modifier.align(Alignment.TopStart),
     )
 
-    if (!consoleOpen) {
-      val idleHudAlpha by animateFloatAsState(
-        targetValue = if (state.isAmbientCentered) 0.40f else 1f,
-        animationSpec = tween(550),
-        label = "idleOtaAlpha",
-      )
-      HudOtaPill(
-        otaState = state.otaState,
-        onClick = viewModel::onOtaPillClick,
-        onDismiss = viewModel::dismissOtaPill,
-        modifier = Modifier
-          .align(Alignment.TopStart)
-          .padding(start = 18.dp, end = 18.dp, top = 196.dp)
-          .graphicsLayer { alpha = idleHudAlpha },
-      )
-    }
+    HudOtaPill(
+      otaState = state.otaState,
+      onClick = viewModel::onOtaPillClick,
+      onDismiss = viewModel::dismissOtaPill,
+      hidden = topHudHidden,
+      modifier = Modifier
+        .align(Alignment.TopStart)
+        .padding(start = 18.dp, end = 18.dp, top = 196.dp),
+    )
 
     // Tap outside the console dismisses it when open
     if (consoleOpen) {

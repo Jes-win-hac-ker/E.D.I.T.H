@@ -45,8 +45,9 @@ fun HudOtaPill(
   onClick: () -> Unit,
   onDismiss: () -> Unit,
   modifier: Modifier = Modifier,
+  hidden: Boolean = false,
 ) {
-  val visible = otaState !is OtaState.Idle
+  val visible = !hidden && otaState !is OtaState.Idle
 
   AnimatedVisibility(
     visible = visible,
