@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.nexwork.edith.data.DataRepository
 import com.nexwork.edith.data.DefaultDataRepository
 import com.nexwork.edith.data.LauncherRepository
+import com.nexwork.edith.data.MonetThemeManager
+import com.nexwork.edith.data.MonetUiState
 import com.nexwork.edith.data.OtaState
 import com.nexwork.edith.data.OtaUpdater
 import com.nexwork.edith.model.AppEntry
@@ -45,6 +47,7 @@ data class LauncherHomeState(
   val notificationCounts: Map<String, Int> = emptyMap(),
   val hasNotificationAccess: Boolean = false,
   val otaState: OtaState = OtaState.Idle,
+  val monetUiState: MonetUiState = MonetUiState(),
 )
 
 class MainScreenViewModel(
@@ -64,6 +67,8 @@ class MainScreenViewModel(
   private var telemetryObservationJob: Job? = null
   private var otaUpdater: OtaUpdater? = null
   private var otaJob: Job? = null
+  private var monetThemeManager: MonetThemeManager? = null
+  private var monetJob: Job? = null
 
   init {
     refreshLauncherData()
@@ -83,6 +88,17 @@ class MainScreenViewModel(
       otaUpdater = OtaUpdater(context.applicationContext).also {
         it.requestShizukuPermissionUpfront()
       }
+    }
+    if (monetThemeManager == null) {
+      val manager = MonetThemeManager(context.applicationContext)
+      monetThemeManager = manager
+      viewModelScope.launch {
+        manager.uiState.collect { monetState ->
+          _launcherState.update { it.copy(monetUiState = monetState) }
+        }
+      }
+      manager.refreshShizukuState()
+      ensureMonetPersisted()
     }
     refreshLauncherData()
     startTelemetryObservation()
@@ -158,8 +174,40 @@ class MainScreenViewModel(
       checkForUpdates(force = true)
       return
     }
+    if (trimmed.equals("!monet", ignoreCase = true) || trimmed.equals("!theme", ignoreCase = true)) {
+      monetThemeManager?.refreshShizukuState()
+    } else if (trimmed.equals("!monet apply", ignoreCase = true)) {
+      applyCrimsonMonet()
+    } else if (trimmed.equals("!monet reset", ignoreCase = true) || trimmed.equals("!reset", ignoreCase = true)) {
+      resetMonetToDefault()
+    }
     _launcherState.update { state ->
       state.copy(searchQuery = query)
+    }
+  }
+
+  fun applyCrimsonMonet() {
+    val manager = monetThemeManager ?: return
+    if (monetJob?.isActive == true) return
+    monetJob = viewModelScope.launch {
+      manager.applyCrimsonMonet()
+    }
+  }
+
+  fun resetMonetToDefault() {
+    val manager = monetThemeManager ?: return
+    if (monetJob?.isActive == true) return
+    monetJob = viewModelScope.launch {
+      manager.resetToDefault()
+    }
+  }
+
+  fun ensureMonetPersisted() {
+    val manager = monetThemeManager ?: return
+    manager.refreshShizukuState()
+    if (monetJob?.isActive == true) return
+    monetJob = viewModelScope.launch {
+      manager.ensureOverlayPersistedIfEnabled()
     }
   }
 
