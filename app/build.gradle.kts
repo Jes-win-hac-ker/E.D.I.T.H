@@ -11,8 +11,8 @@ android {
         applicationId = "com.nexwork.edith"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = providers.gradleProperty("versionCode").orNull?.toIntOrNull() ?: 1
+        versionName = providers.gradleProperty("versionName").orNull ?: "1.0"
     }
 
     buildTypes {

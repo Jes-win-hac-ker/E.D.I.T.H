@@ -14,8 +14,8 @@ tag="v${version_name}+${version_code}"
 apk_path="app/build/outputs/apk/debug/app-debug.apk"
 
 ./gradlew assembleDebug \
-  -Pandroid.injected.version.code="$version_code" \
-  -Pandroid.injected.version.name="$version_name"
+  -PversionCode="$version_code" \
+  -PversionName="$version_name"
 
 if [[ ! -f "$apk_path" ]]; then
   echo "Missing APK at $apk_path" >&2
