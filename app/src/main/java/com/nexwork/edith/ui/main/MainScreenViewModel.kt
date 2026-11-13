@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.nexwork.edith.data.DataRepository
 import com.nexwork.edith.data.DefaultDataRepository
 import com.nexwork.edith.data.LauncherRepository
+import com.nexwork.edith.data.OtaState
+import com.nexwork.edith.data.OtaUpdater
 import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.model.AppFootprint
 import com.nexwork.edith.model.DeviceTelemetry
@@ -39,6 +41,7 @@ data class LauncherHomeState(
   val telemetry: DeviceTelemetry = DeviceTelemetry(),
   val notificationCounts: Map<String, Int> = emptyMap(),
   val hasNotificationAccess: Boolean = false,
+  val otaState: OtaState = OtaState.Idle,
 )
 
 class MainScreenViewModel(
@@ -56,6 +59,8 @@ class MainScreenViewModel(
   val launcherState: StateFlow<LauncherHomeState> = _launcherState.asStateFlow()
 
   private var telemetryObservationJob: Job? = null
+  private var otaUpdater: OtaUpdater? = null
+  private var otaJob: Job? = null
 
   init {
     refreshLauncherData()
@@ -71,8 +76,12 @@ class MainScreenViewModel(
 
   fun initContext(context: android.content.Context) {
     launcherRepository.setContext(context)
+    if (otaUpdater == null) {
+      otaUpdater = OtaUpdater(context.applicationContext)
+    }
     refreshLauncherData()
     startTelemetryObservation()
+    checkForUpdates(force = false)
   }
 
   private fun startTelemetryObservation() {
@@ -130,9 +139,83 @@ class MainScreenViewModel(
   }
 
   fun onSearchQueryChange(query: String) {
+    val trimmed = query.trim()
+    if (trimmed.equals("!ota", ignoreCase = true)) {
+      closeSpotlightSearch()
+      checkForUpdates(force = true)
+      return
+    }
+    if (trimmed.startsWith("!ota https://", ignoreCase = true)) {
+      val customUrl = trimmed.substringAfter(" ").trim()
+      otaUpdater?.setFeedUrl(customUrl)
+      closeSpotlightSearch()
+      checkForUpdates(force = true)
+      return
+    }
     _launcherState.update { state ->
       state.copy(searchQuery = query)
     }
+  }
+
+  /** Checks the configured OTA endpoint for a newer versionCode; silent when auto-checking. */
+  fun checkForUpdates(force: Boolean) {
+    val updater = otaUpdater ?: return
+    if (!force && !updater.shouldAutoCheck()) return
+    if (otaJob?.isActive == true) return
+
+    otaJob = viewModelScope.launch {
+      if (force) {
+        _launcherState.update { it.copy(otaState = OtaState.Checking) }
+      }
+      val result = updater.checkForUpdate()
+      result.fold(
+        onSuccess = { release ->
+          val next = when {
+            release != null -> OtaState.Available(release)
+            force -> OtaState.UpToDate
+            else -> OtaState.Idle
+          }
+          _launcherState.update { it.copy(otaState = next) }
+        },
+        onFailure = { err ->
+          _launcherState.update {
+            it.copy(otaState = if (force) OtaState.Error(err.message ?: "Check failed") else OtaState.Idle)
+          }
+        },
+      )
+    }
+  }
+
+  fun onOtaPillClick() {
+    val updater = otaUpdater ?: return
+    when (val current = _launcherState.value.otaState) {
+      is OtaState.Available -> {
+        if (otaJob?.isActive == true) return
+        otaJob = viewModelScope.launch {
+          _launcherState.update { it.copy(otaState = OtaState.Downloading(current.release, 0)) }
+          val download = updater.downloadAndVerify(current.release) { pct ->
+            _launcherState.update { it.copy(otaState = OtaState.Downloading(current.release, pct)) }
+          }
+          download.fold(
+            onSuccess = { file ->
+              _launcherState.update { it.copy(otaState = OtaState.ReadyToInstall(current.release, file)) }
+              updater.launchInstaller(file)
+            },
+            onFailure = { err ->
+              _launcherState.update { it.copy(otaState = OtaState.Error(err.message ?: "Download failed")) }
+            },
+          )
+        }
+      }
+      is OtaState.ReadyToInstall -> updater.launchInstaller(current.apkFile)
+      is OtaState.Error -> checkForUpdates(force = true)
+      OtaState.UpToDate -> dismissOtaPill()
+      else -> Unit
+    }
+  }
+
+  fun dismissOtaPill() {
+    _launcherState.update { it.copy(otaState = OtaState.Idle) }
   }
 
   fun toggleTimeFormat() {

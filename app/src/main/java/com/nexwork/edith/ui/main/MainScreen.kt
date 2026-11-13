@@ -34,6 +34,7 @@ import androidx.navigation3.runtime.NavKey
 import com.nexwork.edith.ui.hud.CrimeSceneFocusOverlay
 import com.nexwork.edith.ui.hud.HudCardDeck
 import com.nexwork.edith.ui.hud.HudClock
+import com.nexwork.edith.ui.hud.HudOtaPill
 import com.nexwork.edith.ui.hud.HudSearchBar
 import com.nexwork.edith.ui.hud.GlobeController
 import com.nexwork.edith.ui.hud.InteractiveWireframeGlobe
@@ -204,6 +205,17 @@ fun MainScreen(
       isOpen = consoleOpen,
       modifier = Modifier.align(Alignment.TopStart),
     )
+
+    if (!consoleOpen) {
+      HudOtaPill(
+        otaState = state.otaState,
+        onClick = viewModel::onOtaPillClick,
+        onDismiss = viewModel::dismissOtaPill,
+        modifier = Modifier
+          .align(Alignment.TopStart)
+          .padding(start = 18.dp, end = 18.dp, top = 196.dp),
+      )
+    }
 
     // Tap outside the console dismisses it when open
     if (consoleOpen) {
