@@ -29,6 +29,8 @@ class GlobeController {
   private var pendingDy = 0f
   private var pendingZoom = 1f
   private var flushScheduled = false
+  private var lastSearchActive = false
+  private var lastAmbientCentered = false
 
   private val flushCallback = Choreographer.FrameCallback {
     flushScheduled = false
@@ -93,8 +95,23 @@ class GlobeController {
   }
 
   fun setSearchActive(active: Boolean) {
+    lastSearchActive = active
     flushPending()
     webViewRef?.evaluateJavascript("if(window.setSearchActive) window.setSearchActive($active);", null)
+  }
+
+  fun setAmbientCentered(centered: Boolean) {
+    lastAmbientCentered = centered
+    flushPending()
+    webViewRef?.evaluateJavascript("if(window.setAmbientCentered) window.setAmbientCentered($centered);", null)
+  }
+
+  internal fun syncState(webView: WebView?) {
+    webView?.evaluateJavascript(
+      "if(window.setAmbientCentered) window.setAmbientCentered($lastAmbientCentered);" +
+        "if(window.setSearchActive) window.setSearchActive($lastSearchActive);",
+      null,
+    )
   }
 
   fun zoom(factor: Float) {
@@ -159,6 +176,7 @@ fun InteractiveWireframeGlobe(
             "if(window.setUserLocation) window.setUserLocation($lat, $lon);",
             null,
           )
+          controller?.syncState(view)
         }
       }
       loadUrl("file:///android_asset/globe/index.html")

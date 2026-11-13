@@ -17,23 +17,31 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
+import kotlinx.coroutines.delay
 import com.nexwork.edith.ui.hud.CrimeSceneFocusOverlay
 import com.nexwork.edith.ui.hud.HudCardDeck
 import com.nexwork.edith.ui.hud.HudClock
@@ -59,29 +67,93 @@ fun MainScreen(
   LaunchedEffect(Unit) {
     viewModel.initContext(context)
   }
-  LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-    viewModel.checkForUpdates(force = false)
-  }
 
   val state by viewModel.launcherState.collectAsStateWithLifecycle()
   val haptic = LocalHapticFeedback.current
+  val focusManager = LocalFocusManager.current
+  val keyboardController = LocalSoftwareKeyboardController.current
+  var isResumed by remember { mutableStateOf(true) }
+  var lastScreenActivityMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+  LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+    isResumed = true
+    lastScreenActivityMs = System.currentTimeMillis()
+    viewModel.wakeFromAmbient()
+    viewModel.checkForUpdates(force = false)
+  }
+  LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
+    isResumed = false
+  }
+
   val consoleOpen = state.isSpotlightSearchOpen || state.isAppBrowseOpen
+  val searchOpen = state.isSpotlightSearchOpen
   val dismissConsole: () -> Unit = {
+    lastScreenActivityMs = System.currentTimeMillis()
     if (state.isSpotlightSearchOpen) viewModel.closeSpotlightSearch() else viewModel.closeAppBrowse()
   }
   val globeController = remember { GlobeController() }
 
-  // Sync search state to 3D globe (fills 60% of screen & aligns beacon perpendicularly)
+  // Sync search and idle-ambient center state to 3D globe
   LaunchedEffect(consoleOpen) {
     globeController.setSearchActive(consoleOpen)
   }
+  LaunchedEffect(state.isAmbientCentered) {
+    globeController.setAmbientCentered(state.isAmbientCentered)
+  }
+  LaunchedEffect(state.isSpotlightSearchOpen, state.isAppBrowseOpen, state.searchQuery, state.browseGroup) {
+    if (state.isSpotlightSearchOpen || state.isAppBrowseOpen) {
+      lastScreenActivityMs = System.currentTimeMillis()
+    }
+  }
+  LaunchedEffect(
+    isResumed,
+    consoleOpen,
+    searchOpen,
+    state.searchQuery,
+    state.browseGroup,
+    state.isAmbientCentered,
+    lastScreenActivityMs,
+  ) {
+    if (!isResumed) return@LaunchedEffect
+    if (consoleOpen) {
+      val timeoutMs = if (searchOpen && state.searchQuery.isEmpty()) 4_000L else 10_000L
+      val remainingMs = (timeoutMs - (System.currentTimeMillis() - lastScreenActivityMs)).coerceAtLeast(0L)
+      delay(remainingMs)
+      keyboardController?.hide()
+      focusManager.clearFocus()
+      viewModel.autoDeactivateConsole()
+    } else if (!state.isAmbientCentered) {
+      val remainingMs = (12_000L - (System.currentTimeMillis() - lastScreenActivityMs)).coerceAtLeast(0L)
+      delay(remainingMs)
+      viewModel.enterAmbientCenter()
+    }
+  }
 
   // Back climbs one level: a category back to the categories, then the console closed.
-  BackHandler(enabled = consoleOpen) { viewModel.handleBackPress() }
+  BackHandler(enabled = consoleOpen) {
+    lastScreenActivityMs = System.currentTimeMillis()
+    viewModel.handleBackPress()
+  }
 
   BoxWithConstraints(
     modifier = modifier
       .fillMaxSize()
+      .pointerInput(Unit) {
+        awaitPointerEventScope {
+          while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            val anyDown = event.changes.any { it.changedToDownIgnoreConsumed() }
+            val anyPressed = event.changes.any { it.pressed }
+            if (anyPressed) {
+              viewModel.wakeFromAmbient()
+              val now = System.currentTimeMillis()
+              if (anyDown || now - lastScreenActivityMs >= 250L) {
+                lastScreenActivityMs = now
+              }
+            }
+          }
+        }
+      }
       .pointerInput(consoleOpen) {
         if (!consoleOpen) {
           awaitEachGesture {
@@ -161,7 +233,6 @@ fun MainScreen(
         }
       }
   ) {
-    val searchOpen = state.isSpotlightSearchOpen
     val browseGroupCount = remember(state.apps, state.browseGroup) {
       val name = state.browseGroup ?: return@remember 0
       groupApps(state.apps).firstOrNull { it.name == name }?.apps?.size ?: 0
@@ -207,20 +278,27 @@ fun MainScreen(
       modifier = Modifier.fillMaxSize(),
     )
 
-    // The clock owns the top bay until the console is summoned into it.
+    // The clock owns the top bay until the console is summoned into it, dimming softly while idle.
     HudClock(
       isOpen = consoleOpen,
+      dimmed = state.isAmbientCentered,
       modifier = Modifier.align(Alignment.TopStart),
     )
 
     if (!consoleOpen) {
+      val idleHudAlpha by animateFloatAsState(
+        targetValue = if (state.isAmbientCentered) 0.40f else 1f,
+        animationSpec = tween(550),
+        label = "idleOtaAlpha",
+      )
       HudOtaPill(
         otaState = state.otaState,
         onClick = viewModel::onOtaPillClick,
         onDismiss = viewModel::dismissOtaPill,
         modifier = Modifier
           .align(Alignment.TopStart)
-          .padding(start = 18.dp, end = 18.dp, top = 196.dp),
+          .padding(start = 18.dp, end = 18.dp, top = 196.dp)
+          .graphicsLayer { alpha = idleHudAlpha },
       )
     }
 
@@ -243,7 +321,7 @@ fun MainScreen(
       apps = state.apps,
       onLaunchApp = viewModel::launchApp,
       autoFocus = searchOpen,
-      idleDismiss = searchOpen,
+      idleDismiss = false,
       scopeLabel = state.browseGroup,
       scopeCount = browseGroupCount,
       onExitGroup = viewModel::closeAppGroup,

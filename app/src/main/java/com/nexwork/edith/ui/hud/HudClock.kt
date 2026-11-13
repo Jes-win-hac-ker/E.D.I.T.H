@@ -3,6 +3,7 @@ package com.nexwork.edith.ui.hud
 import android.graphics.Paint
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -92,6 +93,7 @@ private class ClockFace {
 fun HudClock(
   isOpen: Boolean,
   modifier: Modifier = Modifier,
+  dimmed: Boolean = false,
 ) {
   val density = LocalDensity.current
   val face = remember { ClockFace().apply { tick(System.currentTimeMillis()) } }
@@ -124,6 +126,12 @@ fun HudClock(
     }
   }
 
+  val dimAlpha by animateFloatAsState(
+    targetValue = if (dimmed) 0.40f else 1f,
+    animationSpec = tween(550),
+    label = "hudClockDim",
+  )
+
   if (!mounted) return
 
   val eyebrowPaint = remember(density) { monoPaint(density, 7.5f, 1.1f, Paint.Align.LEFT, 107) }
@@ -139,7 +147,7 @@ fun HudClock(
       .fillMaxWidth()
       .padding(horizontal = 18.dp, vertical = 84.dp)
       .height(64.dp)
-      .graphicsLayer { alpha = phase(revealAnim.value, 0f, 0.22f) },
+      .graphicsLayer { alpha = phase(revealAnim.value, 0f, 0.22f) * dimAlpha },
   ) {
     Box(
       Modifier

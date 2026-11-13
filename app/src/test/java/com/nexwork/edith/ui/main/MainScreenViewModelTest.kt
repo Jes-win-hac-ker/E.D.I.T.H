@@ -154,6 +154,49 @@ class MainScreenViewModelTest {
     assertEquals(1, chromeMatches.size)
     assertEquals("Chrome", chromeMatches[0].label)
   }
+
+  @Test
+  fun ambientCenter_entersOnIdleAndWakesOnActivity() = runTest {
+    val viewModel = MainScreenViewModel(FakeMyModelRepository())
+    assertFalse(viewModel.launcherState.value.isAmbientCentered)
+
+    viewModel.enterAmbientCenter()
+    assertTrue(viewModel.launcherState.value.isAmbientCentered)
+
+    viewModel.wakeFromAmbient()
+    assertFalse(viewModel.launcherState.value.isAmbientCentered)
+  }
+
+  @Test
+  fun autoDeactivateConsole_closesSearchAndBrowseIntoAmbientCenter() = runTest {
+    val viewModel = MainScreenViewModel(FakeMyModelRepository())
+
+    viewModel.openSpotlightSearch()
+    viewModel.onSearchQueryChange("cam")
+    assertTrue(viewModel.launcherState.value.isSpotlightSearchOpen)
+    assertFalse(viewModel.launcherState.value.isAmbientCentered)
+
+    // Cannot enter ambient directly while console is open
+    viewModel.enterAmbientCenter()
+    assertFalse(viewModel.launcherState.value.isAmbientCentered)
+
+    // Auto-deactivation closes console cleanly and glides globe straight to center
+    viewModel.autoDeactivateConsole()
+    assertFalse(viewModel.launcherState.value.isSpotlightSearchOpen)
+    assertFalse(viewModel.launcherState.value.isAppBrowseOpen)
+    assertEquals("", viewModel.launcherState.value.searchQuery)
+    assertTrue(viewModel.launcherState.value.isAmbientCentered)
+
+    // Opening browse wakes from ambient; manual close stays active on horizon arc
+    viewModel.openAppBrowse()
+    viewModel.openAppGroup("TOOLS")
+    assertFalse(viewModel.launcherState.value.isAmbientCentered)
+
+    viewModel.closeAppBrowse()
+    assertFalse(viewModel.launcherState.value.isAppBrowseOpen)
+    assertEquals(null, viewModel.launcherState.value.browseGroup)
+    assertFalse(viewModel.launcherState.value.isAmbientCentered)
+  }
 }
 
 private class FakeMyModelRepository : DataRepository {

@@ -58,7 +58,7 @@
             renderer.outputColorSpace = THREE.SRGBColorSpace;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
             // Subdued exposure for stealth holographic HUD aesthetic (never glaring)
-            renderer.toneMappingExposure = 0.32;
+            renderer.toneMappingExposure = 0.36;
 
             const canvas = renderer.domElement;
             canvas.id = 'webgl-canvas';
@@ -104,8 +104,17 @@
                 landmass: landmass
             });
 
-            // 6. TOTAL DE-BLUR & BRIGHTNESS MUTING:
-            // Remove blurry haze point duplicates and sharpen particle points into needle-fine dots
+            function isInside(obj, root) {
+                let cur = obj;
+                while (cur) {
+                    if (cur === root) return true;
+                    cur = cur.parent;
+                }
+                return false;
+            }
+
+            // 6. TOTAL DE-BLUR & E.D.I.T.H HUD PALETTE COHESION:
+            // Remove blurry haze point duplicates, sharpen landmass dots, and apply slate/crimson accents
             globeGroup.traverse((obj) => {
                 if (obj.isPoints) {
                     if (obj.name && obj.name.includes('haze')) {
@@ -118,15 +127,28 @@
                         obj.material.sizeAttenuation = true;
                         // Normal blending prevents additive whiteout blowout
                         obj.material.blending = THREE.NormalBlending;
-                        obj.material.opacity = 0.35;
+                        obj.material.opacity = 0.44;
                         obj.material.transparent = true;
                         obj.material.needsUpdate = true;
                     }
                 }
                 if (obj.isLine || obj.isLineSegments) {
                     if (obj.material) {
-                        obj.material.opacity = Math.min(obj.material.opacity || 0.15, 0.16);
-                        obj.material.transparent = true;
+                        if (obj.name === 'graticule-equator') {
+                            obj.material.color.setHex(0xE01432);
+                            obj.material.blending = THREE.NormalBlending;
+                            obj.material.opacity = 0.28;
+                            obj.material.transparent = true;
+                        } else if (obj.name === 'solar-terminator-line') {
+                            obj.material.color.setHex(0xE01432);
+                            obj.material.blending = THREE.NormalBlending;
+                            obj.material.opacity = 0.34;
+                            obj.material.transparent = true;
+                        } else if (!isInside(obj, userLocation.group)) {
+                            obj.material.color.setHex(0x334155);
+                            obj.material.opacity = Math.min(obj.material.opacity || 0.14, 0.14);
+                            obj.material.transparent = true;
+                        }
                     }
                 }
                 if (obj.isMesh && obj.material) {
@@ -135,14 +157,20 @@
                 }
             });
 
-            // 7. Dynamic Scaling & Search-Active Transitions
-            let restingScale = 0.42;
-            let targetScale = 0.42;
-            let currentScale = 0.42;
-            let targetPosY = -10;
-            let currentPosY = -10;
+            // 7. Option 2 Orbital Horizon Arc, Idle Center Showcase & Search Transitions
+            let horizonScale = 0.98;
+            let horizonPosY = -118;
+            let centerScale = 0.46;
+            let centerPosY = -10;
+            let searchScale = 0.60;
+            let targetScale = horizonScale;
+            let currentScale = horizonScale;
+            let targetPosY = horizonPosY;
+            let currentPosY = horizonPosY;
+            let hasInitializedPose = false;
             let userZoom = 1.0;
             let searchModeActive = false;
+            let ambientCentered = false;
             let targetRotY = 0;
             let targetRotX = 0;
             let userLat = 10.516;
@@ -183,6 +211,29 @@
                 scheduleNextFrame(0);
             }
 
+            function applyTargetPresentation() {
+                if (searchModeActive) {
+                    targetScale = searchScale;
+                    targetPosY = -28;
+                    if (W.latLonToVector3) {
+                        const localVec = W.latLonToVector3(userLat, userLon, radius);
+                        targetRotY = -Math.atan2(localVec.x, localVec.z);
+                        targetRotX = -0.16;
+                    }
+                    wakeLoop(520);
+                } else if (ambientCentered) {
+                    targetScale = centerScale;
+                    targetPosY = centerPosY;
+                    targetRotX = 0;
+                    wakeLoop(950);
+                } else {
+                    targetScale = horizonScale;
+                    targetPosY = horizonPosY;
+                    targetRotX = 0;
+                    wakeLoop(950);
+                }
+            }
+
             function resize() {
                 const width = window.innerWidth || 1;
                 const height = window.innerHeight || 1;
@@ -192,14 +243,26 @@
                 camera.updateProjectionMatrix();
                 renderer.setSize(width, height);
 
-                // Resting scale fits cleanly below the clock
-                restingScale = Math.min(0.48, Math.max(0.32, aspect * 0.95));
-                if (!searchModeActive) {
-                    targetScale = restingScale;
-                }
+                const halfH = 280 * Math.tan(THREE.MathUtils.degToRad(45 / 2));
+                const apexY = -10 - 0.30 * halfH;
+
+                horizonScale = Math.min(1.22, Math.max(0.86, aspect * 2.18));
+                horizonPosY = apexY - radius * horizonScale;
+
+                centerScale = Math.min(0.48, Math.max(0.36, aspect * 1.02));
+                centerPosY = -10;
+
+                searchScale = Math.min(0.60, Math.max(0.46, aspect * 1.32));
+
                 camera.position.set(0, 15, 280);
                 camera.lookAt(0, -10, 0);
-                wakeLoop(500);
+
+                if (!hasInitializedPose) {
+                    hasInitializedPose = true;
+                    currentScale = horizonScale;
+                    currentPosY = horizonPosY;
+                }
+                applyTargetPresentation();
             }
 
             resize();
@@ -223,28 +286,21 @@
             };
             window.setUserLocation(10.516, 76.2157);
 
-            // 8B. SEARCH ACTIVE STATE: FILL 60% SCREEN & ALIGN BEACON PERPENDICULAR TO SEARCH
+            // 8B. SEARCH & AMBIENT CENTER TRANSITIONS
             window.setSearchActive = function(active) {
-                searchModeActive = !!active;
-                if (searchModeActive) {
-                    // Fill 60% of screen width
-                    targetScale = 0.60;
-                    // Lower position so search bar and floating cards have dedicated stage
-                    targetPosY = -28;
+                const next = !!active;
+                if (searchModeActive === next) return;
+                searchModeActive = next;
+                applyTargetPresentation();
+            };
 
-                    // Orient Earth so user location beacon (Kerala) is strictly perpendicular to the search bar
-                    if (W.latLonToVector3) {
-                        const localVec = W.latLonToVector3(userLat, userLon, radius);
-                        targetRotY = -Math.atan2(localVec.x, localVec.z);
-                        // Subtle upward tilt so beacon points directly perpendicular towards top search header
-                        targetRotX = -0.16;
-                    }
-                } else {
-                    targetScale = restingScale;
-                    targetPosY = -10;
-                    targetRotX = 0;
+            window.setAmbientCentered = function(centered) {
+                const next = !!centered;
+                if (ambientCentered === next) return;
+                ambientCentered = next;
+                if (!searchModeActive) {
+                    applyTargetPresentation();
                 }
-                wakeLoop(searchModeActive ? 520 : 700);
             };
 
             // 8C. ZOOM IN / ZOOM OUT CONTROLS
@@ -373,11 +429,12 @@
                 const rawNow = typeof now === 'number' ? now : performance.now();
                 const scaleGap = Math.abs(targetScale - currentScale);
                 const posGap = Math.abs(targetPosY - currentPosY);
+                const zoomGap = ambientCentered ? Math.abs(1.0 - userZoom) : 0;
                 const rotGap = searchModeActive
                     ? Math.abs(targetRotY - globeGroup.rotation.y) + Math.abs(targetRotX - globeGroup.rotation.x)
                     : 0;
                 const hasInertia = !searchModeActive && (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001);
-                const hasActiveMotion = isDragging || hasInertia || scaleGap > 0.0008 || posGap > 0.04 || rotGap > 0.002 || rawNow < activeUntilMs;
+                const hasActiveMotion = isDragging || hasInertia || scaleGap > 0.0008 || posGap > 0.04 || zoomGap > 0.001 || rotGap > 0.002 || rawNow < activeUntilMs;
 
                 if (searchModeActive && !hasActiveMotion) {
                     return;
@@ -399,6 +456,10 @@
                 const lerpT = 1 - Math.pow(0.925, step60);
                 currentScale = THREE.MathUtils.lerp(currentScale, targetScale, lerpT);
                 currentPosY = THREE.MathUtils.lerp(currentPosY, targetPosY, lerpT);
+                if (ambientCentered && Math.abs(1.0 - userZoom) > 0.001) {
+                    userZoom = THREE.MathUtils.lerp(userZoom, 1.0, lerpT);
+                    if (Math.abs(1.0 - userZoom) <= 0.001) userZoom = 1.0;
+                }
 
                 const effectiveScale = currentScale * userZoom;
                 globeGroup.scale.set(effectiveScale, effectiveScale, effectiveScale);
@@ -434,6 +495,7 @@
                     (!searchModeActive && (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001)) ||
                     Math.abs(targetScale - currentScale) > 0.0008 ||
                     Math.abs(targetPosY - currentPosY) > 0.04 ||
+                    (ambientCentered && Math.abs(1.0 - userZoom) > 0.001) ||
                     (searchModeActive && (Math.abs(targetRotY - globeGroup.rotation.y) + Math.abs(targetRotX - globeGroup.rotation.x)) > 0.002) ||
                     performance.now() < activeUntilMs;
                 if (searchModeActive && !keepFast) {

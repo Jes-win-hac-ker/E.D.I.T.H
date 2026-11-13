@@ -37,6 +37,7 @@ data class LauncherHomeState(
   val isAppBrowseOpen: Boolean = false,
   val browseGroup: String? = null,
   val isSpotlightSearchOpen: Boolean = false,
+  val isAmbientCentered: Boolean = false,
   val use24Hour: Boolean = false,
   val isDefaultLauncher: Boolean = true,
   val weather: WeatherCondition = WeatherCondition.PARTLY_CLOUDY,
@@ -366,6 +367,7 @@ class MainScreenViewModel(
         isAppBrowseOpen = false,
         browseGroup = null,
         searchQuery = "",
+        isAmbientCentered = false,
       )
     }
   }
@@ -376,6 +378,7 @@ class MainScreenViewModel(
         isSpotlightSearchOpen = false,
         browseGroup = null,
         searchQuery = "",
+        isAmbientCentered = false,
       )
     }
   }
@@ -387,6 +390,7 @@ class MainScreenViewModel(
         isSpotlightSearchOpen = false,
         browseGroup = null,
         searchQuery = "",
+        isAmbientCentered = false,
       )
     }
   }
@@ -409,6 +413,36 @@ class MainScreenViewModel(
         isAppBrowseOpen = false,
         browseGroup = null,
         searchQuery = "",
+        isAmbientCentered = false,
+      )
+    }
+  }
+
+  /** Parks the globe at center screen when no screen activity occurs. */
+  fun enterAmbientCenter() {
+    _launcherState.update { state ->
+      if (state.isSpotlightSearchOpen || state.isAppBrowseOpen || state.isAmbientCentered) state
+      else state.copy(isAmbientCentered = true)
+    }
+  }
+
+  /** Restores the active horizon globe layout as soon as screen activity resumes. */
+  fun wakeFromAmbient() {
+    if (!_launcherState.value.isAmbientCentered) return
+    _launcherState.update { state ->
+      if (!state.isAmbientCentered) state else state.copy(isAmbientCentered = false)
+    }
+  }
+
+  /** Deactivates an idle search/browse console and glides the globe directly to screen center. */
+  fun autoDeactivateConsole() {
+    _launcherState.update { state ->
+      state.copy(
+        isSpotlightSearchOpen = false,
+        isAppBrowseOpen = false,
+        browseGroup = null,
+        searchQuery = "",
+        isAmbientCentered = true,
       )
     }
   }
