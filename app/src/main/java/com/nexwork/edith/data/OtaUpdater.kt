@@ -1,27 +1,25 @@
 package com.nexwork.edith.data
 
-import android.app.PendingIntent
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageInstaller
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.os.Parcel
+import android.os.ParcelFileDescriptor
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import org.lsposed.hiddenapibypass.HiddenApiBypass
 import rikka.shizuku.Shizuku
-import rikka.shizuku.ShizukuBinderWrapper
-import rikka.shizuku.SystemServiceHelper
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -283,52 +281,63 @@ class OtaUpdater(private val context: Context) {
       return false
     }
 
+    val args = Shizuku.UserServiceArgs(
+      ComponentName(context.packageName, ShizukuInstallService::class.java.name),
+    )
+      .daemon(false)
+      .processNameSuffix("shizuku_installer")
+      .debuggable(false)
+      .version(1)
+
+    val binderDeferred = CompletableDeferred<IBinder?>()
+    val connection = object : ServiceConnection {
+      override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+        if (!binderDeferred.isCompleted) binderDeferred.complete(service)
+      }
+
+      override fun onServiceDisconnected(name: ComponentName?) {
+        if (!binderDeferred.isCompleted) binderDeferred.complete(null)
+      }
+    }
+
     return try {
-      HiddenApiBypass.addHiddenApiExemptions("Landroid/content/pm/")
-      val pmBinder = ShizukuBinderWrapper(SystemServiceHelper.getSystemService("package"))
-      val iPmClass = Class.forName("android.content.pm.IPackageManager\$Stub")
-      val iPm = iPmClass.getMethod("asInterface", IBinder::class.java).invoke(null, pmBinder)
-      val iPiRaw = iPm.javaClass.getMethod("getPackageInstaller").invoke(iPm) as android.os.IInterface
-      val iPiBinder = ShizukuBinderWrapper(iPiRaw.asBinder())
-      val iPiStubClass = Class.forName("android.content.pm.IPackageInstaller\$Stub")
-      val iPi = iPiStubClass.getMethod("asInterface", IBinder::class.java).invoke(null, iPiBinder)
-      val iPiClass = Class.forName("android.content.pm.IPackageInstaller")
-
-      val installer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        PackageInstaller::class.java
-          .getConstructor(iPiClass, String::class.java, String::class.java, Int::class.javaPrimitiveType)
-          .newInstance(iPi, "com.android.shell", null, 0)
-      } else {
-        PackageInstaller::class.java
-          .getConstructor(iPiClass, String::class.java, Int::class.javaPrimitiveType)
-          .newInstance(iPi, "com.android.shell", 0)
+      withContext(Dispatchers.Main) {
+        Shizuku.bindUserService(args, connection)
+      }
+      val binder = withTimeoutOrNull(10_000L) { binderDeferred.await() }
+      if (binder == null || !binder.isBinderAlive) {
+        android.util.Log.w("OtaUpdater", "Shizuku UserService failed to bind in time")
+        return false
       }
 
-      val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-          setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
-        }
+      val pfd = ParcelFileDescriptor.open(apkFile, ParcelFileDescriptor.MODE_READ_ONLY)
+      val data = Parcel.obtain()
+      val reply = Parcel.obtain()
+      try {
+        data.writeInterfaceToken(ShizukuInstallService.DESCRIPTOR)
+        data.writeFileDescriptor(pfd.fileDescriptor)
+        data.writeLong(apkFile.length())
+        binder.transact(ShizukuInstallService.TRANSACTION_INSTALL, data, reply, 0)
+        reply.readException()
+        val ok = reply.readInt() == 1
+        val output = reply.readString().orEmpty()
+        android.util.Log.i("OtaUpdater", "Shizuku pm install ok=$ok output=$output")
+        ok
+      } finally {
+        data.recycle()
+        reply.recycle()
+        pfd.close()
       }
-      val sessionId = installer.createSession(params)
-      installer.openSession(sessionId).use { session ->
-        session.openWrite("edith-update.apk", 0, apkFile.length()).use { out ->
-          FileInputStream(apkFile).use { input ->
-            input.copyTo(out, bufferSize = 32 * 1024)
-          }
-          session.fsync(out)
-        }
-        val statusIntent = PendingIntent.getBroadcast(
-          context,
-          sessionId,
-          Intent("${context.packageName}.OTA_INSTALL_STATUS").setPackage(context.packageName),
-          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        session.commit(statusIntent.intentSender)
-      }
-      true
     } catch (t: Throwable) {
-      android.util.Log.w("OtaUpdater", "Shizuku install error, falling back", t)
+      android.util.Log.w("OtaUpdater", "Shizuku UserService install error, falling back", t)
       false
+    } finally {
+      try {
+        withContext(Dispatchers.Main) {
+          Shizuku.unbindUserService(args, connection, true)
+        }
+      } catch (_: Throwable) {
+      }
     }
   }
 
