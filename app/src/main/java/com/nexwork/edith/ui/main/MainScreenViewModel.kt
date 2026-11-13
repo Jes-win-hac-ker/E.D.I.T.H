@@ -12,6 +12,7 @@ import com.nexwork.edith.model.AppFootprint
 import com.nexwork.edith.model.DeviceTelemetry
 import com.nexwork.edith.model.WeatherCondition
 import com.nexwork.edith.notifications.EdithNotificationListener
+import com.nexwork.edith.ui.hud.warmAppIcons
 import com.nexwork.edith.ui.main.MainScreenUiState.Success
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -138,6 +139,7 @@ class MainScreenViewModel(
           hasNotificationAccess = notifAccess,
         )
       }
+      withContext(Dispatchers.Default) { warmAppIcons(apps) }
     }
   }
 

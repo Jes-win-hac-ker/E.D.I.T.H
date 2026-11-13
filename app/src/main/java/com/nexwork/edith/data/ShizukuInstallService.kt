@@ -67,13 +67,28 @@ class ShizukuInstallService : Binder {
       reply?.writeNoException()
       reply?.writeInt(if (ok) 1 else 0)
       reply?.writeString(output)
+      scheduleSelfExit()
       true
     } catch (t: Throwable) {
       reply?.writeNoException()
       reply?.writeInt(0)
       reply?.writeString(t.message ?: t.javaClass.simpleName)
+      scheduleSelfExit()
       true
     }
+  }
+
+  private fun scheduleSelfExit() {
+    Thread {
+      try {
+        Thread.sleep(600L)
+      } catch (_: InterruptedException) {
+      }
+      exitProcess(0)
+    }.apply {
+      isDaemon = true
+      name = "shizuku-installer-exit"
+    }.start()
   }
 
   companion object {

@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
 import android.location.LocationManager
+import android.view.Choreographer
 import android.view.ViewGroup
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -15,26 +16,75 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 
 /**
  * Controller to drive live touch rotation, precision raycast waves, and location updates into the Three.js globe.
+ * High-rate drag/zoom deltas are coalesced at most once per VSync to prevent WebView JS IPC flooding.
  */
 class GlobeController {
   private var webViewRef: WebView? = null
+  private var pendingDx = 0f
+  private var pendingDy = 0f
+  private var pendingZoom = 1f
+  private var flushScheduled = false
+
+  private val flushCallback = Choreographer.FrameCallback {
+    flushScheduled = false
+    flushPending()
+  }
 
   internal fun attach(webView: WebView) {
     webViewRef = webView
   }
 
   internal fun detach() {
+    if (flushScheduled) {
+      Choreographer.getInstance().removeFrameCallback(flushCallback)
+      flushScheduled = false
+    }
+    pendingDx = 0f
+    pendingDy = 0f
+    pendingZoom = 1f
     webViewRef = null
   }
 
+  private fun scheduleFlush() {
+    if (!flushScheduled && webViewRef != null) {
+      flushScheduled = true
+      Choreographer.getInstance().postFrameCallback(flushCallback)
+    }
+  }
+
+  private fun flushPending() {
+    val webView = webViewRef ?: return
+    val dx = pendingDx
+    val dy = pendingDy
+    val zoomFactor = pendingZoom
+    pendingDx = 0f
+    pendingDy = 0f
+    pendingZoom = 1f
+
+    val hasRot = dx != 0f || dy != 0f
+    val hasZoom = zoomFactor != 1f
+    if (!hasRot && !hasZoom) return
+
+    val script = buildString {
+      if (hasRot) append("if(window.rotateGlobe) window.rotateGlobe($dx, $dy);")
+      if (hasZoom) append("if(window.applyZoomDelta) window.applyZoomDelta($zoomFactor);")
+    }
+    webView.evaluateJavascript(script, null)
+  }
+
   fun rotate(dx: Float, dy: Float) {
-    webViewRef?.evaluateJavascript("if(window.rotateGlobe) window.rotateGlobe($dx, $dy);", null)
+    pendingDx += dx
+    pendingDy += dy
+    scheduleFlush()
   }
 
   fun tap(x: Float, y: Float) {
+    flushPending()
     webViewRef?.evaluateJavascript("if(window.triggerWaveAt) window.triggerWaveAt($x, $y);", null)
   }
 
@@ -43,14 +93,19 @@ class GlobeController {
   }
 
   fun setSearchActive(active: Boolean) {
+    flushPending()
     webViewRef?.evaluateJavascript("if(window.setSearchActive) window.setSearchActive($active);", null)
   }
 
   fun zoom(factor: Float) {
-    webViewRef?.evaluateJavascript("if(window.applyZoomDelta) window.applyZoomDelta($factor);", null)
+    if (factor > 0f) {
+      pendingZoom *= factor
+      scheduleFlush()
+    }
   }
 
   fun resetZoom() {
+    pendingZoom = 1f
     webViewRef?.evaluateJavascript("if(window.resetZoom) window.resetZoom();", null)
   }
 }
@@ -116,6 +171,14 @@ fun InteractiveWireframeGlobe(
       webView.onPause()
       webView.destroy()
     }
+  }
+
+  LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+    webView.onResume()
+  }
+
+  LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
+    webView.onPause()
   }
 
   DisposableEffect(webView, controller) {

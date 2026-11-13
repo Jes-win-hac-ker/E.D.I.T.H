@@ -5,11 +5,8 @@ import android.graphics.Typeface
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,7 +18,6 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -31,11 +27,14 @@ import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Constraints
 import com.nexwork.edith.theme.Crimson
 import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.CrimsonDim
@@ -70,7 +69,7 @@ fun HudAppCard(
 ) {
   val density = LocalDensity.current
   val monochrome = remember { ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }) }
-  val iconBitmap = remember(app.packageName, app.icon) { app.icon?.toImageBitmap() }
+  val iconBitmap = remember(app.packageName, app.icon) { app.cachedIconBitmap() }
   val ghost = remember(app.label) { app.label.filter { it.isLetterOrDigit() }.take(2).uppercase() }
   val fineText = remember(footprint) { footprint?.let(::footprintLine) }
   val label = remember(app.label) { app.label.uppercase() }
@@ -125,39 +124,7 @@ fun HudAppCard(
           fun Y(sy: Float) = sy * uy
           val hair = 0.6f.dp.toPx()
 
-          val fieldBrush = Brush.verticalGradient(
-            0f to Color.Transparent,
-            1f to Color.White.copy(alpha = 0.17f),
-          )
-          val columnBrush = Brush.verticalGradient(
-            0f to Color.White.copy(alpha = 0.05f),
-            1f to Color.White.copy(alpha = 0.12f),
-          )
-
-          val fieldGrid = Path()
-          var gx = 10f
-          while (gx < 259f) {
-            fieldGrid.addRect(Rect(X(gx), Y(2f), X(gx) + hair, Y(122f)))
-            gx += 10f
-          }
-          var gy = 6f
-          while (gy < 122f) {
-            fieldGrid.addRect(Rect(X(2f), Y(gy), X(259f), Y(gy) + hair))
-            gy += 10f
-          }
-          val columnGrid = Path()
-          var rx = 269f
-          while (rx < 304f) {
-            columnGrid.addRect(Rect(X(rx), Y(2f), X(rx) + hair, Y(122f)))
-            rx += 10f
-          }
-          var ry = 6f
-          while (ry < 120f) {
-            columnGrid.addRect(Rect(X(260f), Y(ry), X(310f), Y(ry) + hair))
-            ry += 10f
-          }
-
-          val plate = Rect(X(260f), Y(2f), size.width, Y(122f))
+          val gridBitmap = cachedHudGridBitmap(size.width.roundToInt(), size.height.roundToInt(), 124f, hair)
           val platePath = Path().apply {
             moveTo(X(260f), Y(2f))
             lineTo(size.width - 8f * ux, Y(2f))
@@ -167,22 +134,7 @@ fun HudAppCard(
             close()
           }
           val bar = 1.2f.dp.toPx()
-          val bracketTL = Path().apply {
-            addRect(Rect(0f, 0f, bar, 17.5f.dp.toPx()))
-            addRect(Rect(0f, 0f, 18f.dp.toPx(), bar))
-          }
-          val bracketTR = Path().apply {
-            addRect(Rect(size.width - bar, 0f, size.width, 17.5f.dp.toPx()))
-            addRect(Rect(size.width - 32.5f.dp.toPx(), 0f, size.width, bar))
-          }
-          val bracketBR = Path().apply {
-            addRect(Rect(size.width - bar, size.height - 6f.dp.toPx(), size.width, size.height))
-            addRect(Rect(size.width - 39f.dp.toPx(), size.height - bar, size.width, size.height))
-          }
-          val bracketBL = Path().apply {
-            addRect(Rect(0f, size.height - 11.5f.dp.toPx(), bar, size.height))
-            addRect(Rect(0f, size.height - bar, 44.5f.dp.toPx(), size.height))
-          }
+          val plateStroke = Stroke(width = 0.8f.dp.toPx())
           val perimeter = 2f * (size.width + size.height)
           val cornerAt = floatArrayOf(
             0f,
@@ -270,15 +222,21 @@ fun HudAppCard(
             val stripP = phase(progress, 0.7f, 1f)
             val fineP = phase(progress, 0.82f, 1f)
 
-            clipRect(right = size.width * phase(trace, 0f, cornerAt[1])) {
+            fun drawPlateAndGrid() {
               drawPath(platePath, if (leader) Color(0xD90F141E) else Color(0xB80F141E))
               drawPath(
                 platePath,
                 if (leader) CrimsonBright.copy(alpha = 0.5f) else CrimsonDim,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 0.8f.dp.toPx())
+                style = plateStroke,
               )
-              drawPath(fieldGrid, fieldBrush)
-              drawPath(columnGrid, columnBrush)
+              gridBitmap?.let { drawImage(it) }
+            }
+
+            val plateClip = phase(trace, 0f, cornerAt[1])
+            if (plateClip < 0.999f) {
+              clipRect(right = size.width * plateClip) { drawPlateAndGrid() }
+            } else {
+              drawPlateAndGrid()
             }
 
             if (charge > 0f) {
@@ -345,14 +303,22 @@ fun HudAppCard(
               }
             }
             if (fineText != null && fineP > 0f) {
-              clipRect(right = stripStart + stripW * fineP) {
-                finePaint.alpha = (88 * fineP).toInt()
+              finePaint.alpha = (88 * fineP).toInt()
+              if (fineP < 0.999f) {
+                clipRect(right = stripStart + stripW * fineP) {
+                  drawContext.canvas.nativeCanvas.drawText(fineText, stripRight, fineBaseline, finePaint)
+                }
+              } else {
                 drawContext.canvas.nativeCanvas.drawText(fineText, stripRight, fineBaseline, finePaint)
               }
             }
 
             if (metaP > 0f) {
-              clipRect(right = labelLeft + (labelRight - labelLeft) * metaP) {
+              if (metaP < 0.999f) {
+                clipRect(right = labelLeft + (labelRight - labelLeft) * metaP) {
+                  drawContext.canvas.nativeCanvas.drawText(meta, labelLeft, metaBaseline, metaPaint)
+                }
+              } else {
                 drawContext.canvas.nativeCanvas.drawText(meta, labelLeft, metaBaseline, metaPaint)
               }
             }
@@ -378,10 +344,14 @@ fun HudAppCard(
             }
 
             val bracketTint = Color.White.copy(if (leader) 1f else 0.5f)
-            if (trace >= cornerAt[0]) drawPath(bracketTL, bracketTint)
-            if (trace >= cornerAt[1]) drawPath(bracketTR, if (leader) CrimsonBright.copy(alpha = 0.85f) else bracketTint)
-            if (trace >= cornerAt[2]) drawPath(bracketBR, bracketTint)
-            if (trace >= cornerAt[3]) drawPath(bracketBL, if (leader) CrimsonDim else bracketTint)
+            drawHudCornerBrackets(
+              trace = trace,
+              cornerAt = cornerAt,
+              barPx = bar,
+              tint = bracketTint,
+              trTint = if (leader) CrimsonBright.copy(alpha = 0.85f) else bracketTint,
+              blTint = if (leader) CrimsonDim else bracketTint,
+            )
 
             drawRect(
               color = if (app.isEssentialQuickAccess || app.isPinned) CrimsonBright.copy(alpha = 0.82f * meterP) else Color.White.copy(alpha = 0.22f * meterP),
@@ -418,40 +388,48 @@ fun HudAppCard(
         },
     )
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-      val sx = maxWidth / 312f
-      val sy = maxHeight / 124f
-      Box(
-        modifier = Modifier
-          .offset(x = sx * 24f, y = sy * 39.75f)
-          .size(sx * 44.5f, sy * 44.5f)
-          .graphicsLayer {
-            val settle = phase(reveal(), 0.28f, 0.6f)
-            alpha = settle
-            scaleX = 0.92f + 0.08f * settle
-            scaleY = 0.92f + 0.08f * settle
-            translationY = (1f - settle) * iconRise
+    val iconShape = remember { RoundedCornerShape(percent = 25) }
+    Layout(
+      modifier = Modifier.fillMaxSize(),
+      content = {
+        Box(
+          modifier = Modifier
+            .graphicsLayer {
+              val settle = phase(reveal(), 0.28f, 0.6f)
+              alpha = settle
+              scaleX = 0.92f + 0.08f * settle
+              scaleY = 0.92f + 0.08f * settle
+              translationY = (1f - settle) * iconRise
+            }
+            .clip(iconShape)
+            .background(Color.White.copy(alpha = 0.06f))
+            .border(1.dp, Color.White.copy(alpha = 0.28f), iconShape),
+          contentAlignment = Alignment.Center,
+        ) {
+          if (iconBitmap != null) {
+            androidx.compose.foundation.Image(
+              bitmap = iconBitmap,
+              contentDescription = null,
+              colorFilter = monochrome,
+              modifier = Modifier.fillMaxSize(30.2f / 44.5f),
+            )
+          } else {
+            Text(
+              text = app.initial.toString(),
+              color = Color.White,
+              fontSize = 21.sp,
+              fontWeight = FontWeight.Bold,
+            )
           }
-          .clip(RoundedCornerShape(sx * 11f))
-          .background(Color.White.copy(alpha = 0.06f))
-          .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(sx * 11f)),
-        contentAlignment = Alignment.Center,
-      ) {
-        if (iconBitmap != null) {
-          androidx.compose.foundation.Image(
-            bitmap = iconBitmap,
-            contentDescription = null,
-            colorFilter = monochrome,
-            modifier = Modifier.size(sx * 30.2f),
-          )
-        } else {
-          Text(
-            text = app.initial.toString(),
-            color = Color.White,
-            fontSize = 21.sp,
-            fontWeight = FontWeight.Bold,
-          )
         }
+      },
+    ) { measurables, constraints ->
+      val boxPx = (constraints.maxWidth * (44.5f / 312f)).roundToInt().coerceAtLeast(1)
+      val leftPx = (constraints.maxWidth * (24f / 312f)).roundToInt()
+      val topPx = (constraints.maxHeight * (39.75f / 124f)).roundToInt()
+      val placeable = measurables[0].measure(Constraints.fixed(boxPx, boxPx))
+      layout(constraints.maxWidth, constraints.maxHeight) {
+        placeable.placeRelative(leftPx, topPx)
       }
     }
   }

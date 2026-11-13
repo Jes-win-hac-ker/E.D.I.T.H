@@ -13,15 +13,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -34,6 +37,10 @@ import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.model.AppFootprint
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 private const val Stagger = 0.13f
@@ -99,9 +106,11 @@ fun HudCardDeck(
   val density = LocalDensity.current
   val revealAnim = remember { Animatable(0f) }
   val focusAnim = remember { Animatable(0f) }
+  val focusPos = remember { mutableFloatStateOf(0f) }
+  var snapJob by remember { mutableStateOf<Job?>(null) }
   val chargeAnim = remember { Animatable(0f) }
   var mounted by remember { mutableStateOf(false) }
-  var footprints by remember { mutableStateOf(mapOf<String, AppFootprint?>()) }
+  val footprints = remember { mutableStateMapOf<String, AppFootprint?>() }
   var spot by remember { mutableIntStateOf(0) }
 
   // Which level the currently dealt cards belong to.
@@ -110,12 +119,24 @@ fun HudCardDeck(
   val settleFwd = remember(density) { with(density) { 18.dp.toPx() } }
   val settleBack = remember(density) { with(density) { 30.dp.toPx() } }
 
+  fun animateFocusTo(target: Float) {
+    snapJob?.cancel()
+    snapJob = scope.launch {
+      focusAnim.snapTo(focusPos.floatValue)
+      focusAnim.animateTo(target, tween(180)) {
+        focusPos.floatValue = value
+      }
+    }
+  }
+
   LaunchedEffect(open, activeGroup?.name, browse) {
     if (open) {
       val levelKey = activeGroup?.name
       val redeal = levelKey != dealtLevel
       dealtLevel = levelKey
       spot = 0
+      snapJob?.cancel()
+      focusPos.floatValue = 0f
       focusAnim.snapTo(0f)
       mounted = true
       if (redeal) {
@@ -143,12 +164,16 @@ fun HudCardDeck(
     }
   }
 
-  // Storage reads land on demand for the visible window around spot
+  // Storage reads land on demand in parallel for the visible window around spot.
+  // Using SnapshotStateMap avoids recomposing unaffected deck slots when one footprint resolves.
   LaunchedEffect(spot, pool) {
     val window = pool.drop((spot - 1).coerceAtLeast(0)).take(6).filterIsInstance<DeckCard.App>().map { it.entry }
     val missing = window.filter { it.packageName !in footprints }
     if (missing.isNotEmpty()) {
-      footprints = footprints + missing.associate { it.packageName to footprintOf(it) }
+      val resolved = coroutineScope {
+        missing.map { entry -> async { entry.packageName to footprintOf(entry) } }.awaitAll()
+      }
+      resolved.forEach { (pkg, fp) -> footprints[pkg] = fp }
     }
   }
 
@@ -171,65 +196,64 @@ fun HudCardDeck(
     val followers = (pool.size - 1 - spot).coerceIn(0, 4)
     val stackBottom = cardPx + with(density) { (followers * 18).dp.toPx() + 6.dp.toPx() }
 
-    // Render cards from the persistent pool
+    // Render only the visible 5-card fan plus 1 pre-warmed card below; focusedState tracks integer
+    // spot boundaries so continuous drag/snap moves GPU layers without invalidating card DrawScopes.
     pool.forEachIndexed { slot, card ->
-      val depth = slot - focusAnim.value
-      // Virtualization: omit cards scrolled far past or buried under 6+ followers
-      if (depth < -1.5f || depth > 6.5f) return@forEachIndexed
+      val slotDist = slot - spot
+      if (slotDist < -1 || slotDist > 5) return@forEachIndexed
 
-      val step = if (exiting) last - slot else slot
-      val cardReveal = { staggeredReveal(revealAnim.value, step, steps, Stagger) }
-      Box(
-        Modifier
-          .fillMaxWidth()
-          .zIndex(-slot.toFloat())
-          .graphicsLayer {
-            val progress = cardReveal()
-            if (progress <= 0.001f) {
-              alpha = 0f
-            } else {
-              val absDepth = abs(depth)
-              alpha = if (depth > 0f) {
-                (1f - 0.17f * depth).coerceAtLeast(0.34f)
+      val cardKey = when (card) {
+        is DeckCard.App -> "a:${card.entry.packageName}"
+        is DeckCard.Group -> "g:${card.group.name}"
+      }
+      key(cardKey) {
+        val cardReveal = remember(slot, steps, exiting) {
+          val step = if (exiting) last - slot else slot
+          { staggeredReveal(revealAnim.value, step, steps, Stagger) }
+        }
+        val cardCharge = remember(slot) { { if (slot == 0) chargeAnim.value else 0f } }
+        val focusedState = remember(slot) { derivedStateOf { slot <= spot } }
+        val cardFocused = remember(focusedState) { { focusedState.value } }
+
+        Box(
+          Modifier
+            .fillMaxWidth()
+            .zIndex(-slot.toFloat())
+            .graphicsLayer {
+              val depth = slot - focusPos.floatValue
+              val progress = cardReveal()
+              if (progress <= 0.001f || depth < -1.2f || depth > 5.0f) {
+                alpha = 0f
               } else {
-                (1f + depth).coerceIn(0f, 1f)
-              }
-              translationY = if (depth > 0f) depth * settleFwd else depth * settleBack
-              val scale = (if (depth > 0f) 1f - 0.06f * depth else 1f + 0.08f * -depth) *
-                (0.985f + 0.015f * progress)
-              scaleX = scale
-              scaleY = scale
-
-              if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                val blurPx = (absDepth * 2.2f).coerceAtMost(6f)
-                renderEffect = if (blurPx > 0.4f) {
-                  android.graphics.RenderEffect.createBlurEffect(
-                    blurPx,
-                    blurPx,
-                    android.graphics.Shader.TileMode.CLAMP
-                  ).asComposeRenderEffect()
-                } else {
-                  null
+                alpha = when {
+                  depth <= 0f -> (1f + depth).coerceIn(0f, 1f)
+                  depth <= 4f -> (1f - 0.17f * depth).coerceAtLeast(0.34f)
+                  else -> (0.34f * (5f - depth)).coerceIn(0f, 0.34f)
                 }
+                translationY = if (depth > 0f) depth * settleFwd else depth * settleBack
+                val scale = (if (depth > 0f) 1f - 0.06f * depth else 1f + 0.08f * -depth) *
+                  (0.985f + 0.015f * progress)
+                scaleX = scale
+                scaleY = scale
               }
-            }
-          },
-      ) {
-        when (card) {
-          is DeckCard.App -> HudAppCard(
-            app = card.entry,
-            usageFraction = card.usageMillis.toFloat() / peak,
-            footprint = footprints[card.entry.packageName],
-            reveal = cardReveal,
-            charge = { if (slot == 0) chargeAnim.value else 0f },
-            focused = { focusAnim.value - slot > -0.5f },
-          )
-          is DeckCard.Group -> HudGroupCard(
-            group = card.group,
-            usageFraction = card.usageMillis.toFloat() / peak,
-            reveal = cardReveal,
-            focused = { focusAnim.value - slot > -0.5f },
-          )
+            },
+        ) {
+          when (card) {
+            is DeckCard.App -> HudAppCard(
+              app = card.entry,
+              usageFraction = card.usageMillis.toFloat() / peak,
+              footprint = footprints[card.entry.packageName],
+              reveal = cardReveal,
+              charge = cardCharge,
+              focused = cardFocused,
+            )
+            is DeckCard.Group -> HudGroupCard(
+              group = card.group,
+              usageFraction = card.usageMillis.toFloat() / peak,
+              reveal = cardReveal,
+              focused = cardFocused,
+            )
+          }
         }
       }
     }
@@ -245,6 +269,7 @@ fun HudCardDeck(
 
           awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            snapJob?.cancel()
             val startY = down.position.y
             var lastY = startY
             var dragged = false
@@ -267,16 +292,16 @@ fun HudCardDeck(
                 change.consume()
 
                 // If dragging downward at the top of the stack, accumulate pull for exiting
-                if (focusAnim.value <= 0.15f && dy > 0f) {
+                if (focusPos.floatValue <= 0.15f && dy > 0f) {
                   downwardPullAtHead += dy
                 }
 
                 val delta = dy / pitch
                 val floor = if (liveGrouped) -0.85f else -0.55f
                 val ceiling = maxIndex.toFloat() + 0.25f
-                val next = (focusAnim.value - delta).coerceIn(floor, ceiling)
+                val next = (focusPos.floatValue - delta).coerceIn(floor, ceiling)
 
-                scope.launch { focusAnim.snapTo(next) }
+                focusPos.floatValue = next
                 val newSpot = next.roundToInt().coerceIn(0, maxIndex)
                 if (newSpot != spot) {
                   spot = newSpot
@@ -287,7 +312,7 @@ fun HudCardDeck(
 
             if (dragged) {
               // Drag finished: check if pulled down past the head to climb out or dismiss
-              if (spot == 0 && (focusAnim.value < -0.32f || downwardPullAtHead > 48.dp.toPx())) {
+              if (spot == 0 && (focusPos.floatValue < -0.32f || downwardPullAtHead > 48.dp.toPx())) {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 if (liveGrouped) {
                   onExitGroup()
@@ -296,15 +321,13 @@ fun HudCardDeck(
                 }
               } else {
                 // Smooth snap to closest card
-                val target = focusAnim.value.roundToInt().coerceIn(0, maxIndex)
+                val target = focusPos.floatValue.roundToInt().coerceIn(0, maxIndex)
                 spot = target
-                scope.launch {
-                  focusAnim.animateTo(target.toFloat(), tween(180))
-                }
+                animateFocusTo(target.toFloat())
               }
             } else {
               // Pure tap event: hit test active plates first
-              val currentFocus = focusAnim.value
+              val currentFocus = focusPos.floatValue
               val hit = livePool.indices
                 .map { s -> s to (s - currentFocus) }
                 .filter { (_, depth) ->
@@ -332,7 +355,7 @@ fun HudCardDeck(
                   }
                 } else {
                   spot = hit
-                  scope.launch { focusAnim.animateTo(hit.toFloat(), tween(180)) }
+                  animateFocusTo(hit.toFloat())
                 }
               } else {
                 // Tapped empty space below the cards: cleanly dismiss or exit

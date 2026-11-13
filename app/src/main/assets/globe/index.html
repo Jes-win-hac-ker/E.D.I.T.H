@@ -53,7 +53,7 @@
                 powerPreference: 'high-performance',
                 alpha: false
             });
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 2, 2.5));
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1.5, 1.75));
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.outputColorSpace = THREE.SRGBColorSpace;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -148,9 +148,44 @@
             let userLat = 10.516;
             let userLon = 76.2157;
 
+            let isPageHidden = typeof document !== 'undefined' && document.hidden;
+            let rafId = null;
+            let idleTimerId = null;
+            let activeUntilMs = performance.now() + 1400;
+            let lastRenderMs = performance.now();
+            let elapsed = 0;
+
+            function scheduleNextFrame(delayMs) {
+                if (isPageHidden || rafId) return;
+                if (delayMs > 0) {
+                    if (idleTimerId) return;
+                    idleTimerId = setTimeout(() => {
+                        idleTimerId = null;
+                        if (!isPageHidden && !rafId) {
+                            rafId = requestAnimationFrame(animate);
+                        }
+                    }, delayMs);
+                } else {
+                    if (idleTimerId) {
+                        clearTimeout(idleTimerId);
+                        idleTimerId = null;
+                    }
+                    rafId = requestAnimationFrame(animate);
+                }
+            }
+
+            function wakeLoop(durationMs) {
+                const now = performance.now();
+                activeUntilMs = Math.max(activeUntilMs, now + (durationMs || 900));
+                if (now - lastRenderMs > 120) {
+                    lastRenderMs = now - 16;
+                }
+                scheduleNextFrame(0);
+            }
+
             function resize() {
-                const width = window.innerWidth;
-                const height = window.innerHeight;
+                const width = window.innerWidth || 1;
+                const height = window.innerHeight || 1;
                 const aspect = width / height;
 
                 camera.aspect = aspect;
@@ -164,6 +199,7 @@
                 }
                 camera.position.set(0, 15, 280);
                 camera.lookAt(0, -10, 0);
+                wakeLoop(500);
             }
 
             resize();
@@ -183,6 +219,7 @@
                         globeGroup.rotation.y = targetRotY;
                     }
                 }
+                wakeLoop(800);
             };
             window.setUserLocation(10.516, 76.2157);
 
@@ -207,15 +244,18 @@
                     targetPosY = -10;
                     targetRotX = 0;
                 }
+                wakeLoop(searchModeActive ? 520 : 700);
             };
 
             // 8C. ZOOM IN / ZOOM OUT CONTROLS
             window.applyZoomDelta = function(factor) {
                 userZoom = Math.max(0.4, Math.min(1.85, userZoom * factor));
+                wakeLoop(1000);
             };
 
             window.resetZoom = function() {
                 userZoom = 1.0;
+                wakeLoop(searchModeActive ? 520 : 700);
             };
 
             // 9. RAYCASTING: TRIGGER WAVE AT EXACT TOUCH COORDINATES
@@ -223,6 +263,7 @@
             const mouse = new THREE.Vector2();
 
             window.triggerWaveAt = function(normX, normY) {
+                wakeLoop(3000);
                 let ndcX, ndcY;
                 if (normX <= 1.0 && normY <= 1.0 && normX >= 0.0 && normY >= 0.0) {
                     ndcX = normX * 2.0 - 1.0;
@@ -266,6 +307,7 @@
                 globeGroup.rotation.x = Math.max(-0.6, Math.min(0.6, globeGroup.rotation.x + dy * 0.003));
                 rotVelocity.x = dx * 0.003;
                 rotVelocity.y = dy * 0.0015;
+                wakeLoop(1200);
             };
 
             let isDragging = false;
@@ -273,6 +315,7 @@
             let initialPinchDist = 0;
 
             function onTouchStart(e) {
+                wakeLoop(1200);
                 if (e.touches && e.touches.length === 2) {
                     isDragging = false;
                     initialPinchDist = Math.hypot(
@@ -320,34 +363,62 @@
             window.addEventListener('touchmove', onTouchMove, { passive: true });
             window.addEventListener('touchend', onTouchEnd);
 
-            // 11. 120Hz Animation Loop (Smooth Lerp Transitions & Option A Tether)
-            const clock = new THREE.Clock();
-            function animate() {
-                requestAnimationFrame(animate);
-                const delta = Math.min(clock.getDelta(), 0.05);
-                const elapsed = clock.getElapsedTime();
+            // 11. Adaptive Animation Loop (Full 90/120Hz on motion/waves; true 30fps timer idle; paused behind console blur)
+            function animate(now) {
+                rafId = null;
+                if (isPageHidden) {
+                    return;
+                }
 
-                // Smooth scale and vertical position transitions
-                currentScale = THREE.MathUtils.lerp(currentScale, targetScale, 0.075);
-                currentPosY = THREE.MathUtils.lerp(currentPosY, targetPosY, 0.075);
+                const rawNow = typeof now === 'number' ? now : performance.now();
+                const scaleGap = Math.abs(targetScale - currentScale);
+                const posGap = Math.abs(targetPosY - currentPosY);
+                const rotGap = searchModeActive
+                    ? Math.abs(targetRotY - globeGroup.rotation.y) + Math.abs(targetRotX - globeGroup.rotation.x)
+                    : 0;
+                const hasInertia = !searchModeActive && (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001);
+                const hasActiveMotion = isDragging || hasInertia || scaleGap > 0.0008 || posGap > 0.04 || rotGap > 0.002 || rawNow < activeUntilMs;
+
+                if (searchModeActive && !hasActiveMotion) {
+                    return;
+                }
+
+                if (!hasActiveMotion) {
+                    const sinceLast = rawNow - lastRenderMs;
+                    if (sinceLast < 32) {
+                        scheduleNextFrame(Math.ceil(32 - sinceLast));
+                        return;
+                    }
+                }
+
+                const dt = Math.min(Math.max((rawNow - lastRenderMs) * 0.001, 0.001), 0.08);
+                lastRenderMs = rawNow;
+                elapsed += dt;
+
+                const step60 = Math.max(0.25, Math.min(dt * 60, 2.0));
+                const lerpT = 1 - Math.pow(0.925, step60);
+                currentScale = THREE.MathUtils.lerp(currentScale, targetScale, lerpT);
+                currentPosY = THREE.MathUtils.lerp(currentPosY, targetPosY, lerpT);
 
                 const effectiveScale = currentScale * userZoom;
                 globeGroup.scale.set(effectiveScale, effectiveScale, effectiveScale);
                 globeGroup.position.set(0, currentPosY, 0);
 
                 if (searchModeActive) {
-                    // Smoothly rotate globe so location beacon aligns perpendicular to the search bar
-                    globeGroup.rotation.y = THREE.MathUtils.lerp(globeGroup.rotation.y, targetRotY, 0.08);
-                    globeGroup.rotation.x = THREE.MathUtils.lerp(globeGroup.rotation.x, targetRotX, 0.08);
+                    const searchT = 1 - Math.pow(0.92, step60);
+                    globeGroup.rotation.y = THREE.MathUtils.lerp(globeGroup.rotation.y, targetRotY, searchT);
+                    globeGroup.rotation.x = THREE.MathUtils.lerp(globeGroup.rotation.x, targetRotX, searchT);
                 } else {
-                    // Momentum inertia or subtle idle auto-rotation
                     if (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001) {
-                        globeGroup.rotation.y += rotVelocity.x;
-                        globeGroup.rotation.x = Math.max(-0.6, Math.min(0.6, globeGroup.rotation.x + rotVelocity.y));
-                        rotVelocity.x *= 0.91;
-                        rotVelocity.y *= 0.91;
+                        globeGroup.rotation.y += rotVelocity.x * step60;
+                        globeGroup.rotation.x = Math.max(-0.6, Math.min(0.6, globeGroup.rotation.x + rotVelocity.y * step60));
+                        const decay = Math.pow(0.91, step60);
+                        rotVelocity.x *= decay;
+                        rotVelocity.y *= decay;
+                        if (Math.abs(rotVelocity.x) <= 0.0001) rotVelocity.x = 0;
+                        if (Math.abs(rotVelocity.y) <= 0.0001) rotVelocity.y = 0;
                     } else if (!isDragging) {
-                        globeGroup.rotation.y += delta * 0.035;
+                        globeGroup.rotation.y += dt * 0.035;
                     }
                 }
 
@@ -358,8 +429,38 @@
                 if (nodes && typeof nodes.update === 'function') nodes.update(elapsed);
 
                 renderer.render(scene, camera);
+
+                const keepFast = isDragging ||
+                    (!searchModeActive && (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001)) ||
+                    Math.abs(targetScale - currentScale) > 0.0008 ||
+                    Math.abs(targetPosY - currentPosY) > 0.04 ||
+                    (searchModeActive && (Math.abs(targetRotY - globeGroup.rotation.y) + Math.abs(targetRotX - globeGroup.rotation.x)) > 0.002) ||
+                    performance.now() < activeUntilMs;
+                if (searchModeActive && !keepFast) {
+                    return;
+                }
+                scheduleNextFrame(keepFast ? 0 : 32);
             }
-            animate();
+
+            if (typeof document !== 'undefined') {
+                document.addEventListener('visibilitychange', () => {
+                    isPageHidden = document.hidden;
+                    if (isPageHidden) {
+                        if (rafId) {
+                            cancelAnimationFrame(rafId);
+                            rafId = null;
+                        }
+                        if (idleTimerId) {
+                            clearTimeout(idleTimerId);
+                            idleTimerId = null;
+                        }
+                    } else {
+                        wakeLoop(800);
+                    }
+                });
+            }
+
+            wakeLoop(1400);
         });
     </script>
 </body>

@@ -11,14 +11,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -36,20 +33,22 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.unit.Constraints
 import com.nexwork.edith.theme.Crimson
 import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.CrimsonDim
@@ -168,13 +167,6 @@ fun HudSearchBar(
       mounted = false
     }
   }
-  val transition = rememberInfiniteTransition(label = "searchConsole")
-  val sweepAnim = transition.animateFloat(
-    initialValue = 0f,
-    targetValue = 1f,
-    animationSpec = infiniteRepeatable(tween(6400, easing = LinearEasing)),
-    label = "searchSweep",
-  )
 
   LaunchedEffect(isOpen) {
     if (isOpen && autoFocus) {
@@ -208,6 +200,14 @@ fun HudSearchBar(
 
   if (!mounted) return
 
+  val transition = rememberInfiniteTransition(label = "searchConsole")
+  val sweepAnim = transition.animateFloat(
+    initialValue = 0f,
+    targetValue = 1f,
+    animationSpec = infiniteRepeatable(tween(6400, easing = LinearEasing)),
+    label = "searchSweep",
+  )
+
   Box(
     modifier
       .fillMaxWidth()
@@ -235,37 +235,7 @@ fun HudSearchBar(
           fun Y(sy: Float) = sy * uy
           val hair = 0.6f.dp.toPx()
 
-          val fieldBrush = Brush.verticalGradient(
-            0f to Color.Transparent,
-            1f to Color.White.copy(alpha = 0.17f),
-          )
-          val columnBrush = Brush.verticalGradient(
-            0f to Color.White.copy(alpha = 0.05f),
-            1f to Color.White.copy(alpha = 0.12f),
-          )
-          val fieldGrid = Path()
-          var gx = 10f
-          while (gx < 259f) {
-            fieldGrid.addRect(Rect(X(gx), Y(2f), X(gx) + hair, Y(62f)))
-            gx += 10f
-          }
-          var gy = 6f
-          while (gy < 62f) {
-            fieldGrid.addRect(Rect(X(2f), Y(gy), X(259f), Y(gy) + hair))
-            gy += 10f
-          }
-          val columnGrid = Path()
-          var rx = 269f
-          while (rx < 304f) {
-            columnGrid.addRect(Rect(X(rx), Y(2f), X(rx) + hair, Y(62f)))
-            rx += 10f
-          }
-          var ry = 6f
-          while (ry < 60f) {
-            columnGrid.addRect(Rect(X(260f), Y(ry), X(310f), Y(ry) + hair))
-            ry += 10f
-          }
-          val plate = Rect(X(260f), Y(2f), size.width, Y(62f))
+          val gridBitmap = cachedHudGridBitmap(size.width.roundToInt(), size.height.roundToInt(), 64f, hair)
           val platePath = Path().apply {
             moveTo(X(260f), Y(2f))
             lineTo(size.width - 8f * ux, Y(2f))
@@ -275,22 +245,7 @@ fun HudSearchBar(
             close()
           }
           val bar = 1.2f.dp.toPx()
-          val bracketTL = Path().apply {
-            addRect(Rect(0f, 0f, bar, 17.5f.dp.toPx()))
-            addRect(Rect(0f, 0f, 18f.dp.toPx(), bar))
-          }
-          val bracketTR = Path().apply {
-            addRect(Rect(size.width - bar, 0f, size.width, 17.5f.dp.toPx()))
-            addRect(Rect(size.width - 32.5f.dp.toPx(), 0f, size.width, bar))
-          }
-          val bracketBR = Path().apply {
-            addRect(Rect(size.width - bar, size.height - 6f.dp.toPx(), size.width, size.height))
-            addRect(Rect(size.width - 39f.dp.toPx(), size.height - bar, size.width, size.height))
-          }
-          val bracketBL = Path().apply {
-            addRect(Rect(0f, size.height - 11.5f.dp.toPx(), bar, size.height))
-            addRect(Rect(0f, size.height - bar, 44.5f.dp.toPx(), size.height))
-          }
+          val plateStroke = Stroke(width = 0.8f.dp.toPx())
           val perimeter = 2f * (size.width + size.height)
           val cornerAt = floatArrayOf(
             0f,
@@ -302,16 +257,6 @@ fun HudSearchBar(
           val crossArm = 3f.dp.toPx()
           val crossStroke = 1.2f.dp.toPx()
           val stroke = 1f.dp.toPx()
-          val bandW = 15f.dp.toPx()
-          val bandBrush = Brush.horizontalGradient(
-            0f to Color.Transparent,
-            bandW to (if (typing) CrimsonBright.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.11f)),
-            bandW * 2f to Color.Transparent,
-          )
-          val fieldLeft = X(2f)
-          val fieldRight = X(259f)
-          val bandTop = Y(2f)
-          val bandH = Y(62f) - Y(2f)
 
           val statusBaseline = centerBaseline(statusPaint, Y(18f))
           val countBaseline = centerBaseline(countPaint, Y(26f))
@@ -335,34 +280,22 @@ fun HudSearchBar(
             val crossP = phase(reveal, 0.42f, 0.6f)
             val promptP = phase(reveal, 0.72f, 0.95f)
 
-            clipRect(right = size.width * phase(trace, 0f, cornerAt[1])) {
+            fun drawPlateAndGrid() {
               drawPath(platePath, Color(0xFF0F141E))
               drawPath(
                 platePath,
                 if (typing) CrimsonBright.copy(alpha = 0.6f) else CrimsonDim,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 0.8f.dp.toPx()),
+                style = plateStroke,
               )
-              drawPath(fieldGrid, fieldBrush)
-              drawPath(columnGrid, columnBrush)
+              gridBitmap?.let { drawImage(it) }
             }
 
-            val sweep = sweepAnim.value
-            val edge = 1f - abs(2f * sweep - 1f)
-            val sweepX = fieldLeft + sweep * (fieldRight - fieldLeft)
-            withTransform({ translate(sweepX - bandW, bandTop) }) {
-              drawRect(
-                brush = bandBrush,
-                size = Size(bandW * 2f, bandH),
-                blendMode = BlendMode.Plus,
-              )
+            val plateClip = phase(trace, 0f, cornerAt[1])
+            if (plateClip < 0.999f) {
+              clipRect(right = size.width * plateClip) { drawPlateAndGrid() }
+            } else {
+              drawPlateAndGrid()
             }
-            drawLine(
-              color = if (typing) CrimsonBright.copy(alpha = 0.45f * edge * edge) else Color.White.copy(alpha = 0.22f * edge * edge),
-              start = Offset(sweepX, Y(4f)),
-              end = Offset(sweepX, Y(60f)),
-              strokeWidth = (if (typing) 1.5f else 1f).dp.toPx(),
-              blendMode = BlendMode.Plus,
-            )
 
             if (crossP > 0f) {
               drawCross(X(9.5f), Y(16.5f), crossArm, crossStroke, CrimsonBright.copy(alpha = 0.7f * crossP))
@@ -392,8 +325,12 @@ fun HudSearchBar(
               )
             }
             if (captionP > 0f) {
-              clipRect(right = captionRight + captionPaint.measureText(captionText) * captionP) {
-                captionPaint.alpha = (120 * captionP).toInt()
+              captionPaint.alpha = (120 * captionP).toInt()
+              if (captionP < 0.999f) {
+                clipRect(right = captionRight + captionPaint.measureText(captionText) * captionP) {
+                  drawContext.canvas.nativeCanvas.drawText(captionText, captionRight, captionBaseline, captionPaint)
+                }
+              } else {
                 drawContext.canvas.nativeCanvas.drawText(captionText, captionRight, captionBaseline, captionPaint)
               }
             }
@@ -408,10 +345,14 @@ fun HudSearchBar(
             }
 
             val bracketTint = Color.White
-            if (trace >= cornerAt[0]) drawPath(bracketTL, bracketTint)
-            if (trace >= cornerAt[1]) drawPath(bracketTR, CrimsonBright.copy(alpha = 0.85f))
-            if (trace >= cornerAt[2]) drawPath(bracketBR, bracketTint)
-            if (trace >= cornerAt[3]) drawPath(bracketBL, bracketTint)
+            drawHudCornerBrackets(
+              trace = trace,
+              cornerAt = cornerAt,
+              barPx = bar,
+              tint = bracketTint,
+              trTint = CrimsonBright.copy(alpha = 0.85f),
+              blTint = bracketTint,
+            )
 
             drawRect(
               color = CrimsonBright.copy(alpha = 0.75f * phase(reveal, 0.85f, 1f)),
@@ -431,75 +372,130 @@ fun HudSearchBar(
         },
     )
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-      val sx = maxWidth / 312f
-      val sy = maxHeight / 64f
-      if (scope != null) {
-        Box(
-          modifier = Modifier
-            .offset(x = 0.dp, y = 0.dp)
-            .size(width = sx * 130f, height = sy * 26f)
-            .pointerInput(scope) {
-              detectTapGestures {
-                onExitGroup()
-              }
+    // Isolate the 90Hz scanner beam in its own draw layer so the static plate, grid, and text don't re-record every frame.
+    Box(
+      Modifier
+        .fillMaxSize()
+        .drawWithCache {
+          val ux = size.width / 312f
+          val uy = size.height / 64f
+          val bandW = 15f.dp.toPx()
+          val bandBrush = Brush.horizontalGradient(
+            0f to Color.Transparent,
+            bandW to (if (typing) CrimsonBright.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.11f)),
+            bandW * 2f to Color.Transparent,
+          )
+          val fieldLeft = 2f * ux
+          val fieldRight = 259f * ux
+          val bandTop = 2f * uy
+          val bandH = 60f * uy
+          val lineTop = 4f * uy
+          val lineBottom = 60f * uy
+          val lineStroke = (if (typing) 1.5f else 1f).dp.toPx()
+
+          onDrawBehind {
+            if (revealAnim.value <= 0.001f) return@onDrawBehind
+            val sweep = sweepAnim.value
+            val edge = 1f - abs(2f * sweep - 1f)
+            val sweepX = fieldLeft + sweep * (fieldRight - fieldLeft)
+            withTransform({ translate(sweepX - bandW, bandTop) }) {
+              drawRect(
+                brush = bandBrush,
+                size = Size(bandW * 2f, bandH),
+                blendMode = BlendMode.Plus,
+              )
             }
+            drawLine(
+              color = if (typing) CrimsonBright.copy(alpha = 0.45f * edge * edge) else Color.White.copy(alpha = 0.22f * edge * edge),
+              start = Offset(sweepX, lineTop),
+              end = Offset(sweepX, lineBottom),
+              strokeWidth = lineStroke,
+              blendMode = BlendMode.Plus,
+            )
+          }
+        },
+    )
+
+    Layout(
+      modifier = Modifier.fillMaxSize(),
+      content = {
+        if (scope != null) {
+          Box(
+            modifier = Modifier
+              .fillMaxSize()
+              .pointerInput(scope) {
+                detectTapGestures { onExitGroup() }
+              }
+          )
+        }
+        Box(modifier = Modifier.fillMaxSize()) {
+          BasicTextField(
+            value = if (isOpen) textFieldValue else frozen,
+            onValueChange = { newVal ->
+              lastInteractionTimestamp = System.currentTimeMillis()
+              textFieldValue = newVal
+              if (newVal.text != searchQuery) onSearchQueryChange(newVal.text)
+            },
+            singleLine = true,
+            textStyle = TextStyle(
+              color = Color.White,
+              fontSize = 20.sp,
+              fontFamily = FontFamily.Monospace,
+              fontWeight = FontWeight.Medium,
+              letterSpacing = 2.sp,
+            ),
+            cursorBrush = SolidColor(CrimsonBright),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+              onSearch = {
+                keyboardController?.hide()
+                focusManager.clearFocus()
+                val top = matchingApps.firstOrNull()
+                if (top != null) {
+                  onLaunchApp(top)
+                  onDismiss()
+                }
+              }
+            ),
+            modifier = Modifier
+              .focusRequester(focusRequester)
+              .graphicsLayer { alpha = contentProgress(revealAnim.value) }
+              .fillMaxWidth()
+              .fillMaxHeight(),
+            decorationBox = { innerTextField ->
+              Box {
+                if (shownText.isEmpty()) {
+                  Text(
+                    text = "SEARCH TELEMETRY",
+                    color = Color.White.copy(alpha = 0.28f),
+                    fontSize = 20.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 2.sp,
+                  )
+                }
+                innerTextField()
+              }
+            },
+          )
+        }
+      },
+    ) { measurables, constraints ->
+      val ux = constraints.maxWidth / 312f
+      val uy = constraints.maxHeight / 64f
+      val scopePlaceable = if (scope != null && measurables.size > 1) {
+        measurables[0].measure(
+          Constraints.fixed((130f * ux).roundToInt().coerceAtLeast(1), (26f * uy).roundToInt().coerceAtLeast(1)),
         )
+      } else {
+        null
       }
-      Box(
-        modifier = Modifier
-          .offset(x = sx * 33f, y = sy * 26f)
-          .size(width = sx * 190f, height = sy * 26f),
-      ) {
-        BasicTextField(
-          value = if (isOpen) textFieldValue else frozen,
-          onValueChange = { newVal ->
-            lastInteractionTimestamp = System.currentTimeMillis()
-            textFieldValue = newVal
-            if (newVal.text != searchQuery) onSearchQueryChange(newVal.text)
-          },
-          singleLine = true,
-          textStyle = TextStyle(
-            color = Color.White,
-            fontSize = 20.sp,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Medium,
-            letterSpacing = 2.sp,
-          ),
-          cursorBrush = SolidColor(CrimsonBright),
-          keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-          keyboardActions = KeyboardActions(
-            onSearch = {
-              keyboardController?.hide()
-              focusManager.clearFocus()
-              val top = matchingApps.firstOrNull()
-              if (top != null) {
-                onLaunchApp(top)
-                onDismiss()
-              }
-            }
-          ),
-          modifier = Modifier
-            .focusRequester(focusRequester)
-            .graphicsLayer { alpha = contentProgress(revealAnim.value) }
-            .fillMaxWidth()
-            .fillMaxHeight(),
-          decorationBox = { innerTextField ->
-            Box {
-              if (shownText.isEmpty()) {
-                Text(
-                  text = "SEARCH TELEMETRY",
-                  color = Color.White.copy(alpha = 0.28f),
-                  fontSize = 20.sp,
-                  fontFamily = FontFamily.Monospace,
-                  fontWeight = FontWeight.Medium,
-                  letterSpacing = 2.sp,
-                )
-              }
-              innerTextField()
-            }
-          },
-        )
+      val fieldPlaceable = measurables.last().measure(
+        Constraints.fixed((190f * ux).roundToInt().coerceAtLeast(1), (26f * uy).roundToInt().coerceAtLeast(1)),
+      )
+      layout(constraints.maxWidth, constraints.maxHeight) {
+        scopePlaceable?.placeRelative(0, 0)
+        fieldPlaceable.placeRelative((33f * ux).roundToInt(), (26f * uy).roundToInt())
       }
     }
   }

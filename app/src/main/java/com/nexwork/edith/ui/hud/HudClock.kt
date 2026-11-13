@@ -19,11 +19,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
@@ -34,6 +33,7 @@ import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.CrimsonDim
 import java.util.Calendar
 import java.util.TimeZone
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 
 private val Months = arrayOf(
@@ -151,37 +151,7 @@ fun HudClock(
           fun Y(sy: Float) = sy * uy
           val hair = 0.6f.dp.toPx()
 
-          val fieldBrush = Brush.verticalGradient(
-            0f to Color.Transparent,
-            1f to Color.White.copy(alpha = 0.17f),
-          )
-          val columnBrush = Brush.verticalGradient(
-            0f to Color.White.copy(alpha = 0.05f),
-            1f to Color.White.copy(alpha = 0.12f),
-          )
-          val fieldGrid = Path()
-          var gx = 10f
-          while (gx < 259f) {
-            fieldGrid.addRect(Rect(X(gx), Y(2f), X(gx) + hair, Y(62f)))
-            gx += 10f
-          }
-          var gy = 6f
-          while (gy < 62f) {
-            fieldGrid.addRect(Rect(X(2f), Y(gy), X(259f), Y(gy) + hair))
-            gy += 10f
-          }
-          val columnGrid = Path()
-          var rx = 269f
-          while (rx < 304f) {
-            columnGrid.addRect(Rect(X(rx), Y(2f), X(rx) + hair, Y(62f)))
-            rx += 10f
-          }
-          var ry = 6f
-          while (ry < 60f) {
-            columnGrid.addRect(Rect(X(260f), Y(ry), X(310f), Y(ry) + hair))
-            ry += 10f
-          }
-          val plate = Rect(X(260f), Y(2f), size.width, Y(62f))
+          val gridBitmap = cachedHudGridBitmap(size.width.roundToInt(), size.height.roundToInt(), 64f, hair)
           val platePath = Path().apply {
             moveTo(X(260f), Y(2f))
             lineTo(size.width - 8f * ux, Y(2f))
@@ -191,22 +161,7 @@ fun HudClock(
             close()
           }
           val bar = 1.2f.dp.toPx()
-          val bracketTL = Path().apply {
-            addRect(Rect(0f, 0f, bar, 17.5f.dp.toPx()))
-            addRect(Rect(0f, 0f, 18f.dp.toPx(), bar))
-          }
-          val bracketTR = Path().apply {
-            addRect(Rect(size.width - bar, 0f, size.width, 17.5f.dp.toPx()))
-            addRect(Rect(size.width - 32.5f.dp.toPx(), 0f, size.width, bar))
-          }
-          val bracketBR = Path().apply {
-            addRect(Rect(size.width - bar, size.height - 6f.dp.toPx(), size.width, size.height))
-            addRect(Rect(size.width - 39f.dp.toPx(), size.height - bar, size.width, size.height))
-          }
-          val bracketBL = Path().apply {
-            addRect(Rect(0f, size.height - 11.5f.dp.toPx(), bar, size.height))
-            addRect(Rect(0f, size.height - bar, 44.5f.dp.toPx(), size.height))
-          }
+          val plateStroke = Stroke(width = 0.8f.dp.toPx())
           val perimeter = 2f * (size.width + size.height)
           val cornerAt = floatArrayOf(
             0f,
@@ -255,15 +210,17 @@ fun HudClock(
             val crossP = phase(reveal, 0.42f, 0.6f)
             val combP = phase(reveal, 0.62f, 1f)
 
-            clipRect(right = size.width * phase(trace, 0f, cornerAt[1])) {
+            fun drawPlateAndGrid() {
               drawPath(platePath, Color(0xFF0F141E))
-              drawPath(
-                platePath,
-                CrimsonDim,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 0.8f.dp.toPx())
-              )
-              drawPath(fieldGrid, fieldBrush)
-              drawPath(columnGrid, columnBrush)
+              drawPath(platePath, CrimsonDim, style = plateStroke)
+              gridBitmap?.let { drawImage(it) }
+            }
+
+            val plateClip = phase(trace, 0f, cornerAt[1])
+            if (plateClip < 0.999f) {
+              clipRect(right = size.width * plateClip) { drawPlateAndGrid() }
+            } else {
+              drawPlateAndGrid()
             }
 
             if (crossP > 0f) {
@@ -283,7 +240,12 @@ fun HudClock(
               }
             }
             if (timeP > 0f) {
-              clipRect(right = timeLeft + (timeRight - timeLeft) * timeP) {
+              if (timeP < 0.999f) {
+                clipRect(right = timeLeft + (timeRight - timeLeft) * timeP) {
+                  canvas.drawText(face.digits, 0, 2, timeLeft, timeBaseline, timePaint)
+                  canvas.drawText(face.digits, 2, 2, timeLeft + timeAdvance * 3f, timeBaseline, timePaint)
+                }
+              } else {
                 canvas.drawText(face.digits, 0, 2, timeLeft, timeBaseline, timePaint)
                 canvas.drawText(face.digits, 2, 2, timeLeft + timeAdvance * 3f, timeBaseline, timePaint)
               }
@@ -306,8 +268,12 @@ fun HudClock(
             }
             if (captionP > 0f) {
               captionPaint.alpha = (120 * captionP).toInt()
-              val width = captionPaint.measureText(face.date)
-              clipRect(right = secRight - width + width * captionP) {
+              if (captionP < 0.999f) {
+                val width = captionPaint.measureText(face.date)
+                clipRect(right = secRight - width + width * captionP) {
+                  canvas.drawText(face.date, secRight, captionBaseline, captionPaint)
+                }
+              } else {
                 canvas.drawText(face.date, secRight, captionBaseline, captionPaint)
               }
             }
@@ -345,10 +311,14 @@ fun HudClock(
             }
 
             val bracketTint = Color.White
-            if (trace >= cornerAt[0]) drawPath(bracketTL, bracketTint)
-            if (trace >= cornerAt[1]) drawPath(bracketTR, CrimsonBright.copy(alpha = 0.85f))
-            if (trace >= cornerAt[2]) drawPath(bracketBR, bracketTint)
-            if (trace >= cornerAt[3]) drawPath(bracketBL, bracketTint)
+            drawHudCornerBrackets(
+              trace = trace,
+              cornerAt = cornerAt,
+              barPx = bar,
+              tint = bracketTint,
+              trTint = CrimsonBright.copy(alpha = 0.85f),
+              blTint = bracketTint,
+            )
 
             drawRect(
               color = CrimsonBright.copy(alpha = 0.75f * phase(reveal, 0.85f, 1f)),

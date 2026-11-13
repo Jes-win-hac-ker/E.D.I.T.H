@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -165,7 +166,7 @@ fun MainScreen(
       val name = state.browseGroup ?: return@remember 0
       groupApps(state.apps).firstOrNull { it.name == name }?.apps?.size ?: 0
     }
-    val bgZoom by animateFloatAsState(
+    val bgZoom = animateFloatAsState(
       targetValue = if (consoleOpen) 1.08f else 1.0f,
       animationSpec = tween(500),
       label = "bgZoom",
@@ -187,8 +188,9 @@ fun MainScreen(
       Modifier
         .fillMaxSize()
         .graphicsLayer {
-          scaleX = bgZoom
-          scaleY = bgZoom
+          val zoom = bgZoom.value
+          scaleX = zoom
+          scaleY = zoom
           renderEffect = if (consoleOpen) consoleBlurEffect else null
         }
         .background(Color.Black)
@@ -252,15 +254,15 @@ fun MainScreen(
     // category plates and drills into one category's app deck; the strip's drag walks the window
     // past the five dealt cards, and a pull past the head of a category climbs back out.
     // Once the IME retracts the leader card parks with its centre at half screen height.
+    val density = LocalDensity.current
     val cardHeight = (maxWidth - 36.dp) * 124f / 312f
     val deckResting = maxHeight * 0.5f - cardHeight / 2f
     val keyboardUp = consoleOpen && WindowInsets.isImeVisible
-    val deckShift by animateFloatAsState(
+    val deckShift = animateFloatAsState(
       targetValue = if (keyboardUp) 0f else 1f,
       animationSpec = tween(260),
       label = "deckShift",
     )
-    val deckTop = 236.dp + (deckResting - 236.dp) * deckShift
 
     HudCardDeck(
       isOpen = consoleOpen,
@@ -275,7 +277,10 @@ fun MainScreen(
       footprintOf = viewModel::footprintOf,
       modifier = Modifier
         .align(Alignment.TopStart)
-        .padding(start = 18.dp, end = 18.dp, top = deckTop, bottom = 28.dp),
+        .padding(start = 18.dp, end = 18.dp, top = 236.dp, bottom = 28.dp)
+        .graphicsLayer {
+          translationY = with(density) { (deckResting - 236.dp).toPx() } * deckShift.value
+        },
     )
   }
 }
