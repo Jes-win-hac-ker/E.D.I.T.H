@@ -6,7 +6,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -18,10 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -42,7 +38,6 @@ import com.nexwork.edith.ui.hud.HudSearchBar
 import com.nexwork.edith.ui.hud.GlobeController
 import com.nexwork.edith.ui.hud.InteractiveWireframeGlobe
 import com.nexwork.edith.ui.hud.groupApps
-import kotlin.math.abs
 
 /**
  * Home screen — Stark HUD void with the flat search line.
@@ -76,11 +71,6 @@ fun MainScreen(
 
   // Back climbs one level: a category back to the categories, then the console closed.
   BackHandler(enabled = consoleOpen) { viewModel.handleBackPress() }
-
-  var totalVerticalDrag by remember { mutableFloatStateOf(0f) }
-  var totalHorizontalDrag by remember { mutableFloatStateOf(0f) }
-  var dragStartY by remember { mutableFloatStateOf(0f) }
-  var dragStartX by remember { mutableFloatStateOf(0f) }
 
   BoxWithConstraints(
     modifier = modifier
@@ -174,23 +164,26 @@ fun MainScreen(
       animationSpec = tween(500),
       label = "bgZoom",
     )
+    val consoleBlurEffect = remember {
+      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+        android.graphics.RenderEffect.createBlurEffect(
+          12f,
+          12f,
+          android.graphics.Shader.TileMode.CLAMP,
+        ).asComposeRenderEffect()
+      } else {
+        null
+      }
+    }
 
     // Wireframe Earth backdrop with rack focus dolly zoom and blur
     Box(
       Modifier
         .fillMaxSize()
         .graphicsLayer {
-          if (consoleOpen) {
-            scaleX = bgZoom
-            scaleY = bgZoom
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-              renderEffect = android.graphics.RenderEffect.createBlurEffect(
-                12f,
-                12f,
-                android.graphics.Shader.TileMode.CLAMP
-              ).asComposeRenderEffect()
-            }
-          }
+          scaleX = bgZoom
+          scaleY = bgZoom
+          renderEffect = if (consoleOpen) consoleBlurEffect else null
         }
         .background(Color.Black)
     ) {

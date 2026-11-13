@@ -11,7 +11,6 @@ import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -68,6 +67,18 @@ fun InteractiveWireframeGlobe(
   controller: GlobeController? = null,
 ) {
   val context = LocalContext.current
+  val locationCoords = remember(context) {
+    val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+    val lastKnown = try {
+      locationManager?.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
+        ?: locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+        ?: locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+    } catch (_: SecurityException) {
+      null
+    }
+    (lastKnown?.latitude ?: 10.516) to (lastKnown?.longitude ?: 76.2157)
+  }
+
   val webView = remember {
     WebView(context).apply {
       layoutParams = ViewGroup.LayoutParams(
@@ -86,31 +97,31 @@ fun InteractiveWireframeGlobe(
         allowUniversalAccessFromFileURLs = true
         cacheMode = WebSettings.LOAD_DEFAULT
       }
-      webViewClient = object : WebViewClient() {}
+      webViewClient = object : WebViewClient() {
+        override fun onPageFinished(view: WebView?, url: String?) {
+          val (lat, lon) = locationCoords
+          view?.evaluateJavascript(
+            "if(window.setUserLocation) window.setUserLocation($lat, $lon);",
+            null,
+          )
+        }
+      }
       loadUrl("file:///android_asset/globe/index.html")
     }
   }
 
-  // Detect real device location and pass it to the 3D globe beacon
-  LaunchedEffect(webView) {
-    val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-    val lastKnown = try {
-      locationManager?.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
-        ?: locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-        ?: locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-    } catch (_: SecurityException) { null }
-
-    val lat = lastKnown?.latitude ?: 10.516
-    val lon = lastKnown?.longitude ?: 76.2157
-    controller?.setLocation(lat, lon)
+  DisposableEffect(webView) {
+    webView.onResume()
+    onDispose {
+      webView.onPause()
+      webView.destroy()
+    }
   }
 
   DisposableEffect(webView, controller) {
     controller?.attach(webView)
-    webView.onResume()
     onDispose {
       controller?.detach()
-      webView.onPause()
     }
   }
 
