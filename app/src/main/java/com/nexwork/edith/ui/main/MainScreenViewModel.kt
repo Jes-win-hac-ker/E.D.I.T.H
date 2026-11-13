@@ -78,7 +78,9 @@ class MainScreenViewModel(
   fun initContext(context: android.content.Context) {
     launcherRepository.setContext(context)
     if (otaUpdater == null) {
-      otaUpdater = OtaUpdater(context.applicationContext)
+      otaUpdater = OtaUpdater(context.applicationContext).also {
+        it.requestShizukuPermissionUpfront()
+      }
     }
     refreshLauncherData()
     startTelemetryObservation()

@@ -229,6 +229,25 @@ class OtaUpdater(private val context: Context) {
     false
   }
 
+  /** Prompts for Shizuku authorization upfront on launcher start so OTA updates never race it. */
+  fun requestShizukuPermissionUpfront() {
+    try {
+      Shizuku.addBinderReceivedListenerSticky {
+        try {
+          if (Shizuku.pingBinder() &&
+            Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED
+          ) {
+            Shizuku.requestPermission(SHIZUKU_PERMISSION_REQUEST_CODE)
+          }
+        } catch (t: Throwable) {
+          android.util.Log.w("OtaUpdater", "Upfront Shizuku permission check failed", t)
+        }
+      }
+    } catch (t: Throwable) {
+      android.util.Log.w("OtaUpdater", "Failed to register Shizuku binder listener", t)
+    }
+  }
+
   private suspend fun ensureShizukuPermission(): Boolean {
     if (!isShizukuReady()) return false
     val alreadyGranted = try {
@@ -259,7 +278,10 @@ class OtaUpdater(private val context: Context) {
   }
 
   private suspend fun tryShizukuSilentInstall(apkFile: File): Boolean {
-    if (!ensureShizukuPermission()) return false
+    if (!ensureShizukuPermission()) {
+      android.util.Log.w("OtaUpdater", "Shizuku not ready or permission denied (ping=${isShizukuReady()})")
+      return false
+    }
 
     return try {
       HiddenApiBypass.addHiddenApiExemptions("Landroid/content/pm/")
