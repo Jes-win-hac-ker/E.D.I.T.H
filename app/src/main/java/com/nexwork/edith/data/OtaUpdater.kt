@@ -40,6 +40,7 @@ sealed interface OtaState {
   data class Downloading(val release: OtaRelease, val progress: Int) : OtaState
   data class ReadyToInstall(val release: OtaRelease, val apkFile: File) : OtaState
   data class Installing(val release: OtaRelease) : OtaState
+  data class Installed(val release: OtaRelease) : OtaState
   data object UpToDate : OtaState
   data class Error(val message: String) : OtaState
 }

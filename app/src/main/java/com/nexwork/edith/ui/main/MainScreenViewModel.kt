@@ -185,7 +185,7 @@ class MainScreenViewModel(
           if (release == null) {
             if (force) {
               _launcherState.update { it.copy(otaState = OtaState.UpToDate) }
-              delay(2_500L)
+              delay(2_000L)
               _launcherState.update { state ->
                 if (state.otaState is OtaState.UpToDate) state.copy(otaState = OtaState.Idle) else state
               }
@@ -281,10 +281,18 @@ class MainScreenViewModel(
     val result = updater.installApk(apkFile)
     result.fold(
       onSuccess = { installedSilently ->
-        _launcherState.update {
-          it.copy(
-            otaState = if (installedSilently) OtaState.Idle else OtaState.ReadyToInstall(release, apkFile),
-          )
+        if (installedSilently) {
+          _launcherState.update { it.copy(otaState = OtaState.Installed(release)) }
+          delay(2_000L)
+          _launcherState.update { state ->
+            if (state.otaState is OtaState.Installed) state.copy(otaState = OtaState.Idle) else state
+          }
+        } else {
+          _launcherState.update { it.copy(otaState = OtaState.ReadyToInstall(release, apkFile)) }
+          delay(2_000L)
+          _launcherState.update { state ->
+            if (state.otaState is OtaState.ReadyToInstall) state.copy(otaState = OtaState.Idle) else state
+          }
         }
       },
       onFailure = { err ->
