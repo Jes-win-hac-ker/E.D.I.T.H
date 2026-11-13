@@ -28,6 +28,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
@@ -55,6 +57,9 @@ fun MainScreen(
   val context = LocalContext.current
   LaunchedEffect(Unit) {
     viewModel.initContext(context)
+  }
+  LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+    viewModel.checkForUpdates(force = false)
   }
 
   val state by viewModel.launcherState.collectAsStateWithLifecycle()

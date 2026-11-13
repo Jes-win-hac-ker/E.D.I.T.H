@@ -12,8 +12,10 @@ import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
@@ -220,29 +222,43 @@ class OtaUpdater(private val context: Context) {
     }
   }
 
-  private fun tryShizukuSilentInstall(apkFile: File): Boolean {
-    val binderAlive = try {
-      Shizuku.pingBinder()
-    } catch (_: Throwable) {
-      false
-    }
-    if (!binderAlive) return false
+  fun isShizukuReady(): Boolean = try {
+    Shizuku.pingBinder()
+  } catch (_: Throwable) {
+    false
+  }
 
-    val granted = try {
+  private suspend fun ensureShizukuPermission(): Boolean {
+    if (!isShizukuReady()) return false
+    val alreadyGranted = try {
       Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
     } catch (_: Throwable) {
       false
     }
-    if (!granted) {
-      try {
-        if (!Shizuku.shouldShowRequestPermissionRationale()) {
-          Shizuku.requestPermission(SHIZUKU_PERMISSION_REQUEST_CODE)
-        }
-      } catch (_: Throwable) {
-        // Fall back to system installer if permission prompt fails
+    if (alreadyGranted) return true
+
+    val deferred = CompletableDeferred<Boolean>()
+    val listener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+      if (requestCode == SHIZUKU_PERMISSION_REQUEST_CODE && !deferred.isCompleted) {
+        deferred.complete(grantResult == PackageManager.PERMISSION_GRANTED)
       }
-      return false
     }
+    return try {
+      Shizuku.addRequestPermissionResultListener(listener)
+      Shizuku.requestPermission(SHIZUKU_PERMISSION_REQUEST_CODE)
+      withTimeoutOrNull(30_000L) { deferred.await() } ?: false
+    } catch (_: Throwable) {
+      false
+    } finally {
+      try {
+        Shizuku.removeRequestPermissionResultListener(listener)
+      } catch (_: Throwable) {
+      }
+    }
+  }
+
+  private suspend fun tryShizukuSilentInstall(apkFile: File): Boolean {
+    if (!ensureShizukuPermission()) return false
 
     return try {
       val pmBinder = ShizukuBinderWrapper(SystemServiceHelper.getSystemService("package"))

@@ -206,7 +206,7 @@ class MainScreenViewModel(
           }
 
           if (force || updater.isUnmeteredWifi()) {
-            downloadRelease(updater, release, installOnComplete = force)
+            downloadRelease(updater, release, installOnComplete = force || updater.isShizukuReady())
           } else {
             _launcherState.update { it.copy(otaState = OtaState.Available(release)) }
           }
