@@ -16,6 +16,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import org.lsposed.hiddenapibypass.HiddenApiBypass
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
@@ -261,6 +262,7 @@ class OtaUpdater(private val context: Context) {
     if (!ensureShizukuPermission()) return false
 
     return try {
+      HiddenApiBypass.addHiddenApiExemptions("Landroid/content/pm/")
       val pmBinder = ShizukuBinderWrapper(SystemServiceHelper.getSystemService("package"))
       val iPmClass = Class.forName("android.content.pm.IPackageManager\$Stub")
       val iPm = iPmClass.getMethod("asInterface", IBinder::class.java).invoke(null, pmBinder)
