@@ -288,7 +288,10 @@ class OtaUpdater(private val context: Context) {
       val pmBinder = ShizukuBinderWrapper(SystemServiceHelper.getSystemService("package"))
       val iPmClass = Class.forName("android.content.pm.IPackageManager\$Stub")
       val iPm = iPmClass.getMethod("asInterface", IBinder::class.java).invoke(null, pmBinder)
-      val iPi = iPm.javaClass.getMethod("getPackageInstaller").invoke(iPm)
+      val iPiRaw = iPm.javaClass.getMethod("getPackageInstaller").invoke(iPm) as android.os.IInterface
+      val iPiBinder = ShizukuBinderWrapper(iPiRaw.asBinder())
+      val iPiStubClass = Class.forName("android.content.pm.IPackageInstaller\$Stub")
+      val iPi = iPiStubClass.getMethod("asInterface", IBinder::class.java).invoke(null, iPiBinder)
       val iPiClass = Class.forName("android.content.pm.IPackageInstaller")
 
       val installer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
