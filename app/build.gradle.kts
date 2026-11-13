@@ -81,4 +81,8 @@ dependencies {
   implementation(libs.androidx.navigation3.ui)
   implementation(libs.androidx.navigation3.runtime)
   implementation(libs.androidx.lifecycle.viewmodel.navigation3)
+
+  // Shizuku (silent in-place OTA install when active)
+  implementation(libs.shizuku.api)
+  implementation(libs.shizuku.provider)
 }

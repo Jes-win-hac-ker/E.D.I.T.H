@@ -48,14 +48,15 @@ fun HudOtaPill(
       OtaState.Idle -> ""
       OtaState.Checking -> "OTA // CHECKING RELEASE"
       is OtaState.Available -> "OTA // v${otaState.release.versionName} (${otaState.release.versionCode}) — TAP TO UPDATE"
-      is OtaState.Downloading -> "OTA // DOWNLOADING ${otaState.progress}%"
-      is OtaState.ReadyToInstall -> "OTA // READY — TAP TO INSTALL"
+      is OtaState.Downloading -> "OTA // DOWNLOADING v${otaState.release.versionName} ${otaState.progress}%"
+      is OtaState.ReadyToInstall -> "OTA // v${otaState.release.versionName} READY — TAP TO INSTALL"
+      is OtaState.Installing -> "OTA // INSTALLING v${otaState.release.versionName}..."
       OtaState.UpToDate -> "OTA // UP TO DATE"
       is OtaState.Error -> "OTA // ${otaState.message.uppercase()}"
     }
 
     val borderColor = when (otaState) {
-      is OtaState.Available, is OtaState.ReadyToInstall -> Color.White.copy(alpha = 0.55f)
+      is OtaState.Available, is OtaState.ReadyToInstall, is OtaState.Installing -> Color.White.copy(alpha = 0.55f)
       is OtaState.Error -> CrimsonBright.copy(alpha = 0.7f)
       else -> Color.White.copy(alpha = 0.24f)
     }
@@ -82,7 +83,7 @@ fun HudOtaPill(
           letterSpacing = 1.2.sp,
           modifier = Modifier.weight(1f),
         )
-        if (otaState is OtaState.Error || otaState is OtaState.UpToDate || otaState is OtaState.Available) {
+        if (otaState !is OtaState.Installing && otaState !is OtaState.Checking) {
           Text(
             text = "✕",
             color = Color.White.copy(alpha = 0.55f),

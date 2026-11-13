@@ -1,7 +1,9 @@
 package com.nexwork.edith.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OtaUpdaterTest {
@@ -63,5 +65,25 @@ class OtaUpdaterTest {
   fun parseReleaseJson_returnsNullWhenNoApkAsset() {
     val json = """{"tag_name": "v2", "body": "versionCode: 2", "assets": []}"""
     assertNull(OtaUpdater.parseReleaseJson(json))
+  }
+
+  @Test
+  fun shouldDownload_skipsWhenInstalledMatchesOrExceedsRemote() {
+    val release = OtaRelease(versionCode = 2L, versionName = "1.1.0", apkUrl = "https://example.com/a.apk", sha256 = "abc")
+    assertFalse(OtaUpdater.shouldDownload(2L, release, cachedCode = -1L, cachedSha = null, cachedFileExists = false))
+    assertFalse(OtaUpdater.shouldDownload(3L, release, cachedCode = -1L, cachedSha = null, cachedFileExists = false))
+  }
+
+  @Test
+  fun shouldDownload_skipsWhenValidApkAlreadyCached() {
+    val release = OtaRelease(versionCode = 3L, versionName = "1.2.0", apkUrl = "https://example.com/a.apk", sha256 = "deadbeef")
+    assertFalse(OtaUpdater.shouldDownload(2L, release, cachedCode = 3L, cachedSha = "DEADBEEF", cachedFileExists = true))
+  }
+
+  @Test
+  fun shouldDownload_downloadsWhenCacheMissingOrShaMismatch() {
+    val release = OtaRelease(versionCode = 3L, versionName = "1.2.0", apkUrl = "https://example.com/a.apk", sha256 = "deadbeef")
+    assertTrue(OtaUpdater.shouldDownload(2L, release, cachedCode = 3L, cachedSha = "deadbeef", cachedFileExists = false))
+    assertTrue(OtaUpdater.shouldDownload(2L, release, cachedCode = 3L, cachedSha = "0000", cachedFileExists = true))
   }
 }

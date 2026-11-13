@@ -15,6 +15,7 @@ import com.nexwork.edith.notifications.EdithNotificationListener
 import com.nexwork.edith.ui.main.MainScreenUiState.Success
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -157,11 +158,22 @@ class MainScreenViewModel(
     }
   }
 
-  /** Checks the configured OTA endpoint for a newer versionCode; silent when auto-checking. */
+  /** Checks the configured OTA endpoint; auto-downloads and caches APKs without duplicate fetches. */
   fun checkForUpdates(force: Boolean) {
     val updater = otaUpdater ?: return
+    val current = _launcherState.value.otaState
+    if (otaJob?.isActive == true || current is OtaState.Downloading || current is OtaState.Installing) {
+      return
+    }
+    if (current is OtaState.ReadyToInstall) {
+      if (force) {
+        otaJob = viewModelScope.launch {
+          installReleaseApk(updater, current.release, current.apkFile)
+        }
+      }
+      return
+    }
     if (!force && !updater.shouldAutoCheck()) return
-    if (otaJob?.isActive == true) return
 
     otaJob = viewModelScope.launch {
       if (force) {
@@ -170,12 +182,34 @@ class MainScreenViewModel(
       val result = updater.checkForUpdate()
       result.fold(
         onSuccess = { release ->
-          val next = when {
-            release != null -> OtaState.Available(release)
-            force -> OtaState.UpToDate
-            else -> OtaState.Idle
+          if (release == null) {
+            if (force) {
+              _launcherState.update { it.copy(otaState = OtaState.UpToDate) }
+              delay(2_500L)
+              _launcherState.update { state ->
+                if (state.otaState is OtaState.UpToDate) state.copy(otaState = OtaState.Idle) else state
+              }
+            } else {
+              _launcherState.update { it.copy(otaState = OtaState.Idle) }
+            }
+            return@fold
           }
-          _launcherState.update { it.copy(otaState = next) }
+
+          val cached = updater.getCachedValidApk(release)
+          if (cached != null) {
+            if (force) {
+              installReleaseApk(updater, release, cached)
+            } else {
+              _launcherState.update { it.copy(otaState = OtaState.ReadyToInstall(release, cached)) }
+            }
+            return@fold
+          }
+
+          if (force || updater.isUnmeteredWifi()) {
+            downloadRelease(updater, release, installOnComplete = force)
+          } else {
+            _launcherState.update { it.copy(otaState = OtaState.Available(release)) }
+          }
         },
         onFailure = { err ->
           _launcherState.update {
@@ -192,22 +226,15 @@ class MainScreenViewModel(
       is OtaState.Available -> {
         if (otaJob?.isActive == true) return
         otaJob = viewModelScope.launch {
-          _launcherState.update { it.copy(otaState = OtaState.Downloading(current.release, 0)) }
-          val download = updater.downloadAndVerify(current.release) { pct ->
-            _launcherState.update { it.copy(otaState = OtaState.Downloading(current.release, pct)) }
-          }
-          download.fold(
-            onSuccess = { file ->
-              _launcherState.update { it.copy(otaState = OtaState.ReadyToInstall(current.release, file)) }
-              updater.launchInstaller(file)
-            },
-            onFailure = { err ->
-              _launcherState.update { it.copy(otaState = OtaState.Error(err.message ?: "Download failed")) }
-            },
-          )
+          downloadRelease(updater, current.release, installOnComplete = true)
         }
       }
-      is OtaState.ReadyToInstall -> updater.launchInstaller(current.apkFile)
+      is OtaState.ReadyToInstall -> {
+        if (otaJob?.isActive == true) return
+        otaJob = viewModelScope.launch {
+          installReleaseApk(updater, current.release, current.apkFile)
+        }
+      }
       is OtaState.Error -> checkForUpdates(force = true)
       OtaState.UpToDate -> dismissOtaPill()
       else -> Unit
@@ -215,7 +242,55 @@ class MainScreenViewModel(
   }
 
   fun dismissOtaPill() {
+    if (_launcherState.value.otaState is OtaState.Downloading) {
+      otaJob?.cancel()
+      otaJob = null
+    }
     _launcherState.update { it.copy(otaState = OtaState.Idle) }
+  }
+
+  private suspend fun downloadRelease(
+    updater: OtaUpdater,
+    release: com.nexwork.edith.data.OtaRelease,
+    installOnComplete: Boolean,
+  ) {
+    _launcherState.update { it.copy(otaState = OtaState.Downloading(release, 0)) }
+    val download = updater.downloadAndVerify(release) { pct ->
+      _launcherState.update { it.copy(otaState = OtaState.Downloading(release, pct)) }
+    }
+    download.fold(
+      onSuccess = { file ->
+        if (installOnComplete) {
+          installReleaseApk(updater, release, file)
+        } else {
+          _launcherState.update { it.copy(otaState = OtaState.ReadyToInstall(release, file)) }
+        }
+      },
+      onFailure = { err ->
+        _launcherState.update { it.copy(otaState = OtaState.Error(err.message ?: "Download failed")) }
+      },
+    )
+  }
+
+  private suspend fun installReleaseApk(
+    updater: OtaUpdater,
+    release: com.nexwork.edith.data.OtaRelease,
+    apkFile: java.io.File,
+  ) {
+    _launcherState.update { it.copy(otaState = OtaState.Installing(release)) }
+    val result = updater.installApk(apkFile)
+    result.fold(
+      onSuccess = { installedSilently ->
+        _launcherState.update {
+          it.copy(
+            otaState = if (installedSilently) OtaState.Idle else OtaState.ReadyToInstall(release, apkFile),
+          )
+        }
+      },
+      onFailure = { err ->
+        _launcherState.update { it.copy(otaState = OtaState.Error(err.message ?: "Install failed")) }
+      },
+    )
   }
 
   fun toggleTimeFormat() {

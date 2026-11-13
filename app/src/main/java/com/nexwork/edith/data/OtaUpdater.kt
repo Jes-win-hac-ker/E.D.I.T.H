@@ -1,15 +1,24 @@
 package com.nexwork.edith.data
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
+import android.os.IBinder
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import rikka.shizuku.Shizuku
+import rikka.shizuku.ShizukuBinderWrapper
+import rikka.shizuku.SystemServiceHelper
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -30,14 +39,15 @@ sealed interface OtaState {
   data class Available(val release: OtaRelease) : OtaState
   data class Downloading(val release: OtaRelease, val progress: Int) : OtaState
   data class ReadyToInstall(val release: OtaRelease, val apkFile: File) : OtaState
+  data class Installing(val release: OtaRelease) : OtaState
   data object UpToDate : OtaState
   data class Error(val message: String) : OtaState
 }
 
 /**
- * Checks a remote HTTPS endpoint (GitHub Releases API or direct `version.json`), streams the APK
- * to `cacheDir/ota/edith-update.apk`, verifies SHA-256 when provided, and hands off to Android's
- * package installer via [FileProvider].
+ * Checks a remote HTTPS endpoint (GitHub Releases API or direct `version.json`), caches verified
+ * APKs in `cacheDir/ota/` to prevent duplicate downloads, and installs either silently via Shizuku
+ * (`pm install -r -S`) or via Android's standard [FileProvider] package installer.
  */
 class OtaUpdater(private val context: Context) {
 
@@ -73,11 +83,47 @@ class OtaUpdater(private val context: Context) {
     return (nowMs - last) >= AUTO_CHECK_INTERVAL_MS
   }
 
+  fun isUnmeteredWifi(): Boolean {
+    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+    val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+    return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) &&
+      caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+  }
+
+  /** Deletes cached update APKs once the installed version catches up or surpasses them. */
+  fun cleanupStaleCache() {
+    val cachedCode = prefs.getLong(KEY_CACHED_VERSION_CODE, -1L)
+    val target = cachedApkFile()
+    if (cachedCode > 0L && installedVersionCode() >= cachedCode) {
+      if (target.exists()) target.delete()
+      prefs.edit().remove(KEY_CACHED_VERSION_CODE).remove(KEY_CACHED_SHA256).apply()
+    }
+  }
+
+  /** Returns the cached APK if it already satisfies [release] without re-downloading. */
+  fun getCachedValidApk(release: OtaRelease): File? {
+    val target = cachedApkFile()
+    val cachedCode = prefs.getLong(KEY_CACHED_VERSION_CODE, -1L)
+    val cachedSha = prefs.getString(KEY_CACHED_SHA256, null)
+    val needDownload = shouldDownload(
+      installedCode = installedVersionCode(),
+      release = release,
+      cachedCode = cachedCode,
+      cachedSha = cachedSha,
+      cachedFileExists = target.exists() && target.length() > 0L,
+    )
+    return if (!needDownload && release.versionCode > installedVersionCode() && target.exists()) {
+      target
+    } else {
+      null
+    }
+  }
+
   suspend fun checkForUpdate(): Result<OtaRelease?> = withContext(Dispatchers.IO) {
     runCatching {
+      cleanupStaleCache()
       prefs.edit().putLong(KEY_LAST_CHECK_MS, System.currentTimeMillis()).apply()
-      val feedUrl = getFeedUrl()
-      val body = fetchText(feedUrl)
+      val body = fetchText(getFeedUrl())
       val release = parseReleaseJson(body) ?: return@runCatching null
       if (release.versionCode > installedVersionCode()) release else null
     }
@@ -88,8 +134,13 @@ class OtaUpdater(private val context: Context) {
     onProgress: (Int) -> Unit,
   ): Result<File> = withContext(Dispatchers.IO) {
     runCatching {
+      getCachedValidApk(release)?.let { cached ->
+        onProgress(100)
+        return@runCatching cached
+      }
+
       val otaDir = File(context.cacheDir, "ota").apply { mkdirs() }
-      val target = File(otaDir, "edith-update.apk")
+      val target = cachedApkFile()
       val temp = File(otaDir, "edith-update.apk.part")
 
       val conn = (URL(release.apkUrl).openConnection() as HttpURLConnection).apply {
@@ -106,7 +157,7 @@ class OtaUpdater(private val context: Context) {
         val totalBytes = conn.contentLengthLong
         var downloaded = 0L
         var lastReported = -1
-        val digest = if (!release.sha256.isNullOrBlank()) MessageDigest.getInstance("SHA-256") else null
+        val digest = MessageDigest.getInstance("SHA-256")
 
         conn.inputStream.use { input ->
           FileOutputStream(temp).use { output ->
@@ -115,7 +166,7 @@ class OtaUpdater(private val context: Context) {
               val read = input.read(buf)
               if (read <= 0) break
               output.write(buf, 0, read)
-              digest?.update(buf, 0, read)
+              digest.update(buf, 0, read)
               downloaded += read
               if (totalBytes > 0L) {
                 val pct = ((downloaded * 100L) / totalBytes).toInt().coerceIn(0, 100)
@@ -128,13 +179,11 @@ class OtaUpdater(private val context: Context) {
           }
         }
 
+        val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
         val expectedHash = release.sha256?.trim()?.lowercase()
-        if (!expectedHash.isNullOrEmpty() && digest != null) {
-          val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
-          if (actualHash != expectedHash) {
-            temp.delete()
-            error("SHA-256 mismatch")
-          }
+        if (!expectedHash.isNullOrEmpty() && actualHash != expectedHash) {
+          temp.delete()
+          error("SHA-256 mismatch")
         }
 
         if (target.exists()) target.delete()
@@ -142,6 +191,10 @@ class OtaUpdater(private val context: Context) {
           temp.copyTo(target, overwrite = true)
           temp.delete()
         }
+        prefs.edit()
+          .putLong(KEY_CACHED_VERSION_CODE, release.versionCode)
+          .putString(KEY_CACHED_SHA256, actualHash)
+          .apply()
         target
       } finally {
         conn.disconnect()
@@ -149,7 +202,93 @@ class OtaUpdater(private val context: Context) {
     }
   }
 
-  fun launchInstaller(apkFile: File) {
+  /**
+   * Attempts silent in-place installation via Shizuku (`pm install -r -S`), falling back to
+   * Android's standard [FileProvider] installer if Shizuku is unavailable or unauthorized.
+   * Returns `true` when installed silently via Shizuku, `false` when handed off to system UI.
+   */
+  suspend fun installApk(apkFile: File): Result<Boolean> = withContext(Dispatchers.IO) {
+    runCatching {
+      if (tryShizukuSilentInstall(apkFile)) {
+        return@runCatching true
+      }
+      withContext(Dispatchers.Main) {
+        launchSystemInstaller(apkFile)
+      }
+      false
+    }
+  }
+
+  private fun tryShizukuSilentInstall(apkFile: File): Boolean {
+    val binderAlive = try {
+      Shizuku.pingBinder()
+    } catch (_: Throwable) {
+      false
+    }
+    if (!binderAlive) return false
+
+    val granted = try {
+      Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+    } catch (_: Throwable) {
+      false
+    }
+    if (!granted) {
+      try {
+        if (!Shizuku.shouldShowRequestPermissionRationale()) {
+          Shizuku.requestPermission(SHIZUKU_PERMISSION_REQUEST_CODE)
+        }
+      } catch (_: Throwable) {
+        // Fall back to system installer if permission prompt fails
+      }
+      return false
+    }
+
+    return try {
+      val pmBinder = ShizukuBinderWrapper(SystemServiceHelper.getSystemService("package"))
+      val iPmClass = Class.forName("android.content.pm.IPackageManager\$Stub")
+      val iPm = iPmClass.getMethod("asInterface", IBinder::class.java).invoke(null, pmBinder)
+      val iPi = iPm.javaClass.getMethod("getPackageInstaller").invoke(iPm)
+      val iPiClass = Class.forName("android.content.pm.IPackageInstaller")
+
+      val installer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        PackageInstaller::class.java
+          .getConstructor(iPiClass, String::class.java, String::class.java, Int::class.javaPrimitiveType)
+          .newInstance(iPi, "com.android.shell", null, 0)
+      } else {
+        PackageInstaller::class.java
+          .getConstructor(iPiClass, String::class.java, Int::class.javaPrimitiveType)
+          .newInstance(iPi, "com.android.shell", 0)
+      }
+
+      val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+          setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+        }
+      }
+      val sessionId = installer.createSession(params)
+      installer.openSession(sessionId).use { session ->
+        session.openWrite("edith-update.apk", 0, apkFile.length()).use { out ->
+          FileInputStream(apkFile).use { input ->
+            input.copyTo(out, bufferSize = 32 * 1024)
+          }
+          session.fsync(out)
+        }
+        val statusIntent = PendingIntent.getBroadcast(
+          context,
+          sessionId,
+          Intent("${context.packageName}.OTA_INSTALL_STATUS").setPackage(context.packageName),
+          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        session.commit(statusIntent.intentSender)
+      }
+      true
+    } catch (t: Throwable) {
+      android.util.Log.w("OtaUpdater", "Shizuku install error, falling back", t)
+      false
+    }
+  }
+
+  private fun launchSystemInstaller(apkFile: File) {
     if (!context.packageManager.canRequestPackageInstalls()) {
       val permIntent = Intent(
         Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
@@ -170,6 +309,8 @@ class OtaUpdater(private val context: Context) {
     }
     context.startActivity(installIntent)
   }
+
+  private fun cachedApkFile(): File = File(File(context.cacheDir, "ota"), "edith-update.apk")
 
   private fun fetchText(url: String): String {
     val conn = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -195,7 +336,10 @@ class OtaUpdater(private val context: Context) {
     private const val PREFS_NAME = "edith_ota"
     private const val KEY_FEED_URL = "feed_url"
     private const val KEY_LAST_CHECK_MS = "last_check_ms"
+    private const val KEY_CACHED_VERSION_CODE = "cached_version_code"
+    private const val KEY_CACHED_SHA256 = "cached_sha256"
     private const val AUTO_CHECK_INTERVAL_MS = 30L * 60L * 1000L
+    private const val SHIZUKU_PERMISSION_REQUEST_CODE = 4207
 
     private val VERSION_CODE_REGEX = Regex("""versionCode\s*[:=]\s*(\d+)""", RegexOption.IGNORE_CASE)
     private val SHA256_REGEX = Regex("""sha256\s*[:=]\s*([0-9a-fA-F]{64})""", RegexOption.IGNORE_CASE)
@@ -209,12 +353,29 @@ class OtaUpdater(private val context: Context) {
     private val JSON_BODY = Regex(""""body"\s*:\s*"((?:[^"\\]|\\.)*)"""")
     private val JSON_ASSET_APK = Regex(""""browser_download_url"\s*:\s*"(https?://[^"]+?\.apk)"""", RegexOption.IGNORE_CASE)
 
+    /** Returns true only when [release] is newer than [installedCode] and not already cached. */
+    fun shouldDownload(
+      installedCode: Long,
+      release: OtaRelease,
+      cachedCode: Long,
+      cachedSha: String?,
+      cachedFileExists: Boolean,
+    ): Boolean {
+      if (release.versionCode <= installedCode) return false
+      if (cachedFileExists && cachedCode == release.versionCode) {
+        val expectedSha = release.sha256?.trim()?.lowercase()
+        if (expectedSha.isNullOrEmpty() || expectedSha == cachedSha?.trim()?.lowercase()) {
+          return false
+        }
+      }
+      return true
+    }
+
     /**
      * Parses either a direct `version.json` object (`versionCode`, `versionName`, `apkUrl`, `sha256`)
      * or a GitHub Releases API payload (`tag_name`, `body`, `assets[].browser_download_url`).
      */
     fun parseReleaseJson(rawJson: String): OtaRelease? {
-      // 1. Direct version.json manifest
       val directCode = JSON_NUM_VERSION_CODE.find(rawJson)?.groupValues?.get(1)?.toLongOrNull()
       val directApk = JSON_APK_URL.find(rawJson)?.groupValues?.get(1)?.trim()
       if (directCode != null && directCode > 0L && !directApk.isNullOrEmpty()) {
@@ -224,7 +385,6 @@ class OtaUpdater(private val context: Context) {
         return OtaRelease(versionCode = directCode, versionName = name, apkUrl = directApk, sha256 = sha)
       }
 
-      // 2. GitHub Releases API payload
       val tagName = JSON_TAG_NAME.find(rawJson)?.groupValues?.get(1)?.trim().orEmpty()
       val rawBody = JSON_BODY.find(rawJson)?.groupValues?.get(1)
         ?.replace("\\n", "\n")
