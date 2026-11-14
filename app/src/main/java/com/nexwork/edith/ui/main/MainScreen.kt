@@ -31,6 +31,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,6 +89,8 @@ fun MainScreen(
   var isResumed by remember { mutableStateOf(true) }
   var isCardActionArmed by remember { mutableStateOf(false) }
   var lastScreenActivityMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+  var lastAmbientWakeMs by remember { mutableLongStateOf(0L) }
+  val isAmbientCenteredState = rememberUpdatedState(state.isAmbientCentered)
   val globeController = remember { GlobeController() }
   var clockRedrawSignal by remember { mutableIntStateOf(0) }
   var lastHomeWakeMs by remember { mutableLongStateOf(0L) }
@@ -215,6 +218,9 @@ fun MainScreen(
             val anyDown = event.changes.any { it.changedToDownIgnoreConsumed() }
             val anyPressed = event.changes.any { it.pressed }
             if (anyPressed) {
+              if (anyDown && isAmbientCenteredState.value) {
+                lastAmbientWakeMs = System.currentTimeMillis()
+              }
               viewModel.wakeFromAmbient()
               val now = System.currentTimeMillis()
               if (anyDown || now - lastScreenActivityMs >= 250L) {
@@ -228,13 +234,38 @@ fun MainScreen(
         if (!consoleOpen) {
           awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
+            val downTimeMs = System.currentTimeMillis()
             val startX = down.position.x
             val startY = down.position.y
+            val screenWidth = size.width.toFloat().coerceAtLeast(1f)
+            val screenHeight = size.height.toFloat().coerceAtLeast(1f)
+            val normStartX = startX / screenWidth
+            val normStartY = startY / screenHeight
+
+            val wasAmbientCentered = isAmbientCenteredState.value ||
+              (downTimeMs - lastAmbientWakeMs < 350L)
+            val onHorizonDome = normStartY >= 0.58f
+            val onCenteredSphere = wasAmbientCentered &&
+              kotlin.math.hypot(normStartX - 0.5f, (startY - screenHeight * 0.52f) / screenWidth) <= 0.26f
+            val startedOnGlobe = onHorizonDome || onCenteredSphere
+
+            val edgeMarginPx = 24.dp.toPx()
+            val isSystemEdge = startX < edgeMarginPx ||
+              startX > (screenWidth - edgeMarginPx) ||
+              startY < edgeMarginPx
+
+            val touchSlopPx = 6.dp.toPx()
+            val lockSlopPx = 10.dp.toPx()
+            val dragTriggerPx = 48.dp.toPx()
+            val flickTriggerPx = 36.dp.toPx()
+
             var totalDx = 0f
             var totalDy = 0f
             var isDrag = false
             var isPinch = false
             var prevSpan = 0f
+            // 0 = UNDECIDED, 1 = GLOBE_ROTATE, 2 = HUD_SWIPE
+            var gestureMode = if (startedOnGlobe || isSystemEdge) 1 else 0
 
             while (true) {
               val event = awaitPointerEvent()
@@ -243,8 +274,8 @@ fun MainScreen(
                 if (!isDrag && !isPinch) {
                   event.changes.forEach { it.consume() }
                   haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                  val normX = (startX / size.width.toFloat()).coerceIn(0f, 1f)
-                  val normY = (startY / size.height.toFloat()).coerceIn(0f, 1f)
+                  val normX = normStartX.coerceIn(0f, 1f)
+                  val normY = normStartY.coerceIn(0f, 1f)
                   globeController.tap(normX, normY)
                 }
                 break
@@ -253,6 +284,7 @@ fun MainScreen(
               // Multi-touch two-finger pinch-to-zoom
               if (activeChanges.size >= 2) {
                 isPinch = true
+                gestureMode = 1
                 val p1 = activeChanges[0].position
                 val p2 = activeChanges[1].position
                 val span = kotlin.math.hypot(p1.x - p2.x, p1.y - p2.y)
@@ -272,32 +304,34 @@ fun MainScreen(
               totalDy += dy
 
               val dragDistance = kotlin.math.hypot(totalDx, totalDy)
-              if (dragDistance > 6.dp.toPx()) {
+              if (dragDistance > touchSlopPx) {
                 isDrag = true
               }
 
-              if (isDrag) {
-                val screenWidth = size.width
-                val isExcludedZone = startX < 40.dp.toPx() ||
-                  startX > (screenWidth - 124.dp.toPx()) ||
-                  startY < 40.dp.toPx()
+              if (!isDrag) continue
 
-                val thresholdPx = 110.dp.toPx()
-                val isStrictlyVerticalDown = totalDy > 0f && totalDy > kotlin.math.abs(totalDx) * 1.8f
-                val isStrictlyVerticalUp = totalDy < 0f && -totalDy > kotlin.math.abs(totalDx) * 1.8f
+              // Lock gesture mode once travel reaches lockSlopPx in the upper HUD void
+              if (gestureMode == 0 && dragDistance >= lockSlopPx) {
+                val absDx = kotlin.math.abs(totalDx)
+                val absDy = kotlin.math.abs(totalDy)
+                gestureMode = if (absDy > absDx * 1.25f) 2 else 1
+              }
 
-                if (!isExcludedZone && isStrictlyVerticalDown && totalDy > thresholdPx) {
-                  change.consume()
+              if (gestureMode == 1) {
+                change.consume()
+                globeController.rotate(dx, dy)
+              } else if (gestureMode == 2) {
+                change.consume()
+                val elapsedMs = System.currentTimeMillis() - downTimeMs
+                val triggerPx = if (elapsedMs <= 180L) flickTriggerPx else dragTriggerPx
+                if (totalDy >= triggerPx) {
+                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                   viewModel.openSpotlightSearch()
                   break
-                } else if (!isExcludedZone && isStrictlyVerticalUp && -totalDy > thresholdPx) {
-                  change.consume()
+                } else if (-totalDy >= triggerPx) {
                   haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                   viewModel.openAppBrowse()
                   break
-                } else {
-                  change.consume()
-                  globeController.rotate(dx, dy)
                 }
               }
             }
