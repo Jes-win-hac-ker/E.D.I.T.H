@@ -46,16 +46,6 @@ import kotlinx.coroutines.delay
 
 private val OrbitalSlate = Color(0xFF64748B)
 
-private fun hudEaseOutCubic(t: Float): Float {
-  val inv = 1f - t.coerceIn(0f, 1f)
-  return 1f - inv * inv * inv
-}
-
-private fun hudEaseInCubic(t: Float): Float {
-  val x = t.coerceIn(0f, 1f)
-  return x * x * x
-}
-
 private val Months = arrayOf(
   "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
 )

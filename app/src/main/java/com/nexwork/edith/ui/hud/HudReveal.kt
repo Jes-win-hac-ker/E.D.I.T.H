@@ -84,6 +84,16 @@ internal fun monoPaint(
 internal fun phase(reveal: Float, from: Float, to: Float): Float =
   ((reveal - from) / (to - from)).coerceIn(0f, 1f)
 
+internal fun hudEaseOutCubic(t: Float): Float {
+  val inv = 1f - t.coerceIn(0f, 1f)
+  return 1f - inv * inv * inv
+}
+
+internal fun hudEaseInCubic(t: Float): Float {
+  val x = t.coerceIn(0f, 1f)
+  return x * x * x
+}
+
 private const val GlyphPool = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789#%&*+=/<>_"
 
 /** Deterministic noise char: same seed + slot + salt always decrypts to the same glyph. */

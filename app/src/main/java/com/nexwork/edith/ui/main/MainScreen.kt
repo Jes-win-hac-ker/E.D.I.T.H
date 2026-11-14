@@ -94,6 +94,8 @@ fun MainScreen(
   val globeController = remember { GlobeController() }
   val isGlobeAtHorizon by globeController.isGlobeAtHorizon.collectAsStateWithLifecycle()
   var isClockMounted by remember { mutableStateOf(true) }
+  var isOtaMounted by remember { mutableStateOf(false) }
+  val isHudMounted = isClockMounted || isOtaMounted
   var clockRedrawSignal by remember { mutableIntStateOf(0) }
   var lastHomeWakeMs by remember { mutableLongStateOf(0L) }
 
@@ -166,11 +168,11 @@ fun MainScreen(
   }
 
   // Sync search and idle-ambient center state to 3D globe after top HUD finishes dismissing
-  val globeSearchActive = consoleOpen && !isClockMounted
+  val globeSearchActive = consoleOpen && !isHudMounted
   LaunchedEffect(globeSearchActive) {
     globeController.setSearchActive(globeSearchActive)
   }
-  val globeAmbientCentered = state.isAmbientCentered && !isClockMounted
+  val globeAmbientCentered = state.isAmbientCentered && !isHudMounted
   LaunchedEffect(globeAmbientCentered) {
     globeController.setAmbientCentered(globeAmbientCentered)
   }
@@ -424,14 +426,16 @@ fun MainScreen(
         .padding(top = clockTop),
     )
 
+    val otaTop = (clockTop - 52.dp).coerceAtLeast(24.dp)
     HudOtaPill(
       otaState = state.otaState,
       onClick = viewModel::onOtaPillClick,
       onDismiss = viewModel::dismissOtaPill,
       hidden = topHudHidden,
+      onMountedChange = { isOtaMounted = it },
       modifier = Modifier
         .align(Alignment.TopStart)
-        .padding(start = 18.dp, end = 18.dp, top = 196.dp),
+        .padding(start = 18.dp, end = 18.dp, top = otaTop),
     )
 
     // Tap outside the console dismisses it when open
