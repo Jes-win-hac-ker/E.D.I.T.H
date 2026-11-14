@@ -160,6 +160,11 @@ fun InteractiveWireframeGlobe(
       setBackgroundColor(Color.BLACK)
       isVerticalScrollBarEnabled = false
       isHorizontalScrollBarEnabled = false
+      isClickable = false
+      isLongClickable = false
+      isFocusable = false
+      isFocusableInTouchMode = false
+      setOnTouchListener { _, _ -> true }
       settings.apply {
         javaScriptEnabled = true
         domStorageEnabled = true

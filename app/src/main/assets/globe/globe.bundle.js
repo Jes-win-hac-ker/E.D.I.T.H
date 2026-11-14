@@ -1881,18 +1881,19 @@ function attachPulseShader(material, pulseUniforms, radarUniforms, isHaze = fals
                 }
             }
 
-            // 3D Kinetic Levitation & Coastline Extrusion (Zero Brightness Bloom)
+            // 3D Kinetic Levitation & Subtle Crimson Wave Tint
             float pulseElevation = 0.0;
             float pulseSettle = 0.0;
             float coastSilhouette = 0.0;
+            float crimsonTint = 0.0;
 
             for (int p = 0; p < 4; p++) {
                 if (uPulseAmplitudes[p] > 0.001) {
                     float cosTheta = clamp(dot(pDir, uPulseCenters[p]), -1.0, 1.0);
                     float angle = acos(cosTheta);
 
-                    // Coastlines lead slightly (+0.08 rad ahead)
-                    float pointPulseAngle = (aCoast > 0.5) ? max(0.0, angle - 0.08) : angle;
+                    // Slight coastline lead (+0.025 rad) without splitting into a separate ring
+                    float pointPulseAngle = (aCoast > 0.5) ? max(0.0, angle - 0.025) : angle;
                     float d = abs(pointPulseAngle - uPulseThetas[p]);
                     float w = uPulseWidths[p];
                     if (d < w) {
@@ -1908,9 +1909,11 @@ function attachPulseShader(material, pulseUniforms, radarUniforms, isHaze = fals
                         // Kinetic point scale swell at the wavefront crest
                         pulseSettle += shape * 0.45 * ampNorm;
 
-                        // Subtle contrast crispness on coastlines (NOT an additive bloom flare)
+                        // Subtle crimson wave tinting (#E01432) weighted toward coastlines
+                        float tintStrength = (aCoast > 0.5) ? 0.52 : 0.36;
+                        crimsonTint = max(crimsonTint, shape * ampNorm * tintStrength);
                         if (aCoast > 0.5) {
-                            coastSilhouette += shape * 0.25 * ampNorm;
+                            coastSilhouette += shape * 0.12 * ampNorm;
                         }
                     }
                 }
@@ -1919,9 +1922,10 @@ function attachPulseShader(material, pulseUniforms, radarUniforms, isHaze = fals
             if (distFrontier < 0.0 && uRadarAngle < 5.0) {
                 vColor = vec3(0.0);
             } else {
-                // Keep base continent colors intact without blinding additive white/blue flare
+                // Blend resting slate dots softly toward #E01432 crimson along the wave crest
                 float radarEdge = (aCoast > 0.5 && uRadarAngle < 5.0) ? (1.0 - snapEased) * 0.18 : 0.0;
-                vColor = vColor * (1.0 + radarEdge + coastSilhouette);
+                vec3 crimsonWaveColor = vec3(0.878, 0.078, 0.196);
+                vColor = mix(vColor, crimsonWaveColor, clamp(crimsonTint, 0.0, 0.55)) * (1.0 + radarEdge + coastSilhouette);
             }
             `
         );
@@ -3368,8 +3372,16 @@ function createGeodesicPulseManager({
      * @param {number} [customDuration=null] - Optional duration override in seconds
      */
     function triggerPulse(centerDir, onComplete = null, customDuration = null) {
-        const pulse = pulses[pulseIndex];
-        pulseIndex = (pulseIndex + 1) % POOL_SIZE;
+        // Single active wave mode (Option A1): clear any prior active wave so only one propagates
+        for (let p = 0; p < POOL_SIZE; p++) {
+            pulses[p].active = false;
+            pulses[p].onComplete = null;
+            if (pulseUniforms && pulseUniforms.uPulseAmplitudes) {
+                pulseUniforms.uPulseAmplitudes.value[p] = 0.0;
+            }
+        }
+        pulseIndex = 0;
+        const pulse = pulses[0];
 
         pulse.active = true;
         pulse.startTime = performance.now() * 0.001;
@@ -3531,21 +3543,13 @@ function createGeodesicPulseManager({
         }
     }
 
-    if (domElement) {
-        domElement.addEventListener('pointerdown', onPointerDown, { passive: true });
-        domElement.addEventListener('pointerup', onPointerUp, { passive: true });
-    }
+    // Pointer listeners removed so Compose + GlobeController own tap wave triggering exclusively.
 
     return {
         group: pulseGroup,
         triggerPulse,
         update,
-        destroy: () => {
-            if (domElement) {
-                domElement.removeEventListener('pointerdown', onPointerDown);
-                domElement.removeEventListener('pointerup', onPointerUp);
-            }
-        }
+        destroy: () => {}
     };
 }
 

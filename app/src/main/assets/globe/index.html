@@ -325,8 +325,12 @@
             // 9. RAYCASTING: TRIGGER WAVE AT EXACT TOUCH COORDINATES
             const raycaster = new THREE.Raycaster();
             const mouse = new THREE.Vector2();
+            let lastWaveTriggerMs = 0;
 
             window.triggerWaveAt = function(normX, normY) {
+                const nowMs = performance.now();
+                if (nowMs - lastWaveTriggerMs < 180) return;
+                lastWaveTriggerMs = nowMs;
                 wakeLoop(3000);
                 let ndcX, ndcY;
                 if (normX <= 1.0 && normY <= 1.0 && normX >= 0.0 && normY >= 0.0) {
@@ -420,12 +424,7 @@
                 initialPinchDist = 0;
             }
 
-            canvas.addEventListener('mousedown', onTouchStart);
-            window.addEventListener('mousemove', onTouchMove);
-            window.addEventListener('mouseup', onTouchEnd);
-            canvas.addEventListener('touchstart', onTouchStart, { passive: true });
-            window.addEventListener('touchmove', onTouchMove, { passive: true });
-            window.addEventListener('touchend', onTouchEnd);
+            // Input is routed exclusively through Compose + GlobeController to prevent duplicate waves.
 
             // 11. Adaptive Animation Loop (Full 90/120Hz on motion/waves; true 30fps timer idle; paused behind console blur)
             function animate(now) {

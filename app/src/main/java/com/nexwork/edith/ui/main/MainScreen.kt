@@ -205,6 +205,8 @@ fun MainScreen(
               val activeChanges = event.changes.filter { it.pressed }
               if (activeChanges.isEmpty()) {
                 if (!isDrag && !isPinch) {
+                  event.changes.forEach { it.consume() }
+                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                   val normX = (startX / size.width.toFloat()).coerceIn(0f, 1f)
                   val normY = (startY / size.height.toFloat()).coerceIn(0f, 1f)
                   globeController.tap(normX, normY)
