@@ -92,6 +92,7 @@ fun MainScreen(
   var lastAmbientWakeMs by remember { mutableLongStateOf(0L) }
   val isAmbientCenteredState = rememberUpdatedState(state.isAmbientCentered)
   val globeController = remember { GlobeController() }
+  var isClockMounted by remember { mutableStateOf(true) }
   var clockRedrawSignal by remember { mutableIntStateOf(0) }
   var lastHomeWakeMs by remember { mutableLongStateOf(0L) }
 
@@ -167,8 +168,9 @@ fun MainScreen(
   LaunchedEffect(consoleOpen) {
     globeController.setSearchActive(consoleOpen)
   }
-  LaunchedEffect(state.isAmbientCentered) {
-    globeController.setAmbientCentered(state.isAmbientCentered)
+  val globeAmbientCentered = state.isAmbientCentered && !isClockMounted
+  LaunchedEffect(globeAmbientCentered) {
+    globeController.setAmbientCentered(globeAmbientCentered)
   }
   LaunchedEffect(state.isSpotlightSearchOpen, state.isAppBrowseOpen, state.searchQuery, state.browseGroup) {
     if (state.isSpotlightSearchOpen || state.isAppBrowseOpen) {
@@ -407,6 +409,7 @@ fun MainScreen(
       redrawSignal = clockRedrawSignal,
       screenWidth = maxWidth,
       screenHeight = maxHeight,
+      onMountedChange = { isClockMounted = it },
       modifier = Modifier
         .align(Alignment.TopStart)
         .padding(top = clockTop),

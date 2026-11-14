@@ -103,16 +103,21 @@ fun HudClock(
   redrawSignal: Int = 0,
   screenWidth: Dp = 360.dp,
   screenHeight: Dp = 800.dp,
+  onMountedChange: (Boolean) -> Unit = {},
 ) {
   val density = LocalDensity.current
   val crimsonMonetActive = rememberUpdatedState(LocalCrimsonMonetActive.current)
   val screenWidthState = rememberUpdatedState(screenWidth)
   val screenHeightState = rememberUpdatedState(screenHeight)
+  val currentOnMountedChange = rememberUpdatedState(onMountedChange)
   val face = remember { ClockFace().apply { tick(System.currentTimeMillis()) } }
   val secondTick = remember { mutableIntStateOf(0) }
 
   val revealAnim = remember { Animatable(0f) }
   var mounted by remember { mutableStateOf(!isOpen) }
+  LaunchedEffect(mounted) {
+    currentOnMountedChange.value(mounted)
+  }
   LaunchedEffect(isOpen, redrawSignal) {
     if (isOpen) {
       val hideMs = (revealAnim.value.coerceIn(0f, 1f) * 500f).roundToInt().coerceAtLeast(1)
@@ -197,13 +202,13 @@ fun HudClock(
           val tickMaxTheta = asin((tickHalfSpan / arcRadius).coerceIn(-1f, 1f))
           val labelHalfSpan = (arcHalfSpan - 18.dp.toPx()).coerceAtLeast(1f)
 
-          val tickU = FloatArray(60)
-          val tickX = FloatArray(60)
-          val tickY = FloatArray(60)
-          val tickNx = FloatArray(60)
-          val tickNy = FloatArray(60)
-          for (i in 0 until 60) {
-            val u = -1f + 2f * (i / 59f)
+          val tickU = FloatArray(61)
+          val tickX = FloatArray(61)
+          val tickY = FloatArray(61)
+          val tickNx = FloatArray(61)
+          val tickNy = FloatArray(61)
+          for (i in 0 until 61) {
+            val u = (i - 30) / 30f
             val theta = u * tickMaxTheta
             val s = sin(theta)
             val c = cos(theta)
@@ -217,7 +222,6 @@ fun HudClock(
           val arcPath = Path()
           val arcStroke = Stroke(width = 0.9f.dp.toPx(), cap = StrokeCap.Round)
           val spineStroke = 0.8f.dp.toPx()
-          val zenithStroke = 1.3f.dp.toPx()
 
           val eyebrowText = "SYS.TIME // ORBITAL"
           val eyebrowWidth = eyebrowPaint.measureText(eyebrowText)
@@ -257,15 +261,6 @@ fun HudClock(
                 path = arcPath,
                 color = if (isMonet) Crimson.copy(alpha = 0.62f) else OrbitalSlate.copy(alpha = 0.52f),
                 style = arcStroke,
-              )
-
-              // Crimson zenith anchor mark
-              drawLine(
-                color = CrimsonBright.copy(alpha = 0.9f * phase(trace, 0f, 0.25f)),
-                start = Offset(cx, arcZenithY - 3f * uy),
-                end = Offset(cx, arcZenithY + 4f * uy),
-                strokeWidth = zenithStroke,
-                cap = StrokeCap.Round,
               )
 
               // Tracing laser heads on expanding left & right arc tips
@@ -325,9 +320,9 @@ fun HudClock(
               )
             }
 
-            // 4. 60-Tick Radial Second Sweep Along the Orbital Arc
+            // 4. 61-Tick Radial Second Sweep (0..60, symmetric with 30s at exact zenith)
             if (combP > 0f) {
-              for (cell in 0 until 60) {
+              for (cell in 0 until 61) {
                 if (abs(tickU[cell]) > combP) continue
                 val bx = tickX[cell]
                 val by = tickY[cell]
