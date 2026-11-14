@@ -10,4 +10,7 @@ interface IShizukuMonetService {
     String readThemeCustomizationJson() = 4;
     boolean writeThemeCustomizationJson(String json) = 5;
     boolean isOverlayActiveAtTop(String packageName, String overlayName, int userId) = 6;
+    String readSecureSetting(String key) = 7;
+    boolean writeSecureSetting(String key, String value) = 8;
+    boolean ensureNightModeYes() = 9;
 }

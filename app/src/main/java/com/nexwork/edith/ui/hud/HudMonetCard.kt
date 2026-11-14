@@ -32,6 +32,7 @@ import com.nexwork.edith.data.MonetStatus
 import com.nexwork.edith.data.MonetUiState
 import com.nexwork.edith.theme.Crimson
 import com.nexwork.edith.theme.CrimsonBright
+import com.nexwork.edith.theme.LocalCrimsonMonetActive
 import com.nexwork.edith.theme.ObsidianBgTop
 
 @Composable
@@ -43,12 +44,14 @@ fun HudMonetCard(
 ) {
   val haptic = LocalHapticFeedback.current
   val isBusy = monetUiState.status == MonetStatus.APPLYING || monetUiState.status == MonetStatus.RESETTING
+  val isCrimsonMonet = LocalCrimsonMonetActive.current || monetUiState.isEnabledPersisted
+  val cardBg = if (isCrimsonMonet) Color(0xF20A0A0A) else ObsidianBgTop.copy(alpha = 0.94f)
 
   Box(
     modifier = modifier
       .fillMaxWidth()
       .padding(horizontal = 18.dp)
-      .background(ObsidianBgTop.copy(alpha = 0.94f))
+      .background(cardBg)
       .clickable(enabled = true, onClick = {})
       .drawBehind {
         val w = size.width

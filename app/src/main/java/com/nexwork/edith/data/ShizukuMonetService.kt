@@ -152,19 +152,28 @@ class ShizukuMonetService : IShizukuMonetService.Stub {
         }
       }
       val json = readThemeCustomizationJson()
-      val jsonActive = json.contains("RAINBOW") && json.contains("DC143C", ignoreCase = true)
-      ourFabricated && ourIndex > maxSystemUiIndex && sysUiEnabledCount >= 3 && jsonActive
+      val jsonActive = json.contains("MOTO") && json.contains("DC143C", ignoreCase = true)
+      val atTop = ourFabricated && ourIndex > maxSystemUiIndex
+      (atTop || sysUiEnabledCount >= 3) && jsonActive
     }.getOrDefault(false)
   }
 
   override fun readThemeCustomizationJson(): String {
+    return readSecureSetting("theme_customization_overlay_packages")
+  }
+
+  override fun writeThemeCustomizationJson(json: String): Boolean {
+    return writeSecureSetting("theme_customization_overlay_packages", json)
+  }
+
+  override fun readSecureSetting(key: String): String {
     return runCatching {
       val proc = ProcessBuilder(
         "cmd",
         "settings",
         "get",
         "secure",
-        "theme_customization_overlay_packages",
+        key,
       ).redirectErrorStream(true).start()
       val out = proc.inputStream.bufferedReader().use { it.readText().trim() }
       proc.waitFor()
@@ -172,15 +181,28 @@ class ShizukuMonetService : IShizukuMonetService.Stub {
     }.getOrDefault("")
   }
 
-  override fun writeThemeCustomizationJson(json: String): Boolean {
+  override fun writeSecureSetting(key: String, value: String): Boolean {
     return runCatching {
       val proc = ProcessBuilder(
         "cmd",
         "settings",
         "put",
         "secure",
-        "theme_customization_overlay_packages",
-        json,
+        key,
+        value,
+      ).redirectErrorStream(true).start()
+      proc.inputStream.bufferedReader().use { it.readText() }
+      proc.waitFor() == 0
+    }.getOrDefault(false)
+  }
+
+  override fun ensureNightModeYes(): Boolean {
+    return runCatching {
+      val proc = ProcessBuilder(
+        "cmd",
+        "uimode",
+        "night",
+        "yes",
       ).redirectErrorStream(true).start()
       proc.inputStream.bufferedReader().use { it.readText() }
       proc.waitFor() == 0

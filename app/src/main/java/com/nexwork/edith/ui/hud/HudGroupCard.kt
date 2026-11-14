@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.CrimsonDim
+import com.nexwork.edith.theme.LocalCrimsonMonetActive
 import kotlin.math.roundToInt
 
 /**
@@ -55,6 +57,7 @@ fun HudGroupCard(
   focused: () -> Boolean = { true },
 ) {
   val density = LocalDensity.current
+  val crimsonMonetActive = rememberUpdatedState(LocalCrimsonMonetActive.current)
   val monochrome = remember { ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }) }
   val label = remember(group.name) { group.name.uppercase() }
   val count = group.apps.size
@@ -167,10 +170,17 @@ fun HudGroupCard(
             val fineP = phase(progress, 0.82f, 1f)
 
             fun drawPlateAndGrid() {
-              drawPath(platePath, if (leader) Color(0xD90F141E) else Color(0xB80F141E))
+              val isMonet = crimsonMonetActive.value
+              val plateColor = when {
+                isMonet && leader -> Color(0xD90A0A0A)
+                isMonet -> Color(0xB80A0A0A)
+                leader -> Color(0xD90F141E)
+                else -> Color(0xB80F141E)
+              }
+              drawPath(platePath, plateColor)
               drawPath(
                 platePath,
-                if (leader) CrimsonBright.copy(alpha = 0.5f) else CrimsonDim,
+                if (leader) CrimsonBright.copy(alpha = if (isMonet) 0.72f else 0.5f) else CrimsonDim,
                 style = plateStroke,
               )
               gridBitmap?.let { drawImage(it) }

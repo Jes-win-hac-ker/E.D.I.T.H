@@ -54,6 +54,7 @@ import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.model.AppFootprint
 import com.nexwork.edith.theme.Crimson
 import com.nexwork.edith.theme.CrimsonBright
+import com.nexwork.edith.theme.LocalCrimsonMonetActive
 import com.nexwork.edith.theme.TextPureWhite
 import com.nexwork.edith.theme.TextSilver
 import kotlin.math.abs
@@ -581,6 +582,7 @@ private fun CardSwipeActionTray(
   revealFraction: () -> Float,
   modifier: Modifier = Modifier,
 ) {
+  val trayPlateBg = if (LocalCrimsonMonetActive.current) Color(0xFF0A0A0A) else Color(0xFF0F141E)
   Column(
     modifier = modifier
       .graphicsLayer {
@@ -594,7 +596,7 @@ private fun CardSwipeActionTray(
       Column(
         modifier = Modifier
           .fillMaxSize()
-          .background(Color(0xFF0F141E))
+          .background(trayPlateBg)
           .border(0.8.dp, Color.White.copy(alpha = 0.28f))
           .drawBehind { drawTrayBrackets(Color.White.copy(alpha = 0.7f)) },
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -624,7 +626,7 @@ private fun CardSwipeActionTray(
         modifier = Modifier
           .weight(1f)
           .fillMaxWidth()
-          .background(Color(0xFF0F141E))
+          .background(trayPlateBg)
           .border(0.8.dp, Color.White.copy(alpha = 0.28f))
           .drawBehind { drawTrayBrackets(Color.White.copy(alpha = 0.65f)) },
         contentAlignment = Alignment.Center,

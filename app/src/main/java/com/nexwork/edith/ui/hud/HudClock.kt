@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import com.nexwork.edith.theme.Crimson
 import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.CrimsonDim
+import com.nexwork.edith.theme.LocalCrimsonMonetActive
 import java.util.Calendar
 import java.util.TimeZone
 import kotlin.math.roundToInt
@@ -92,6 +94,7 @@ fun HudClock(
   modifier: Modifier = Modifier,
 ) {
   val density = LocalDensity.current
+  val crimsonMonetActive = rememberUpdatedState(LocalCrimsonMonetActive.current)
   val face = remember { ClockFace().apply { tick(System.currentTimeMillis()) } }
   val secondTick = remember { mutableIntStateOf(0) }
 
@@ -217,8 +220,9 @@ fun HudClock(
             val combP = phase(reveal, 0.62f, 1f)
 
             fun drawPlateAndGrid() {
-              drawPath(platePath, Color(0xFF0F141E))
-              drawPath(platePath, CrimsonDim, style = plateStroke)
+              val isMonet = crimsonMonetActive.value
+              drawPath(platePath, if (isMonet) Color(0xFF0A0A0A) else Color(0xFF0F141E))
+              drawPath(platePath, if (isMonet) CrimsonBright.copy(alpha = 0.65f) else CrimsonDim, style = plateStroke)
               gridBitmap?.let { drawImage(it) }
             }
 

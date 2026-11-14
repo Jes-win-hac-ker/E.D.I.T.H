@@ -70,6 +70,7 @@ class MonetThemeManager(private val context: Context) {
     private const val PREFS_NAME = "edith_monet_prefs"
     private const val KEY_MONET_ENABLED = "monet_enabled"
     private const val KEY_BACKUP_THEME_JSON = "backup_theme_customization_json"
+    private const val KEY_BACKUP_CONTRAST_LEVEL = "backup_contrast_level"
     private const val SHIZUKU_REQ_CODE = 9002
 
     /**
@@ -205,8 +206,10 @@ class MonetThemeManager(private val context: Context) {
     /**
      * Pure helper that preserves existing keys in `Settings.Secure`
      * (`theme_customization_overlay_packages`, such as `android.theme.customization.font` and
-     * `android.theme.customization.adaptive_icon_shape`) while setting the base SystemUI theme
-     * style to `MONOCHROMATIC` so non-overlaid surfaces remain 0% chroma grayscale.
+     * `android.theme.customization.adaptive_icon_shape`) while configuring SystemUI's `MOTO`
+     * high-chroma (`200.0`) primary palette (`#DC143C`) with `home_wallpaper` color_source
+     * (avoiding Motorola's `mPreset` early-return trap) and a unique `_edith_nonce` so
+     * `ThemeOverlayController.reevaluateSystemTheme` always regenerates overlays.
      */
     fun buildPreservedMonetSettingsJson(existingJson: String, timestampMs: Long): String {
       val entries = linkedMapOf<String, String>()
@@ -216,11 +219,12 @@ class MonetThemeManager(private val context: Context) {
           entries[match.groupValues[1]] = match.groupValues[2]
         }
       }
-      entries["android.theme.customization.theme_style"] = "\"RAINBOW\""
-      entries["android.theme.customization.color_source"] = "\"preset\""
+      entries["android.theme.customization.theme_style"] = "\"MOTO\""
+      entries["android.theme.customization.color_source"] = "\"home_wallpaper\""
       entries["android.theme.customization.color_both"] = "\"1\""
       entries["android.theme.customization.system_palette"] = "\"DC143C\""
       entries["android.theme.customization.accent_color"] = "\"DC143C\""
+      entries["_edith_nonce"] = timestampMs.toString()
       entries["_applied_timestamp"] = timestampMs.toString()
       return entries.entries.joinToString(prefix = "{", postfix = "}", separator = ",") { (k, v) ->
         "\"$k\":$v"
@@ -238,7 +242,8 @@ class MonetThemeManager(private val context: Context) {
         for (match in pairRegex.findAll(existingJson)) {
           val key = match.groupValues[1]
           if (key != "android.theme.customization.system_palette" &&
-            key != "android.theme.customization.accent_color"
+            key != "android.theme.customization.accent_color" &&
+            key != "_edith_nonce"
           ) {
             entries[key] = match.groupValues[2]
           }
@@ -382,33 +387,38 @@ class MonetThemeManager(private val context: Context) {
         exemptHiddenApis()
 
         // 1. Preserve Settings.Secure theme_customization_overlay_packages (font, icon shape)
+        //    and contrast_level, then force dark mode + High Contrast (1.0) so SystemUI
+        //    DynamicScheme generates pure #000000/#0E0E0E surfaces + vivid Crimson (#DC143C).
         val currentJson = service.readThemeCustomizationJson()
-        val isAlreadyCrimsonRainbow = try {
+        val isAlreadyCrimsonMoto = try {
           val obj = JSONObject(currentJson)
-          obj.optString("android.theme.customization.theme_style") == "RAINBOW" &&
+          obj.optString("android.theme.customization.theme_style") == "MOTO" &&
             obj.optString("android.theme.customization.system_palette").equals("DC143C", ignoreCase = true)
         } catch (_: Exception) {
           false
         }
-        if (!prefs.contains(KEY_BACKUP_THEME_JSON) && currentJson.isNotBlank() && !isAlreadyCrimsonRainbow) {
+        if (!prefs.contains(KEY_BACKUP_THEME_JSON) && currentJson.isNotBlank() && !isAlreadyCrimsonMoto) {
           prefs.edit().putString(KEY_BACKUP_THEME_JSON, currentJson).apply()
         }
-        if (!isAlreadyCrimsonRainbow) {
-          val updatedJson = buildPreservedMonetSettingsJson(currentJson, System.currentTimeMillis())
-          service.writeThemeCustomizationJson(updatedJson)
-          // Allow SystemUI ThemeOverlayController to finish committing its base overlays first
-          delay(600L)
+        if (!prefs.contains(KEY_BACKUP_CONTRAST_LEVEL)) {
+          val prevContrast = service.readSecureSetting("contrast_level")
+          prefs.edit().putString(KEY_BACKUP_CONTRAST_LEVEL, prevContrast.ifBlank { "0.0" }).apply()
         }
+        service.ensureNightModeYes()
+        service.writeSecureSetting("contrast_level", "1.0")
+
+        val updatedJson = buildPreservedMonetSettingsJson(currentJson, System.currentTimeMillis())
+        service.writeThemeCustomizationJson(updatedJson)
+        // Allow SystemUI ThemeOverlayController to finish committing its base overlays first
+        delay(600L)
 
         // 2. Obtain raw IOverlayManager IBinder from Shizuku (uid 2000) and register
-        //    FabricatedOverlay directly from com.nexwork.edith's app UID.
-        val rawOverlayBinder = service.overlayManagerBinder ?: return@withBoundMonetService false
-        val registered = registerFabricatedOverlayAsAppUid(rawOverlayBinder)
-        if (!registered) return@withBoundMonetService false
-
-        // 3. Enable and promote com.nexwork.edith:EdithMonet to highest priority from uid 2000.
-        val enabled = service.enableAndPrioritizeOverlay(context.packageName, OVERLAY_NAME, USER_ID)
-        if (!enabled) return@withBoundMonetService false
+        //    FabricatedOverlay directly from com.nexwork.edith's app UID (for AOSP/non-system-idmap targets).
+        val rawOverlayBinder = service.overlayManagerBinder
+        if (rawOverlayBinder != null && registerFabricatedOverlayAsAppUid(rawOverlayBinder)) {
+          // 3. Enable and promote com.nexwork.edith:EdithMonet to highest priority from uid 2000.
+          service.enableAndPrioritizeOverlay(context.packageName, OVERLAY_NAME, USER_ID)
+        }
 
         service.isOverlayActiveAtTop(context.packageName, OVERLAY_NAME, USER_ID)
       } ?: false
@@ -459,7 +469,9 @@ class MonetThemeManager(private val context: Context) {
           unregisterFabricatedOverlayAsAppUid(rawOverlayBinder)
         }
 
-        // 3. Restore backed-up Settings.Secure theme_customization_overlay_packages if present
+        // 3. Restore backed-up Settings.Secure contrast_level and theme_customization_overlay_packages
+        val backupContrast = prefs.getString(KEY_BACKUP_CONTRAST_LEVEL, null)
+        service.writeSecureSetting("contrast_level", backupContrast?.ifBlank { "0.0" } ?: "0.0")
         val backupJson = prefs.getString(KEY_BACKUP_THEME_JSON, null)
         if (!backupJson.isNullOrBlank()) {
           service.writeThemeCustomizationJson(backupJson)
@@ -474,6 +486,7 @@ class MonetThemeManager(private val context: Context) {
       prefs.edit()
         .putBoolean(KEY_MONET_ENABLED, false)
         .remove(KEY_BACKUP_THEME_JSON)
+        .remove(KEY_BACKUP_CONTRAST_LEVEL)
         .apply()
 
       _uiState.value = MonetUiState(

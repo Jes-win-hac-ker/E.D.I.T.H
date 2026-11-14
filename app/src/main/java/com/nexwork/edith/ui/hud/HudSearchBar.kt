@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +53,7 @@ import androidx.compose.ui.unit.Constraints
 import com.nexwork.edith.theme.Crimson
 import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.CrimsonDim
+import com.nexwork.edith.theme.LocalCrimsonMonetActive
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -94,6 +96,7 @@ fun HudSearchBar(
   onExitGroup: () -> Unit = {},
 ) {
   val density = LocalDensity.current
+  val crimsonMonetActive = rememberUpdatedState(LocalCrimsonMonetActive.current)
   val focusRequester = remember { FocusRequester() }
   val focusManager = LocalFocusManager.current
   val keyboardController = LocalSoftwareKeyboardController.current
@@ -282,10 +285,13 @@ fun HudSearchBar(
             val promptP = phase(reveal, 0.72f, 0.95f)
 
             fun drawPlateAndGrid() {
-              drawPath(platePath, Color(0xFF0F141E))
+              val isMonet = crimsonMonetActive.value
+              drawPath(platePath, if (isMonet) Color(0xFF0A0A0A) else Color(0xFF0F141E))
               drawPath(
                 platePath,
-                if (typing) CrimsonBright.copy(alpha = 0.6f) else CrimsonDim,
+                if (typing) CrimsonBright.copy(alpha = if (isMonet) 0.78f else 0.6f)
+                else if (isMonet) Crimson.copy(alpha = 0.55f)
+                else CrimsonDim,
                 style = plateStroke,
               )
               gridBitmap?.let { drawImage(it) }

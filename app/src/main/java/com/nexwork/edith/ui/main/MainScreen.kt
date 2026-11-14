@@ -47,6 +47,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
 import kotlinx.coroutines.delay
+import com.nexwork.edith.theme.EDITHTheme
 import com.nexwork.edith.ui.hud.CrimeSceneFocusOverlay
 import com.nexwork.edith.ui.hud.HudCardDeck
 import com.nexwork.edith.ui.hud.HudClock
@@ -164,6 +165,7 @@ fun MainScreen(
     viewModel.handleBackPress()
   }
 
+  EDITHTheme(crimsonMonetActive = state.monetUiState.isEnabledPersisted) {
   BoxWithConstraints(
     modifier = modifier
       .fillMaxSize()
@@ -413,5 +415,6 @@ fun MainScreen(
           translationY = with(density) { (deckResting - 236.dp).toPx() } * deckShift.value
         },
     )
+  }
   }
 }

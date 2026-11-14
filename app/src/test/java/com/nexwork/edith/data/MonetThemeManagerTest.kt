@@ -48,8 +48,21 @@ class MonetThemeManagerTest {
     val result = MonetThemeManager.buildPreservedMonetSettingsJson(existing, 1800000000000L)
     assertTrue(result.contains(""""android.theme.customization.font":"com.android.theme.font.Exo2Regular""""))
     assertTrue(result.contains(""""android.theme.customization.adaptive_icon_shape":"com.android.theme.icon.round""""))
-    assertTrue(result.contains(""""android.theme.customization.theme_style":"RAINBOW""""))
+    assertTrue(result.contains(""""android.theme.customization.theme_style":"MOTO""""))
+    assertTrue(result.contains(""""android.theme.customization.color_source":"home_wallpaper""""))
     assertTrue(result.contains(""""android.theme.customization.system_palette":"DC143C""""))
+    assertTrue(result.contains(""""_edith_nonce":1800000000000"""))
     assertTrue(result.contains(""""_applied_timestamp":1800000000000"""))
+  }
+
+  @Test
+  fun buildResetMonetSettingsJson_removesPaletteAndNonceWhilePreservingFont() {
+    val existing =
+      """{"android.theme.customization.font":"com.android.theme.font.Exo2Regular","android.theme.customization.theme_style":"MOTO","android.theme.customization.system_palette":"DC143C","_edith_nonce":1800000000000}"""
+    val reset = MonetThemeManager.buildResetMonetSettingsJson(existing, 1800000005000L)
+    assertTrue(reset.contains(""""android.theme.customization.font":"com.android.theme.font.Exo2Regular""""))
+    assertTrue(reset.contains(""""android.theme.customization.theme_style":"TONAL_SPOT""""))
+    assertTrue(!reset.contains("system_palette"))
+    assertTrue(!reset.contains("_edith_nonce"))
   }
 }
