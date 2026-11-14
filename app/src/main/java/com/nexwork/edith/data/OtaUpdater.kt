@@ -1,9 +1,13 @@
 package com.nexwork.edith.data
 
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.ServiceConnection
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -13,7 +17,9 @@ import android.os.IBinder
 import android.os.Parcel
 import android.os.ParcelFileDescriptor
 import android.provider.Settings
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.content.IntentCompat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -205,19 +211,16 @@ class OtaUpdater(private val context: Context) {
   }
 
   /**
-   * Attempts silent in-place installation via Shizuku (`pm install -r -S`), falling back to
-   * Android's standard [FileProvider] installer if Shizuku is unavailable or unauthorized.
-   * Returns `true` when installed silently via Shizuku, `false` when handed off to system UI.
+   * Attempts silent in-place installation via Shizuku (`pm install -r -S`), falling back to a
+   * [PackageInstaller.Session] configured for self-update without prompt (`USER_ACTION_NOT_REQUIRED`).
+   * Returns `true` when installed silently, `false` when handed off to system confirmation/settings UI.
    */
   suspend fun installApk(apkFile: File): Result<Boolean> = withContext(Dispatchers.IO) {
     runCatching {
       if (tryShizukuSilentInstall(apkFile)) {
         return@runCatching true
       }
-      withContext(Dispatchers.Main) {
-        launchSystemInstaller(apkFile)
-      }
-      false
+      installViaPackageInstaller(apkFile)
     }
   }
 
@@ -341,26 +344,122 @@ class OtaUpdater(private val context: Context) {
     }
   }
 
-  private fun launchSystemInstaller(apkFile: File) {
-    if (!context.packageManager.canRequestPackageInstalls()) {
-      val permIntent = Intent(
-        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-        Uri.parse("package:${context.packageName}"),
-      ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-      context.startActivity(permIntent)
-      return
+  private suspend fun installViaPackageInstaller(apkFile: File): Boolean {
+    val appCtx = context.applicationContext
+    if (!appCtx.packageManager.canRequestPackageInstalls()) {
+      withContext(Dispatchers.Main) {
+        launchUnknownSourcesSettings(appCtx)
+      }
+      return false
     }
 
+    val packageInstaller = appCtx.packageManager.packageInstaller
+    val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+      setAppPackageName(appCtx.packageName)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+      }
+    }
+
+    val sessionId = try {
+      packageInstaller.createSession(params)
+    } catch (t: Throwable) {
+      android.util.Log.w("OtaUpdater", "createSession failed, falling back to ACTION_VIEW", t)
+      withContext(Dispatchers.Main) { launchSystemInstaller(appCtx, apkFile) }
+      return false
+    }
+
+    val action = "${appCtx.packageName}.action.OTA_INSTALL_STATUS.$sessionId"
+    val deferred = CompletableDeferred<Boolean>()
+    val receiver = object : BroadcastReceiver() {
+      override fun onReceive(ctx: Context?, intent: Intent?) {
+        if (intent == null) return
+        when (val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
+          PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+            val confirmIntent = IntentCompat.getParcelableExtra(
+              intent,
+              Intent.EXTRA_INTENT,
+              Intent::class.java,
+            )
+            if (confirmIntent != null) {
+              confirmIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+              runCatching { appCtx.startActivity(confirmIntent) }
+            }
+            if (!deferred.isCompleted) deferred.complete(false)
+          }
+          PackageInstaller.STATUS_SUCCESS -> {
+            if (!deferred.isCompleted) deferred.complete(true)
+          }
+          else -> {
+            val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty()
+            android.util.Log.w("OtaUpdater", "PackageInstaller failed status=$status msg=$msg")
+            if (!deferred.isCompleted) {
+              deferred.completeExceptionally(
+                IllegalStateException(msg.ifBlank { "PackageInstaller failed ($status)" }),
+              )
+            }
+          }
+        }
+      }
+    }
+
+    var committed = false
+    ContextCompat.registerReceiver(appCtx, receiver, IntentFilter(action), ContextCompat.RECEIVER_NOT_EXPORTED)
+    return try {
+      val session = packageInstaller.openSession(sessionId)
+      try {
+        apkFile.inputStream().use { input ->
+          session.openWrite("edith-update.apk", 0L, apkFile.length()).use { output ->
+            input.copyTo(output, bufferSize = 32 * 1024)
+            session.fsync(output)
+          }
+        }
+        val statusIntent = Intent(action).setPackage(appCtx.packageName)
+        val piFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+          PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        } else {
+          PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val pendingIntent = PendingIntent.getBroadcast(appCtx, sessionId, statusIntent, piFlags)
+        session.commit(pendingIntent.intentSender)
+        committed = true
+      } finally {
+        session.close()
+      }
+      withTimeoutOrNull(90_000L) { deferred.await() } ?: false
+    } catch (t: Throwable) {
+      if (!committed) {
+        runCatching { packageInstaller.abandonSession(sessionId) }
+        android.util.Log.w("OtaUpdater", "Session commit failed, falling back to ACTION_VIEW", t)
+        withContext(Dispatchers.Main) { launchSystemInstaller(appCtx, apkFile) }
+        false
+      } else {
+        throw t
+      }
+    } finally {
+      runCatching { appCtx.unregisterReceiver(receiver) }
+    }
+  }
+
+  private fun launchUnknownSourcesSettings(appCtx: Context) {
+    val permIntent = Intent(
+      Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+      Uri.parse("package:${appCtx.packageName}"),
+    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    appCtx.startActivity(permIntent)
+  }
+
+  private fun launchSystemInstaller(appCtx: Context, apkFile: File) {
     val uri = FileProvider.getUriForFile(
-      context,
-      "${context.packageName}.fileprovider",
+      appCtx,
+      "${appCtx.packageName}.fileprovider",
       apkFile,
     )
     val installIntent = Intent(Intent.ACTION_VIEW).apply {
       setDataAndType(uri, "application/vnd.android.package-archive")
       addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
     }
-    context.startActivity(installIntent)
+    appCtx.startActivity(installIntent)
   }
 
   private fun cachedApkFile(): File = File(File(context.cacheDir, "ota"), "edith-update.apk")
