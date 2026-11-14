@@ -108,9 +108,10 @@ class GlobeController {
   }
 
   fun setSearchActive(active: Boolean) {
+    val wasSearch = lastSearchActive
     lastSearchActive = active
-    if (active) {
-      _isGlobeAtHorizon.value = true
+    if (active || wasSearch) {
+      _isGlobeAtHorizon.value = false
     }
     flushPending()
     webViewRef?.evaluateJavascript("if(window.setSearchActive) window.setSearchActive($active);", null)

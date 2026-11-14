@@ -333,15 +333,29 @@
             window.setUserLocation(10.516, 76.2157);
 
             // 8B. SEARCH & AMBIENT CENTER TRANSITIONS
+            function startPoseTransition(durMs) {
+                const posDelta = Math.abs(targetPosY - currentPosY);
+                const scaleDelta = Math.abs(targetScale - currentScale);
+                const effectiveDur = (posDelta < 0.5 && scaleDelta < 0.002) ? 0 : durMs;
+                poseTransition = {
+                    startMs: performance.now(),
+                    durationMs: effectiveDur,
+                    startScale: currentScale,
+                    startPosY: currentPosY,
+                    startZoom: userZoom,
+                    startRotX: globeGroup.rotation.x,
+                };
+                wakeLoop(effectiveDur + 160);
+            }
+
             window.setSearchActive = function(active) {
                 const next = !!active;
                 if (searchModeActive === next) return;
+                const wasSearch = searchModeActive;
                 searchModeActive = next;
-                if (searchModeActive) {
-                    pendingHorizonSettle = false;
-                    poseTransition = null;
-                }
+                pendingHorizonSettle = (!next && wasSearch && !ambientCentered);
                 applyTargetPresentation();
+                startPoseTransition(next ? 520 : 700);
             };
 
             window.setAmbientCentered = function(centered) {
@@ -352,17 +366,7 @@
                 pendingHorizonSettle = wasCentered && !next && !searchModeActive;
                 if (!searchModeActive) {
                     applyTargetPresentation();
-                    const posDelta = Math.abs(targetPosY - currentPosY);
-                    const scaleDelta = Math.abs(targetScale - currentScale);
-                    const durMs = (posDelta < 0.5 && scaleDelta < 0.002) ? 0 : 700;
-                    poseTransition = {
-                        startMs: performance.now(),
-                        durationMs: durMs,
-                        startScale: currentScale,
-                        startPosY: currentPosY,
-                        startZoom: userZoom,
-                    };
-                    wakeLoop(durMs + 160);
+                    startPoseTransition(700);
                 }
             };
 
@@ -664,7 +668,7 @@
                 const step60 = Math.max(0.25, Math.min(dt * 60, 2.0));
                 const lerpT = 1 - Math.pow(0.925, step60);
                 let notifyHorizonSettledNow = false;
-                if (poseTransition !== null && !searchModeActive) {
+                if (poseTransition !== null) {
                     const u = poseTransition.durationMs <= 0
                         ? 1
                         : clamp01((rawNow - poseTransition.startMs) / poseTransition.durationMs);
@@ -674,12 +678,16 @@
                     if (ambientCentered) {
                         userZoom = THREE.MathUtils.lerp(poseTransition.startZoom, 1.0, eased);
                     }
+                    if (!searchModeActive && !isDragging) {
+                        globeGroup.rotation.x = THREE.MathUtils.lerp(poseTransition.startRotX, targetRotX, eased);
+                    }
                     if (u >= 1) {
                         currentScale = targetScale;
                         currentPosY = targetPosY;
                         if (ambientCentered) userZoom = 1.0;
+                        if (!searchModeActive && !isDragging) globeGroup.rotation.x = targetRotX;
                         poseTransition = null;
-                        if (pendingHorizonSettle && !ambientCentered) {
+                        if (pendingHorizonSettle && !ambientCentered && !searchModeActive) {
                             pendingHorizonSettle = false;
                             notifyHorizonSettledNow = true;
                         }

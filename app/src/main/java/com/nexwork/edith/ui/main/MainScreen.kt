@@ -165,16 +165,17 @@ fun MainScreen(
     if (state.isSpotlightSearchOpen) viewModel.closeSpotlightSearch() else viewModel.closeAppBrowse()
   }
 
-  // Sync search and idle-ambient center state to 3D globe
-  LaunchedEffect(consoleOpen) {
-    globeController.setSearchActive(consoleOpen)
+  // Sync search and idle-ambient center state to 3D globe after top HUD finishes dismissing
+  val globeSearchActive = consoleOpen && !isClockMounted
+  LaunchedEffect(globeSearchActive) {
+    globeController.setSearchActive(globeSearchActive)
   }
   val globeAmbientCentered = state.isAmbientCentered && !isClockMounted
   LaunchedEffect(globeAmbientCentered) {
     globeController.setAmbientCentered(globeAmbientCentered)
   }
-  LaunchedEffect(isGlobeAtHorizon, state.isAmbientCentered) {
-    if (!isGlobeAtHorizon && !state.isAmbientCentered) {
+  LaunchedEffect(isGlobeAtHorizon, consoleOpen, state.isAmbientCentered) {
+    if (!isGlobeAtHorizon && !consoleOpen && !state.isAmbientCentered) {
       delay(1_400L)
       globeController.markHorizonSettled()
     }
@@ -353,12 +354,12 @@ fun MainScreen(
       groupApps(state.apps).firstOrNull { it.name == name }?.apps?.size ?: 0
     }
     val backdropProgress = remember { Animatable(0f) }
-    LaunchedEffect(consoleOpen) {
-      if (consoleOpen) {
-        val showMs = ((1f - backdropProgress.value).coerceIn(0f, 1f) * 650f).roundToInt().coerceAtLeast(1)
+    LaunchedEffect(globeSearchActive) {
+      if (globeSearchActive) {
+        val showMs = ((1f - backdropProgress.value).coerceIn(0f, 1f) * 520f).roundToInt().coerceAtLeast(1)
         backdropProgress.animateTo(1f, tween(showMs, easing = FastOutSlowInEasing))
       } else {
-        val hideMs = (backdropProgress.value.coerceIn(0f, 1f) * 500f).roundToInt().coerceAtLeast(1)
+        val hideMs = (backdropProgress.value.coerceIn(0f, 1f) * 650f).roundToInt().coerceAtLeast(1)
         backdropProgress.animateTo(0f, tween(hideMs, easing = FastOutSlowInEasing))
       }
     }
