@@ -204,6 +204,7 @@
             let searchModeActive = false;
             let ambientCentered = false;
             let pendingHorizonSettle = false;
+            let poseTransition = null;
             let targetRotY = 0;
             let targetRotX = 0;
             let userLat = 10.516;
@@ -338,6 +339,7 @@
                 searchModeActive = next;
                 if (searchModeActive) {
                     pendingHorizonSettle = false;
+                    poseTransition = null;
                 }
                 applyTargetPresentation();
             };
@@ -350,6 +352,17 @@
                 pendingHorizonSettle = wasCentered && !next && !searchModeActive;
                 if (!searchModeActive) {
                     applyTargetPresentation();
+                    const posDelta = Math.abs(targetPosY - currentPosY);
+                    const scaleDelta = Math.abs(targetScale - currentScale);
+                    const durMs = (posDelta < 0.5 && scaleDelta < 0.002) ? 0 : 700;
+                    poseTransition = {
+                        startMs: performance.now(),
+                        durationMs: durMs,
+                        startScale: currentScale,
+                        startPosY: currentPosY,
+                        startZoom: userZoom,
+                    };
+                    wakeLoop(durMs + 160);
                 }
             };
 
@@ -543,7 +556,7 @@
                     ? Math.abs(targetRotY - globeGroup.rotation.y) + Math.abs(targetRotX - globeGroup.rotation.x)
                     : 0;
                 const hasInertia = !searchModeActive && (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001);
-                const hasActiveMotion = startupActive || isDragging || hasInertia || scaleGap > 0.0008 || posGap > 0.04 || zoomGap > 0.001 || rotGap > 0.002 || rawNow < activeUntilMs;
+                const hasActiveMotion = startupActive || isDragging || hasInertia || poseTransition !== null || scaleGap > 0.0008 || posGap > 0.04 || zoomGap > 0.001 || rotGap > 0.002 || rawNow < activeUntilMs;
 
                 if (searchModeActive && !hasActiveMotion) {
                     return;
@@ -650,19 +663,34 @@
 
                 const step60 = Math.max(0.25, Math.min(dt * 60, 2.0));
                 const lerpT = 1 - Math.pow(0.925, step60);
-                currentScale = THREE.MathUtils.lerp(currentScale, targetScale, lerpT);
-                currentPosY = THREE.MathUtils.lerp(currentPosY, targetPosY, lerpT);
-                if (pendingHorizonSettle && !ambientCentered && !searchModeActive) {
-                    if (Math.abs(targetPosY - currentPosY) <= 1.8 && Math.abs(targetScale - currentScale) <= 0.012) {
-                        pendingHorizonSettle = false;
-                        if (window.EdithGlobeBridge && typeof window.EdithGlobeBridge.onHorizonSettled === 'function') {
-                            window.EdithGlobeBridge.onHorizonSettled();
+                let notifyHorizonSettledNow = false;
+                if (poseTransition !== null && !searchModeActive) {
+                    const u = poseTransition.durationMs <= 0
+                        ? 1
+                        : clamp01((rawNow - poseTransition.startMs) / poseTransition.durationMs);
+                    const eased = easeInOutCubic(u);
+                    currentScale = THREE.MathUtils.lerp(poseTransition.startScale, targetScale, eased);
+                    currentPosY = THREE.MathUtils.lerp(poseTransition.startPosY, targetPosY, eased);
+                    if (ambientCentered) {
+                        userZoom = THREE.MathUtils.lerp(poseTransition.startZoom, 1.0, eased);
+                    }
+                    if (u >= 1) {
+                        currentScale = targetScale;
+                        currentPosY = targetPosY;
+                        if (ambientCentered) userZoom = 1.0;
+                        poseTransition = null;
+                        if (pendingHorizonSettle && !ambientCentered) {
+                            pendingHorizonSettle = false;
+                            notifyHorizonSettledNow = true;
                         }
                     }
-                }
-                if (ambientCentered && Math.abs(1.0 - userZoom) > 0.001) {
-                    userZoom = THREE.MathUtils.lerp(userZoom, 1.0, lerpT);
-                    if (Math.abs(1.0 - userZoom) <= 0.001) userZoom = 1.0;
+                } else {
+                    currentScale = THREE.MathUtils.lerp(currentScale, targetScale, lerpT);
+                    currentPosY = THREE.MathUtils.lerp(currentPosY, targetPosY, lerpT);
+                    if (ambientCentered && Math.abs(1.0 - userZoom) > 0.001) {
+                        userZoom = THREE.MathUtils.lerp(userZoom, 1.0, lerpT);
+                        if (Math.abs(1.0 - userZoom) <= 0.001) userZoom = 1.0;
+                    }
                 }
 
                 const effectiveScale = currentScale * userZoom * startupScaleMult;
@@ -695,7 +723,11 @@
 
                 renderer.render(scene, camera);
 
-                const keepFast = startupActive || isDragging ||
+                if (notifyHorizonSettledNow && window.EdithGlobeBridge && typeof window.EdithGlobeBridge.onHorizonSettled === 'function') {
+                    window.EdithGlobeBridge.onHorizonSettled();
+                }
+
+                const keepFast = startupActive || isDragging || poseTransition !== null ||
                     (!searchModeActive && (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001)) ||
                     Math.abs(targetScale - currentScale) > 0.0008 ||
                     Math.abs(targetPosY - currentPosY) > 0.04 ||

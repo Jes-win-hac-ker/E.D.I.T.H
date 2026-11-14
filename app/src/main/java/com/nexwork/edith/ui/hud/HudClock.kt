@@ -46,6 +46,16 @@ import kotlinx.coroutines.delay
 
 private val OrbitalSlate = Color(0xFF64748B)
 
+private fun hudEaseOutCubic(t: Float): Float {
+  val inv = 1f - t.coerceIn(0f, 1f)
+  return 1f - inv * inv * inv
+}
+
+private fun hudEaseInCubic(t: Float): Float {
+  val x = t.coerceIn(0f, 1f)
+  return x * x * x
+}
+
 private val Months = arrayOf(
   "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
 )
@@ -115,20 +125,28 @@ fun HudClock(
 
   val revealAnim = remember { Animatable(0f) }
   var mounted by remember { mutableStateOf(!isOpen) }
+  var isDismissing by remember { mutableStateOf(false) }
+  var lastHandledRedraw by remember { mutableIntStateOf(redrawSignal) }
   LaunchedEffect(mounted) {
     currentOnMountedChange.value(mounted)
   }
   LaunchedEffect(isOpen, redrawSignal) {
     if (isOpen) {
+      isDismissing = true
       val hideMs = (revealAnim.value.coerceIn(0f, 1f) * 500f).roundToInt().coerceAtLeast(1)
       revealAnim.animateTo(0f, tween(hideMs, easing = LinearEasing))
       mounted = false
+      isDismissing = false
     } else {
+      isDismissing = false
       mounted = true
-      if (redrawSignal > 0) {
-        revealAnim.snapTo(0f)
+      if (redrawSignal != lastHandledRedraw) {
+        lastHandledRedraw = redrawSignal
+        if (revealAnim.value > 0.01f) {
+          revealAnim.snapTo(0f)
+        }
       }
-      val showMs = ((1f - revealAnim.value).coerceIn(0f, 1f) * 650f).roundToInt().coerceAtLeast(1)
+      val showMs = ((1f - revealAnim.value).coerceIn(0f, 1f) * 760f).roundToInt().coerceAtLeast(1)
       revealAnim.animateTo(1f, tween(showMs, easing = LinearEasing))
     }
   }
@@ -167,7 +185,7 @@ fun HudClock(
     modifier
       .fillMaxWidth()
       .height(168.dp)
-      .graphicsLayer { alpha = phase(revealAnim.value, 0f, 0.18f) },
+      .graphicsLayer { alpha = if (revealAnim.value <= 0.001f) 0f else 1f },
   ) {
     Box(
       Modifier
@@ -238,14 +256,62 @@ fun HudClock(
             val ticked = secondTick.intValue
             if (reveal <= 0.001f) return@onDrawBehind
 
-            val trace = phase(reveal, 0f, 0.62f)
-            val eyebrowP = phase(reveal, 0.18f, 0.58f)
-            val timeP = phase(reveal, 0.22f, 0.72f)
-            val wingP = phase(reveal, 0.38f, 0.78f)
-            val combP = phase(reveal, 0.50f, 1.00f)
+            val dismissing = isDismissing
+            val trace: Float
+            val arcAlpha: Float
+            val sparkAlpha: Float
+            val eyebrowP: Float
+            val eyebrowDecrypt: Float
+            val timeP: Float
+            val timeOffsetY: Float
+            val combP: Float
+            val wingAlpha: Float
+            val wingDecrypt: Float
+            val wingSlideX: Float
+            val wingSlideY: Float
+
+            if (dismissing) {
+              val d = (1f - reveal).coerceIn(0f, 1f)
+              val wingRem = 1f - hudEaseInCubic(phase(d, 0.00f, 0.42f))
+              wingAlpha = wingRem
+              wingDecrypt = 1f
+              wingSlideX = (1f - wingRem) * 4f.dp.toPx()
+              wingSlideY = (1f - wingRem) * 5f.dp.toPx()
+
+              eyebrowP = 1f - hudEaseInCubic(phase(d, 0.04f, 0.34f))
+              eyebrowDecrypt = 1f
+
+              timeP = 1f - hudEaseInCubic(phase(d, 0.08f, 0.50f))
+              timeOffsetY = (1f - timeP) * 7f.dp.toPx()
+
+              combP = 1f - hudEaseInCubic(phase(d, 0.28f, 0.72f))
+              trace = 1f - hudEaseInCubic(phase(d, 0.42f, 0.94f))
+              arcAlpha = (trace * 5f).coerceIn(0f, 1f)
+              sparkAlpha = if (d >= 0.88f) 1f - phase(d, 0.90f, 1.00f) else 0f
+            } else {
+              trace = hudEaseOutCubic(phase(reveal, 0.00f, 0.48f))
+              arcAlpha = 1f
+              sparkAlpha = if (reveal < 0.16f) 1f - phase(reveal, 0.06f, 0.16f) else 0f
+
+              eyebrowDecrypt = phase(reveal, 0.20f, 0.56f)
+              eyebrowP = hudEaseOutCubic(phase(eyebrowDecrypt, 0f, 0.25f))
+
+              timeP = hudEaseOutCubic(phase(reveal, 0.24f, 0.68f))
+              timeOffsetY = (1f - timeP) * 7f.dp.toPx()
+
+              combP = hudEaseOutCubic(phase(reveal, 0.18f, 0.78f))
+
+              val wingRaw = phase(reveal, 0.48f, 0.98f)
+              val wingEased = hudEaseOutCubic(wingRaw)
+              wingDecrypt = wingRaw
+              wingAlpha = (wingEased * 1.15f).coerceIn(0f, 1f)
+              wingSlideX = -(1f - wingEased) * 4f.dp.toPx()
+              wingSlideY = (1f - wingEased) * 5f.dp.toPx()
+            }
+
             val isMonet = crimsonMonetActive.value
 
-            // 1. Curved Orbital Horizon Arc tracing outward from zenith center
+            // 1. Curved Orbital Horizon Arc + Zenith Ignition Spark
             if (trace > 0.01f) {
               arcPath.reset()
               val segments = 48
@@ -259,27 +325,37 @@ fun HudClock(
               }
               drawPath(
                 path = arcPath,
-                color = if (isMonet) Crimson.copy(alpha = 0.62f) else OrbitalSlate.copy(alpha = 0.52f),
+                color = if (isMonet) Crimson.copy(alpha = 0.62f * arcAlpha) else OrbitalSlate.copy(alpha = 0.52f * arcAlpha),
                 style = arcStroke,
               )
 
-              // Tracing laser heads on expanding left & right arc tips
-              if (trace in 0.02f..0.98f) {
+              if (trace in 0.02f..0.985f) {
                 val tipTheta = trace * maxTheta
                 val tipLx = cx - arcRadius * sin(tipTheta)
                 val tipRx = cx + arcRadius * sin(tipTheta)
                 val tipY = arcCenterY - arcRadius * cos(tipTheta)
-                drawCircle(CrimsonBright.copy(alpha = 0.35f), 4.2f.dp.toPx(), Offset(tipLx, tipY))
-                drawCircle(Color.White.copy(alpha = 0.92f), 1.5f.dp.toPx(), Offset(tipLx, tipY))
-                drawCircle(CrimsonBright.copy(alpha = 0.35f), 4.2f.dp.toPx(), Offset(tipRx, tipY))
-                drawCircle(Color.White.copy(alpha = 0.92f), 1.5f.dp.toPx(), Offset(tipRx, tipY))
+                drawCircle(CrimsonBright.copy(alpha = 0.35f * arcAlpha), 4.2f.dp.toPx(), Offset(tipLx, tipY))
+                drawCircle(Color.White.copy(alpha = 0.92f * arcAlpha), 1.5f.dp.toPx(), Offset(tipLx, tipY))
+                drawCircle(CrimsonBright.copy(alpha = 0.35f * arcAlpha), 4.2f.dp.toPx(), Offset(tipRx, tipY))
+                drawCircle(Color.White.copy(alpha = 0.92f * arcAlpha), 1.5f.dp.toPx(), Offset(tipRx, tipY))
               }
-
+            }
+            if (sparkAlpha > 0.01f) {
+              val apexY = arcCenterY - arcRadius
+              drawCircle(CrimsonBright.copy(alpha = 0.38f * sparkAlpha), 5.0f.dp.toPx(), Offset(cx, apexY))
+              drawCircle(Color.White.copy(alpha = 0.95f * sparkAlpha), 1.8f.dp.toPx(), Offset(cx, apexY))
             }
 
+            val canvas = drawContext.canvas.nativeCanvas
+
             // 2. Centered Eyebrow & Zenith Status Dot
-            if (eyebrowP > 0f) {
-              drawDecrypt(eyebrowText, eyebrowP, 12, eyebrowPaint, eyebrowX, eyebrowBaseline)
+            if (eyebrowP > 0.005f) {
+              eyebrowPaint.alpha = (120f * eyebrowP).roundToInt().coerceIn(0, 120)
+              if (dismissing) {
+                canvas.drawText(eyebrowText, eyebrowX, eyebrowBaseline, eyebrowPaint)
+              } else {
+                drawDecrypt(eyebrowText, eyebrowDecrypt, 12, eyebrowPaint, eyebrowX, eyebrowBaseline)
+              }
               drawCircle(
                 color = (if (ticked % 2 == 0) CrimsonBright else CrimsonDim).copy(alpha = eyebrowP),
                 radius = 2.0f.dp.toPx(),
@@ -287,25 +363,26 @@ fun HudClock(
               )
             }
 
-            val canvas = drawContext.canvas.nativeCanvas
-
             // 3. Giant Frameless HH:MM Numerals & Central Crimson Pulse Spine
-            if (timeP > 0f) {
-              val timeRise = (1f - timeP) * 4f.dp.toPx()
-              clipRect(left = 0f, top = Y(13f), right = size.width, bottom = Y(13f) + Y(48f) * timeP) {
-                canvas.drawText(face.digits, 0, 2, cx - 46f * ux, timeBaseline + timeRise, timePaint)
-                canvas.drawText(face.digits, 2, 2, cx + 46f * ux, timeBaseline + timeRise, timePaint)
+            if (timeP > 0.005f) {
+              val timeAlpha = (timeP * 1.18f).coerceIn(0f, 1f)
+              timePaint.alpha = (255f * timeAlpha).roundToInt().coerceIn(0, 255)
+              clipRect(left = 0f, top = Y(13f), right = size.width, bottom = Y(13f) + Y(48f) * (0.25f + 0.75f * timeP)) {
+                canvas.drawText(face.digits, 0, 2, cx - 46f * ux, timeBaseline + timeOffsetY, timePaint)
+                canvas.drawText(face.digits, 2, 2, cx + 46f * ux, timeBaseline + timeOffsetY, timePaint)
               }
 
+              val spineMidY = Y(33.5f)
+              val spineHalf = Y(14.5f) * timeP
               drawLine(
-                color = OrbitalSlate.copy(alpha = 0.35f * timeP),
-                start = Offset(cx, Y(19f)),
-                end = Offset(cx, Y(48f)),
+                color = OrbitalSlate.copy(alpha = 0.35f * timeAlpha),
+                start = Offset(cx, spineMidY - spineHalf),
+                end = Offset(cx, spineMidY + spineHalf),
                 strokeWidth = spineStroke,
                 cap = StrokeCap.Round,
               )
               val colonColor = (if (ticked % 2 == 0) CrimsonBright else CrimsonDim).copy(
-                alpha = if (ticked % 2 == 0) timeP else 0.45f * timeP,
+                alpha = if (ticked % 2 == 0) timeAlpha else 0.45f * timeAlpha,
               )
               val pipSize = 3.2f.dp.toPx()
               drawRect(
@@ -321,9 +398,11 @@ fun HudClock(
             }
 
             // 4. 61-Tick Radial Second Sweep (0..60, symmetric with 30s at exact zenith)
-            if (combP > 0f) {
+            if (combP > 0.005f) {
               for (cell in 0 until 61) {
-                if (abs(tickU[cell]) > combP) continue
+                val cellStart = abs(tickU[cell]) * 0.86f
+                val localPop = hudEaseOutCubic(phase(combP, cellStart, cellStart + 0.14f))
+                if (localPop <= 0.01f) continue
                 val bx = tickX[cell]
                 val by = tickY[cell]
                 val nx = tickNx[cell]
@@ -339,7 +418,7 @@ fun HudClock(
                   isCardinal -> 5.8f * uy
                   isMajor -> 4.6f * uy
                   else -> 2.6f * uy
-                }
+                } * localPop
                 val tickStroke = when {
                   isHead -> 1.6f.dp.toPx()
                   isCardinal -> 1.25f.dp.toPx()
@@ -347,9 +426,9 @@ fun HudClock(
                   else -> 0.8f.dp.toPx()
                 }
                 val tickColor = when {
-                  isHead -> CrimsonBright.copy(alpha = combP)
-                  isPassed -> Color.White.copy(alpha = (if (isMajor) 0.65f else 0.34f) * combP)
-                  else -> OrbitalSlate.copy(alpha = (if (isMajor) 0.24f else 0.12f) * combP)
+                  isHead -> CrimsonBright.copy(alpha = localPop)
+                  isPassed -> Color.White.copy(alpha = (if (isMajor) 0.65f else 0.34f) * localPop)
+                  else -> OrbitalSlate.copy(alpha = (if (isMajor) 0.24f else 0.12f) * localPop)
                 }
 
                 drawLine(
@@ -362,28 +441,36 @@ fun HudClock(
 
                 if (isHead) {
                   val orbCenter = Offset(bx + nx * (tickLen + 2.5f * uy), by + ny * (tickLen + 2.5f * uy))
-                  drawCircle(CrimsonBright.copy(alpha = 0.35f * combP), 4.0f.dp.toPx(), orbCenter)
-                  drawCircle(CrimsonBright.copy(alpha = combP), 2.1f.dp.toPx(), orbCenter)
+                  drawCircle(CrimsonBright.copy(alpha = 0.35f * localPop), 4.0f.dp.toPx(), orbCenter)
+                  drawCircle(CrimsonBright.copy(alpha = localPop), 2.1f.dp.toPx(), orbCenter)
                 }
               }
             }
 
             // 5. Left & Right Upper Shoulder Telemetry Above the Orbital Arc
-            if (wingP > 0f) {
-              drawDecrypt("${face.weekday} // ${face.date}", wingP, 19, wingPaint, cx - labelHalfSpan, wingBaseline)
+            if (wingAlpha > 0.005f) {
+              val dateText = "${face.weekday} // ${face.date}"
+              val leftWingX = cx - labelHalfSpan + wingSlideX
+              val leftWingBaseline = wingBaseline + wingSlideY
+              wingPaint.alpha = (185f * wingAlpha).roundToInt().coerceIn(0, 185)
+              if (dismissing) {
+                canvas.drawText(dateText, leftWingX, leftWingBaseline, wingPaint)
+              } else {
+                drawDecrypt(dateText, wingDecrypt, 19, wingPaint, leftWingX, leftWingBaseline)
+              }
 
-              val rightWingX = cx + labelHalfSpan
+              val rightWingX = cx + labelHalfSpan - wingSlideX
               secChars[1] = face.digits[4]
               secChars[2] = face.digits[5]
               secReadoutPaint.color = if (ticked % 2 == 0) {
-                android.graphics.Color.argb((255 * wingP).toInt(), 255, 77, 94)
+                android.graphics.Color.argb((255 * wingAlpha).toInt().coerceIn(0, 255), 255, 77, 94)
               } else {
-                android.graphics.Color.argb((235 * wingP).toInt(), 248, 250, 252)
+                android.graphics.Color.argb((235 * wingAlpha).toInt().coerceIn(0, 235), 248, 250, 252)
               }
-              canvas.drawText(secChars, 0, 3, rightWingX, secBaseline, secReadoutPaint)
+              canvas.drawText(secChars, 0, 3, rightWingX, secBaseline + wingSlideY, secReadoutPaint)
 
-              wingRightPaint.alpha = (165 * wingP).toInt()
-              canvas.drawText(face.zone, rightWingX - secWidth - 5f * ux, wingBaseline, wingRightPaint)
+              wingRightPaint.alpha = (165 * wingAlpha).toInt().coerceIn(0, 165)
+              canvas.drawText(face.zone, rightWingX - secWidth - 5f * ux, wingBaseline + wingSlideY, wingRightPaint)
             }
           }
         },
