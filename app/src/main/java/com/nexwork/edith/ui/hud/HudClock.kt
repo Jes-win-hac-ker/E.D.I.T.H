@@ -162,8 +162,7 @@ fun HudClock(
   Box(
     modifier
       .fillMaxWidth()
-      .padding(horizontal = 18.dp)
-      .height(138.dp)
+      .height(168.dp)
       .graphicsLayer { alpha = phase(revealAnim.value, 0f, 0.18f) },
   ) {
     Box(
@@ -171,7 +170,7 @@ fun HudClock(
         .fillMaxSize()
         .drawWithCache {
           val ux = size.width / 312f
-          val uy = size.height / 138f
+          val uy = size.height / 168f
           fun X(sx: Float) = sx * ux
           fun Y(sy: Float) = sy * uy
 
@@ -190,12 +189,16 @@ fun HudClock(
           val globeScreenRadius = (globeWorldRadius / zCam) * (fullH * 0.5f / tanHalfFov)
 
           val cx = size.width * 0.5f
-          val arcHalfSpan = (size.width * 0.44f).coerceAtMost(globeScreenRadius * 0.92f)
           val arcZenithY = Y(72f)
           val arcRadius = globeScreenRadius + 10.dp.toPx()
+          val arcHalfSpan = (size.width * 0.5f).coerceAtMost(arcRadius * 0.985f)
           val arcCenterY = arcZenithY + arcRadius
           val maxTheta = asin((arcHalfSpan / arcRadius).coerceIn(-1f, 1f))
-          val arcWingY = arcCenterY - arcRadius * cos(maxTheta)
+          val tickHalfSpan = (arcHalfSpan - 6.dp.toPx()).coerceAtLeast(1f)
+          val tickMaxTheta = asin((tickHalfSpan / arcRadius).coerceIn(-1f, 1f))
+          val labelHalfSpan = (arcHalfSpan - 16.dp.toPx()).coerceAtLeast(1f)
+          val labelTheta = asin((labelHalfSpan / arcRadius).coerceIn(-1f, 1f))
+          val labelArcY = arcCenterY - arcRadius * cos(labelTheta)
 
           val tickU = FloatArray(60)
           val tickX = FloatArray(60)
@@ -204,7 +207,7 @@ fun HudClock(
           val tickNy = FloatArray(60)
           for (i in 0 until 60) {
             val u = -1f + 2f * (i / 59f)
-            val theta = u * maxTheta
+            val theta = u * tickMaxTheta
             val s = sin(theta)
             val c = cos(theta)
             tickU[i] = u
@@ -226,7 +229,7 @@ fun HudClock(
           val eyebrowX = cx - eyebrowWidth * 0.5f
           val eyebrowBaseline = centerBaseline(eyebrowPaint, Y(10f))
           val timeBaseline = centerBaseline(timePaint, Y(41f))
-          val wingTextY = (arcWingY + 12.dp.toPx()).coerceAtMost(size.height - 4.dp.toPx())
+          val wingTextY = (labelArcY + 14.dp.toPx()).coerceAtMost(size.height - 4.dp.toPx())
           val wingBaseline = centerBaseline(wingPaint, wingTextY)
           val secBaseline = centerBaseline(secReadoutPaint, wingTextY)
           val secWidth = secReadoutPaint.measureText(":00")
@@ -284,8 +287,8 @@ fun HudClock(
 
               val crossP = phase(trace, 0.85f, 1.0f)
               if (crossP > 0f) {
-                drawCross(cx - arcHalfSpan, arcWingY + 4f * uy, crossArm, crossStroke, CrimsonBright.copy(alpha = 0.72f * crossP))
-                drawCross(cx + arcHalfSpan, arcWingY + 4f * uy, crossArm, crossStroke, Color.White.copy(alpha = 0.45f * crossP))
+                drawCross(cx - labelHalfSpan, labelArcY + 4f * uy, crossArm, crossStroke, CrimsonBright.copy(alpha = 0.72f * crossP))
+                drawCross(cx + labelHalfSpan, labelArcY + 4f * uy, crossArm, crossStroke, Color.White.copy(alpha = 0.45f * crossP))
               }
             }
 
@@ -379,9 +382,9 @@ fun HudClock(
 
             // 5. Left & Right Wing Telemetry Below Arc Wings
             if (wingP > 0f) {
-              drawDecrypt("${face.weekday} // ${face.date}", wingP, 19, wingPaint, cx - arcHalfSpan + 6f * ux, wingBaseline)
+              drawDecrypt("${face.weekday} // ${face.date}", wingP, 19, wingPaint, cx - labelHalfSpan + 6f * ux, wingBaseline)
 
-              val rightWingX = cx + arcHalfSpan - 6f * ux
+              val rightWingX = cx + labelHalfSpan - 6f * ux
               secChars[1] = face.digits[4]
               secChars[2] = face.digits[5]
               secReadoutPaint.color = if (ticked % 2 == 0) {
