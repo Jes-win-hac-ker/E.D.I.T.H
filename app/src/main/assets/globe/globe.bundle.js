@@ -1923,10 +1923,12 @@ function attachPulseShader(material, pulseUniforms, radarUniforms, isHaze = fals
             if (distFrontier < 0.0 && uRadarAngle < 5.0) {
                 vColor = vec3(0.0);
             } else {
-                // Blend resting slate dots strongly toward pre-exposure linear crimson (#DC143C) on crest
-                float radarEdge = (aCoast > 0.5 && uRadarAngle < 5.0) ? (1.0 - snapEased) * 0.18 : 0.0;
+                // Blend resting slate dots strongly toward pre-exposure linear crimson (#DC143C) on wave crest or startup radar frontier
+                float radarEdge = (aCoast > 0.5 && uRadarAngle < 5.0) ? (1.0 - snapEased) * 0.24 : 0.0;
+                float radarCrimson = (uRadarAngle < 5.0) ? pow(1.0 - snapEased, 1.35) * ((aCoast > 0.5) ? 0.92 : 0.58) : 0.0;
+                float totalCrimson = max(crimsonTint, radarCrimson);
                 vec3 crimsonWaveColor = vec3(1.65, 0.04, 0.14);
-                vColor = mix(vColor * (1.0 + radarEdge), crimsonWaveColor * (1.0 + coastSilhouette), clamp(crimsonTint, 0.0, 0.98));
+                vColor = mix(vColor * (1.0 + radarEdge), crimsonWaveColor * (1.0 + coastSilhouette), clamp(totalCrimson, 0.0, 0.98));
             }
             `
         );

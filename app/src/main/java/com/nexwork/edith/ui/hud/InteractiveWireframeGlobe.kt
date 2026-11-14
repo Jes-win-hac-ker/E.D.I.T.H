@@ -90,6 +90,11 @@ class GlobeController {
     webViewRef?.evaluateJavascript("if(window.triggerWaveAt) window.triggerWaveAt($x, $y);", null)
   }
 
+  fun playStartupAnimation() {
+    flushPending()
+    webViewRef?.evaluateJavascript("if(window.triggerStartupAnimation) window.triggerStartupAnimation();", null)
+  }
+
   fun setLocation(lat: Double, lon: Double) {
     webViewRef?.evaluateJavascript("if(window.setUserLocation) window.setUserLocation($lat, $lon);", null)
   }

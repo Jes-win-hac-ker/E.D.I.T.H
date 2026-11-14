@@ -92,6 +92,7 @@ private class ClockFace {
 fun HudClock(
   isOpen: Boolean,
   modifier: Modifier = Modifier,
+  redrawSignal: Int = 0,
 ) {
   val density = LocalDensity.current
   val crimsonMonetActive = rememberUpdatedState(LocalCrimsonMonetActive.current)
@@ -100,13 +101,16 @@ fun HudClock(
 
   val revealAnim = remember { Animatable(0f) }
   var mounted by remember { mutableStateOf(!isOpen) }
-  LaunchedEffect(isOpen) {
+  LaunchedEffect(isOpen, redrawSignal) {
     if (isOpen) {
       val hideMs = (revealAnim.value.coerceIn(0f, 1f) * 500f).roundToInt().coerceAtLeast(1)
       revealAnim.animateTo(0f, tween(hideMs, easing = LinearEasing))
       mounted = false
     } else {
       mounted = true
+      if (redrawSignal > 0) {
+        revealAnim.snapTo(0f)
+      }
       val showMs = ((1f - revealAnim.value).coerceIn(0f, 1f) * 650f).roundToInt().coerceAtLeast(1)
       revealAnim.animateTo(1f, tween(showMs, easing = LinearEasing))
     }

@@ -1,9 +1,11 @@
 package com.nexwork.edith.ui.main
 
+import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -25,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -85,11 +88,40 @@ fun MainScreen(
   var isResumed by remember { mutableStateOf(true) }
   var isCardActionArmed by remember { mutableStateOf(false) }
   var lastScreenActivityMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+  val globeController = remember { GlobeController() }
+  var clockRedrawSignal by remember { mutableIntStateOf(0) }
+  var lastHomeWakeMs by remember { mutableLongStateOf(0L) }
+
+  val triggerHomeWake: () -> Unit = {
+    val now = System.currentTimeMillis()
+    lastScreenActivityMs = now
+    keyboardController?.hide()
+    focusManager.clearFocus()
+    viewModel.wakeFromAmbient()
+    viewModel.closeSpotlightSearch()
+    viewModel.closeAppBrowse()
+    if (now - lastHomeWakeMs > 600L) {
+      lastHomeWakeMs = now
+      clockRedrawSignal++
+      globeController.playStartupAnimation()
+    }
+  }
+
+  LaunchedEffect(clockRedrawSignal) {
+    if (clockRedrawSignal > 0) {
+      delay(1600L)
+      if (isResumed) {
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+      }
+    }
+  }
 
   LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
     isResumed = true
-    lastScreenActivityMs = System.currentTimeMillis()
-    viewModel.wakeFromAmbient()
+    val keyguardManager = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+    if (keyguardManager?.isKeyguardLocked != true) {
+      triggerHomeWake()
+    }
     viewModel.refreshLauncherData()
     viewModel.checkForUpdates(force = false)
     viewModel.ensureMonetPersisted()
@@ -100,12 +132,17 @@ fun MainScreen(
   DisposableEffect(context) {
     val receiver = object : BroadcastReceiver() {
       override fun onReceive(ctx: Context?, intent: Intent?) {
-        viewModel.ensureMonetPersisted()
+        when (intent?.action) {
+          Intent.ACTION_USER_PRESENT -> triggerHomeWake()
+          else -> viewModel.ensureMonetPersisted()
+        }
       }
     }
     @Suppress("DEPRECATION")
-    val filter = IntentFilter(Intent.ACTION_WALLPAPER_CHANGED)
-    context.registerReceiver(receiver, filter)
+    val filter = IntentFilter(Intent.ACTION_WALLPAPER_CHANGED).apply {
+      addAction(Intent.ACTION_USER_PRESENT)
+    }
+    ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
     onDispose {
       runCatching { context.unregisterReceiver(receiver) }
     }
@@ -122,7 +159,6 @@ fun MainScreen(
     lastScreenActivityMs = System.currentTimeMillis()
     if (state.isSpotlightSearchOpen) viewModel.closeSpotlightSearch() else viewModel.closeAppBrowse()
   }
-  val globeController = remember { GlobeController() }
 
   // Sync search and idle-ambient center state to 3D globe
   LaunchedEffect(consoleOpen) {
@@ -332,6 +368,7 @@ fun MainScreen(
     val topHudHidden = consoleOpen || state.isAmbientCentered
     HudClock(
       isOpen = topHudHidden,
+      redrawSignal = clockRedrawSignal,
       modifier = Modifier.align(Alignment.TopStart),
     )
 

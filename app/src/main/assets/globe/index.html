@@ -66,9 +66,10 @@
 
             // 4. Globe Master Group with 23.4° realistic axial tilt
             const radius = 75;
+            const axialTiltRad = (23.4 * Math.PI) / 180;
             const globeGroup = new THREE.Group();
             globeGroup.name = 'minimized-wireframe-globe';
-            globeGroup.rotation.z = (23.4 * Math.PI) / 180;
+            globeGroup.rotation.z = axialTiltRad;
             scene.add(globeGroup);
             window.globeGroup = globeGroup;
 
@@ -157,6 +158,9 @@
                             obj.material.opacity = Math.min(0.24, Math.max(0.18, (obj.material.opacity || 0.14) * 1.5));
                             obj.material.transparent = true;
                         }
+                        if (obj.userData && typeof obj.userData.baseOpacity === 'number') {
+                            obj.userData.baseOpacity = obj.material.opacity;
+                        }
                     }
                 }
                 if (obj.isMesh && obj.material) {
@@ -164,6 +168,26 @@
                     obj.material.color.setHex(0x000000);
                 }
             });
+
+            // 6B. Crimson Equatorial Tracer Ring for 4-Phase Startup Animation (Option B1)
+            const tracerPoints = [];
+            const tracerSegments = 128;
+            for (let i = 0; i <= tracerSegments; i++) {
+                const theta = (i / tracerSegments) * Math.PI * 2;
+                tracerPoints.push(new THREE.Vector3(Math.cos(theta) * radius * 1.004, 0, Math.sin(theta) * radius * 1.004));
+            }
+            const tracerGeo = new THREE.BufferGeometry().setFromPoints(tracerPoints);
+            const tracerMat = new THREE.LineBasicMaterial({
+                color: 0xE01432,
+                transparent: true,
+                opacity: 0.92,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+            const equatorTracerLine = new THREE.Line(tracerGeo, tracerMat);
+            equatorTracerLine.name = 'startup-equator-tracer';
+            equatorTracerLine.visible = false;
+            globeGroup.add(equatorTracerLine);
 
             // 7. Option 2 Orbital Horizon Arc, Idle Center Showcase & Search Transitions
             let horizonScale = 0.98;
@@ -183,6 +207,13 @@
             let targetRotX = 0;
             let userLat = 10.516;
             let userLon = 76.2157;
+            let startupActive = false;
+            let startupStartMs = 0;
+            let lastStartupTriggerMs = -1000;
+            let startupPulseFired = false;
+            let startupScaleMult = 1.0;
+            let startupStartRotY = 0;
+            let startupEndRotY = 0;
 
             let isPageHidden = typeof document !== 'undefined' && document.hidden;
             let rafId = null;
@@ -283,10 +314,15 @@
                 if (userLocation && typeof userLocation.setPosition === 'function') {
                     userLocation.setPosition(lat, lon);
                 }
+                if (landmass && typeof landmass.setRadarOrigin === 'function') {
+                    landmass.setRadarOrigin(lat, lon);
+                }
                 if (W.latLonToVector3) {
                     const localVec = W.latLonToVector3(lat, lon, radius);
                     targetRotY = -Math.atan2(localVec.x, localVec.z);
-                    if (!searchModeActive) {
+                    startupEndRotY = targetRotY;
+                    startupStartRotY = targetRotY - 0.85;
+                    if (!searchModeActive && !startupActive) {
                         globeGroup.rotation.y = targetRotY;
                     }
                 }
@@ -370,6 +406,66 @@
 
             // 10. INTERACTIVE TOUCH ROTATION WITH MOMENTUM & TWO-FINGER PINCH ZOOM
             let rotVelocity = { x: 0, y: 0 };
+
+            function clamp01(v) {
+                return Math.max(0, Math.min(1, v));
+            }
+
+            function easeOutCubic(t) {
+                return 1 - Math.pow(1 - t, 3);
+            }
+
+            function easeInOutCubic(t) {
+                return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+            }
+
+            window.triggerStartupAnimation = function() {
+                const nowMs = performance.now();
+                if (nowMs - lastStartupTriggerMs < 400) return;
+                lastStartupTriggerMs = nowMs;
+
+                startupActive = true;
+                startupStartMs = nowMs;
+                startupPulseFired = false;
+                startupScaleMult = 0.22;
+
+                rotVelocity.x = 0;
+                rotVelocity.y = 0;
+
+                if (W.latLonToVector3) {
+                    const localVec = W.latLonToVector3(userLat, userLon, radius);
+                    startupEndRotY = -Math.atan2(localVec.x, localVec.z);
+                    startupStartRotY = startupEndRotY - 0.85;
+                    if (!searchModeActive) {
+                        globeGroup.rotation.y = startupStartRotY;
+                        globeGroup.rotation.x = 0;
+                    }
+                }
+                globeGroup.rotation.z = 0;
+
+                if (graticule && typeof graticule.setRibsProgress === 'function') {
+                    graticule.setRibsProgress(0, 0);
+                }
+                if (graticule && typeof graticule.setOccluderActive === 'function') {
+                    graticule.setOccluderActive(true, 0.15);
+                }
+                if (landmass && typeof landmass.setRadarOrigin === 'function') {
+                    landmass.setRadarOrigin(userLat, userLon);
+                }
+                if (landmass && typeof landmass.setRadarSweep === 'function') {
+                    landmass.setRadarSweep(-0.05);
+                }
+
+                if (solarTerminator && solarTerminator.group) solarTerminator.group.visible = false;
+                if (nodes && nodes.group) nodes.group.visible = false;
+                if (userLocation && userLocation.group) userLocation.group.visible = false;
+
+                equatorTracerLine.visible = true;
+                tracerMat.opacity = 0.92;
+                tracerGeo.setDrawRange(0, 2);
+
+                wakeLoop(2400);
+            };
             window.rotateGlobe = function(dx, dy) {
                 globeGroup.rotation.y += dx * 0.005;
                 globeGroup.rotation.x = Math.max(-0.6, Math.min(0.6, globeGroup.rotation.x + dy * 0.003));
@@ -441,7 +537,7 @@
                     ? Math.abs(targetRotY - globeGroup.rotation.y) + Math.abs(targetRotX - globeGroup.rotation.x)
                     : 0;
                 const hasInertia = !searchModeActive && (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001);
-                const hasActiveMotion = isDragging || hasInertia || scaleGap > 0.0008 || posGap > 0.04 || zoomGap > 0.001 || rotGap > 0.002 || rawNow < activeUntilMs;
+                const hasActiveMotion = startupActive || isDragging || hasInertia || scaleGap > 0.0008 || posGap > 0.04 || zoomGap > 0.001 || rotGap > 0.002 || rawNow < activeUntilMs;
 
                 if (searchModeActive && !hasActiveMotion) {
                     return;
@@ -459,6 +555,93 @@
                 lastRenderMs = rawNow;
                 elapsed += dt;
 
+                if (startupActive) {
+                    const st = Math.max(0, (rawNow - startupStartMs) * 0.001);
+
+                    // Phase 1 (0.00s - 0.45s): Equatorial crimson tracer + axial tilt (0.00s - 0.65s)
+                    const p1Trace = easeOutCubic(clamp01(st / 0.45));
+                    const p1Tilt = easeInOutCubic(clamp01(st / 0.65));
+                    globeGroup.rotation.z = axialTiltRad * p1Tilt;
+
+                    if (!isDragging && !searchModeActive) {
+                        const pRot = easeOutCubic(clamp01(st / 1.65));
+                        globeGroup.rotation.y = THREE.MathUtils.lerp(startupStartRotY, startupEndRotY, pRot);
+                    }
+
+                    if (st < 0.55) {
+                        startupScaleMult = THREE.MathUtils.lerp(0.22, 1.06, easeOutCubic(clamp01(st / 0.55)));
+                    } else if (st < 1.55) {
+                        startupScaleMult = 1.06;
+                    } else {
+                        startupScaleMult = THREE.MathUtils.lerp(1.06, 1.0, easeOutCubic(clamp01((st - 1.55) / 0.55)));
+                    }
+
+                    // Phase 2 (0.35s - 1.15s): Simultaneous Latitude & Longitude Wireframe Unfold
+                    const p2 = clamp01((st - 0.35) / 0.80);
+                    const pLat = easeOutCubic(p2);
+                    const pLon = easeInOutCubic(p2);
+                    if (graticule && typeof graticule.setRibsProgress === 'function') {
+                        graticule.setRibsProgress(pLat, pLon);
+                    }
+                    if (graticule && typeof graticule.setOccluderActive === 'function') {
+                        graticule.setOccluderActive(true, THREE.MathUtils.lerp(0.15, 1.0, pLat));
+                    }
+
+                    if (st <= 0.45) {
+                        equatorTracerLine.visible = true;
+                        tracerMat.opacity = 0.92;
+                        tracerGeo.setDrawRange(0, Math.max(2, Math.floor(p1Trace * 129)));
+                    } else if (st <= 1.00) {
+                        const fadeOut = clamp01((st - 0.45) / 0.55);
+                        tracerGeo.setDrawRange(0, 129);
+                        tracerMat.opacity = 0.92 * (1.0 - fadeOut);
+                    } else {
+                        equatorTracerLine.visible = false;
+                    }
+
+                    // Phase 3 (0.85s - 1.85s): Origin-Out Crimson Continent Radar Sweep
+                    if (st >= 0.85) {
+                        const p3 = clamp01((st - 0.85) / 1.00);
+                        const sweepAngle = easeInOutCubic(p3) * (Math.PI + 0.42);
+                        if (landmass && typeof landmass.setRadarSweep === 'function') {
+                            landmass.setRadarSweep(sweepAngle);
+                        }
+                    }
+
+                    // Phase 4 (1.55s - 2.10s): Beacon, Terminator & Origin Lock-In
+                    if (st >= 1.55) {
+                        if (solarTerminator && solarTerminator.group) solarTerminator.group.visible = true;
+                        if (nodes && nodes.group) nodes.group.visible = true;
+                        if (userLocation && userLocation.group) userLocation.group.visible = true;
+                    }
+                    if (st >= 1.60 && !startupPulseFired) {
+                        startupPulseFired = true;
+                        if (geodesicPulse && typeof geodesicPulse.triggerPulse === 'function' && W.latLonToVector3) {
+                            const originDir = W.latLonToVector3(userLat, userLon, 1.0).normalize();
+                            geodesicPulse.triggerPulse(originDir, null, 1.25);
+                        }
+                    }
+
+                    if (st >= 2.10) {
+                        startupActive = false;
+                        startupScaleMult = 1.0;
+                        globeGroup.rotation.z = axialTiltRad;
+                        equatorTracerLine.visible = false;
+                        if (graticule && typeof graticule.setRibsProgress === 'function') {
+                            graticule.setRibsProgress(1, 1);
+                        }
+                        if (graticule && typeof graticule.setOccluderActive === 'function') {
+                            graticule.setOccluderActive(true, 1.0);
+                        }
+                        if (landmass && typeof landmass.setRadarSweep === 'function') {
+                            landmass.setRadarSweep(10.0);
+                        }
+                        if (solarTerminator && solarTerminator.group) solarTerminator.group.visible = true;
+                        if (nodes && nodes.group) nodes.group.visible = true;
+                        if (userLocation && userLocation.group) userLocation.group.visible = true;
+                    }
+                }
+
                 const step60 = Math.max(0.25, Math.min(dt * 60, 2.0));
                 const lerpT = 1 - Math.pow(0.925, step60);
                 currentScale = THREE.MathUtils.lerp(currentScale, targetScale, lerpT);
@@ -468,7 +651,7 @@
                     if (Math.abs(1.0 - userZoom) <= 0.001) userZoom = 1.0;
                 }
 
-                const effectiveScale = currentScale * userZoom;
+                const effectiveScale = currentScale * userZoom * startupScaleMult;
                 globeGroup.scale.set(effectiveScale, effectiveScale, effectiveScale);
                 globeGroup.position.set(0, currentPosY, 0);
 
@@ -485,7 +668,7 @@
                         rotVelocity.y *= decay;
                         if (Math.abs(rotVelocity.x) <= 0.0001) rotVelocity.x = 0;
                         if (Math.abs(rotVelocity.y) <= 0.0001) rotVelocity.y = 0;
-                    } else if (!isDragging) {
+                    } else if (!isDragging && !startupActive) {
                         globeGroup.rotation.y += dt * 0.035;
                     }
                 }
@@ -498,7 +681,7 @@
 
                 renderer.render(scene, camera);
 
-                const keepFast = isDragging ||
+                const keepFast = startupActive || isDragging ||
                     (!searchModeActive && (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001)) ||
                     Math.abs(targetScale - currentScale) > 0.0008 ||
                     Math.abs(targetPosY - currentPosY) > 0.04 ||
@@ -529,7 +712,7 @@
                 });
             }
 
-            wakeLoop(1400);
+            window.triggerStartupAnimation();
         });
     </script>
 </body>
