@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -196,9 +195,7 @@ fun HudClock(
           val maxTheta = asin((arcHalfSpan / arcRadius).coerceIn(-1f, 1f))
           val tickHalfSpan = (arcHalfSpan - 6.dp.toPx()).coerceAtLeast(1f)
           val tickMaxTheta = asin((tickHalfSpan / arcRadius).coerceIn(-1f, 1f))
-          val labelHalfSpan = (arcHalfSpan - 16.dp.toPx()).coerceAtLeast(1f)
-          val labelTheta = asin((labelHalfSpan / arcRadius).coerceIn(-1f, 1f))
-          val labelArcY = arcCenterY - arcRadius * cos(labelTheta)
+          val labelHalfSpan = (arcHalfSpan - 18.dp.toPx()).coerceAtLeast(1f)
 
           val tickU = FloatArray(60)
           val tickX = FloatArray(60)
@@ -221,15 +218,13 @@ fun HudClock(
           val arcStroke = Stroke(width = 0.9f.dp.toPx(), cap = StrokeCap.Round)
           val spineStroke = 0.8f.dp.toPx()
           val zenithStroke = 1.3f.dp.toPx()
-          val crossArm = 2.8f.dp.toPx()
-          val crossStroke = 1.1f.dp.toPx()
 
           val eyebrowText = "SYS.TIME // ORBITAL"
           val eyebrowWidth = eyebrowPaint.measureText(eyebrowText)
           val eyebrowX = cx - eyebrowWidth * 0.5f
-          val eyebrowBaseline = centerBaseline(eyebrowPaint, Y(10f))
-          val timeBaseline = centerBaseline(timePaint, Y(41f))
-          val wingTextY = (labelArcY + 14.dp.toPx()).coerceAtMost(size.height - 4.dp.toPx())
+          val eyebrowBaseline = centerBaseline(eyebrowPaint, Y(8f))
+          val timeBaseline = centerBaseline(timePaint, Y(34f))
+          val wingTextY = Y(65f)
           val wingBaseline = centerBaseline(wingPaint, wingTextY)
           val secBaseline = centerBaseline(secReadoutPaint, wingTextY)
           val secWidth = secReadoutPaint.measureText(":00")
@@ -285,11 +280,6 @@ fun HudClock(
                 drawCircle(Color.White.copy(alpha = 0.92f), 1.5f.dp.toPx(), Offset(tipRx, tipY))
               }
 
-              val crossP = phase(trace, 0.85f, 1.0f)
-              if (crossP > 0f) {
-                drawCross(cx - labelHalfSpan, labelArcY + 4f * uy, crossArm, crossStroke, CrimsonBright.copy(alpha = 0.72f * crossP))
-                drawCross(cx + labelHalfSpan, labelArcY + 4f * uy, crossArm, crossStroke, Color.White.copy(alpha = 0.45f * crossP))
-              }
             }
 
             // 2. Centered Eyebrow & Zenith Status Dot
@@ -298,7 +288,7 @@ fun HudClock(
               drawCircle(
                 color = (if (ticked % 2 == 0) CrimsonBright else CrimsonDim).copy(alpha = eyebrowP),
                 radius = 2.0f.dp.toPx(),
-                center = Offset(cx, Y(21f)),
+                center = Offset(cx, Y(18f)),
               )
             }
 
@@ -307,15 +297,15 @@ fun HudClock(
             // 3. Giant Frameless HH:MM Numerals & Central Crimson Pulse Spine
             if (timeP > 0f) {
               val timeRise = (1f - timeP) * 4f.dp.toPx()
-              clipRect(left = 0f, top = Y(16f), right = size.width, bottom = Y(16f) + Y(52f) * timeP) {
+              clipRect(left = 0f, top = Y(13f), right = size.width, bottom = Y(13f) + Y(48f) * timeP) {
                 canvas.drawText(face.digits, 0, 2, cx - 46f * ux, timeBaseline + timeRise, timePaint)
                 canvas.drawText(face.digits, 2, 2, cx + 46f * ux, timeBaseline + timeRise, timePaint)
               }
 
               drawLine(
                 color = OrbitalSlate.copy(alpha = 0.35f * timeP),
-                start = Offset(cx, Y(26f)),
-                end = Offset(cx, Y(55f)),
+                start = Offset(cx, Y(19f)),
+                end = Offset(cx, Y(48f)),
                 strokeWidth = spineStroke,
                 cap = StrokeCap.Round,
               )
@@ -325,12 +315,12 @@ fun HudClock(
               val pipSize = 3.2f.dp.toPx()
               drawRect(
                 color = colonColor,
-                topLeft = Offset(cx - pipSize * 0.5f, Y(34f)),
+                topLeft = Offset(cx - pipSize * 0.5f, Y(27f)),
                 size = Size(pipSize, pipSize),
               )
               drawRect(
                 color = colonColor,
-                topLeft = Offset(cx - pipSize * 0.5f, Y(45f)),
+                topLeft = Offset(cx - pipSize * 0.5f, Y(38f)),
                 size = Size(pipSize, pipSize),
               )
             }
@@ -380,11 +370,11 @@ fun HudClock(
               }
             }
 
-            // 5. Left & Right Wing Telemetry Below Arc Wings
+            // 5. Left & Right Upper Shoulder Telemetry Above the Orbital Arc
             if (wingP > 0f) {
-              drawDecrypt("${face.weekday} // ${face.date}", wingP, 19, wingPaint, cx - labelHalfSpan + 6f * ux, wingBaseline)
+              drawDecrypt("${face.weekday} // ${face.date}", wingP, 19, wingPaint, cx - labelHalfSpan, wingBaseline)
 
-              val rightWingX = cx + labelHalfSpan - 6f * ux
+              val rightWingX = cx + labelHalfSpan
               secChars[1] = face.digits[4]
               secChars[2] = face.digits[5]
               secReadoutPaint.color = if (ticked % 2 == 0) {
