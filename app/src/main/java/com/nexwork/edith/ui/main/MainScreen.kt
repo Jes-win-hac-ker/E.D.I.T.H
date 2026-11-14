@@ -5,8 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import kotlin.math.roundToInt
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -268,32 +271,46 @@ fun MainScreen(
       val name = state.browseGroup ?: return@remember 0
       groupApps(state.apps).firstOrNull { it.name == name }?.apps?.size ?: 0
     }
-    val bgZoom = animateFloatAsState(
-      targetValue = if (consoleOpen) 1.08f else 1.0f,
-      animationSpec = tween(500),
-      label = "bgZoom",
-    )
-    val consoleBlurEffect = remember {
-      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-        android.graphics.RenderEffect.createBlurEffect(
-          12f,
-          12f,
-          android.graphics.Shader.TileMode.CLAMP,
-        ).asComposeRenderEffect()
+    val backdropProgress = remember { Animatable(0f) }
+    LaunchedEffect(consoleOpen) {
+      if (consoleOpen) {
+        val showMs = ((1f - backdropProgress.value).coerceIn(0f, 1f) * 650f).roundToInt().coerceAtLeast(1)
+        backdropProgress.animateTo(1f, tween(showMs, easing = FastOutSlowInEasing))
       } else {
-        null
+        val hideMs = (backdropProgress.value.coerceIn(0f, 1f) * 500f).roundToInt().coerceAtLeast(1)
+        backdropProgress.animateTo(0f, tween(hideMs, easing = FastOutSlowInEasing))
+      }
+    }
+    val consoleBlurSteps = remember {
+      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+        List(12) { idx ->
+          val radius = (idx + 1).toFloat()
+          android.graphics.RenderEffect.createBlurEffect(
+            radius,
+            radius,
+            android.graphics.Shader.TileMode.CLAMP,
+          ).asComposeRenderEffect()
+        }
+      } else {
+        emptyList()
       }
     }
 
-    // Wireframe Earth backdrop with rack focus dolly zoom and blur
+    // Wireframe Earth backdrop with synchronized rack-focus dolly zoom and stepped blur
     Box(
       Modifier
         .fillMaxSize()
         .graphicsLayer {
-          val zoom = bgZoom.value
+          val p = backdropProgress.value
+          val zoom = 1f + 0.08f * p
           scaleX = zoom
           scaleY = zoom
-          renderEffect = if (consoleOpen) consoleBlurEffect else null
+          val blurStep = (p * consoleBlurSteps.size).roundToInt()
+          renderEffect = if (blurStep > 0 && consoleBlurSteps.isNotEmpty()) {
+            consoleBlurSteps[(blurStep - 1).coerceIn(0, consoleBlurSteps.lastIndex)]
+          } else {
+            null
+          }
         }
         .background(Color.Black)
     ) {

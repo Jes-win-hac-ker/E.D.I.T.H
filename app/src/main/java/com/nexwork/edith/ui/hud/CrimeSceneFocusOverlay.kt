@@ -13,6 +13,7 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import kotlin.math.roundToInt
 
 /**
  * Depth vignette: darkens the outer field so the deck sits in a pool of focus. No rings, no
@@ -27,9 +28,11 @@ fun CrimeSceneFocusOverlay(
 
   LaunchedEffect(isOpen) {
     if (isOpen) {
-      openAnim.animateTo(1f, tween(600, easing = LinearEasing))
+      val showMs = ((1f - openAnim.value).coerceIn(0f, 1f) * 650f).roundToInt().coerceAtLeast(1)
+      openAnim.animateTo(1f, tween(showMs, easing = LinearEasing))
     } else {
-      openAnim.animateTo(0f, tween(400, easing = LinearEasing))
+      val hideMs = (openAnim.value.coerceIn(0f, 1f) * 500f).roundToInt().coerceAtLeast(1)
+      openAnim.animateTo(0f, tween(hideMs, easing = LinearEasing))
     }
   }
 

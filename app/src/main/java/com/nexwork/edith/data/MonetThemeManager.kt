@@ -297,6 +297,15 @@ class MonetThemeManager(private val context: Context) {
 
   init {
     runCatching {
+      Shizuku.addBinderReceivedListenerSticky {
+        refreshShizukuState()
+        managerScope.launch { ensureOverlayPersistedIfEnabled() }
+      }
+      Shizuku.addBinderDeadListener {
+        refreshShizukuState()
+      }
+    }
+    runCatching {
       val receiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context?, intent: Intent?) {
           when (intent?.action) {
@@ -581,24 +590,37 @@ class MonetThemeManager(private val context: Context) {
   private suspend fun <T> withBoundMonetService(
     block: suspend (IShizukuMonetService) -> T,
   ): T? {
-    val serviceDeferred = CompletableDeferred<IShizukuMonetService>()
+    val binderAlive = try {
+      Shizuku.pingBinder()
+    } catch (_: Throwable) {
+      false
+    }
+    if (!binderAlive) return null
+
+    val serviceDeferred = CompletableDeferred<IShizukuMonetService?>()
     val serviceArgs = Shizuku.UserServiceArgs(
       ComponentName(context.packageName, ShizukuMonetService::class.java.name)
     )
       .daemon(false)
       .processNameSuffix("shizuku_monet")
       .debuggable(false)
-      .version(1)
+      .version(21)
 
     val connection = object : ServiceConnection {
       override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
         val svc = IShizukuMonetService.Stub.asInterface(binder)
         if (svc != null && binder != null && binder.pingBinder()) {
           serviceDeferred.complete(svc)
+        } else {
+          serviceDeferred.complete(null)
         }
       }
 
-      override fun onServiceDisconnected(name: ComponentName?) {}
+      override fun onServiceDisconnected(name: ComponentName?) {
+        if (!serviceDeferred.isCompleted) {
+          serviceDeferred.complete(null)
+        }
+      }
     }
 
     return try {

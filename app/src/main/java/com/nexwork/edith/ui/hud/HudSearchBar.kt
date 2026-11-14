@@ -164,9 +164,10 @@ fun HudSearchBar(
   LaunchedEffect(isOpen) {
     if (isOpen) {
       mounted = true
-      revealAnim.animateTo(1f, tween(1200, easing = LinearEasing))
+      val showMs = ((1f - revealAnim.value).coerceIn(0f, 1f) * 650f).roundToInt().coerceAtLeast(1)
+      revealAnim.animateTo(1f, tween(showMs, easing = LinearEasing))
     } else {
-      val hideMs = (revealAnim.value.coerceIn(0f, 1f) * 650f).roundToInt().coerceAtLeast(1)
+      val hideMs = (revealAnim.value.coerceIn(0f, 1f) * 500f).roundToInt().coerceAtLeast(1)
       revealAnim.animateTo(0f, tween(hideMs, easing = LinearEasing))
       mounted = false
     }

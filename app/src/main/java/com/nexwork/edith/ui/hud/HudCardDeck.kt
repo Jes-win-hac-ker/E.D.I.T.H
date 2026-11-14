@@ -222,13 +222,15 @@ fun HudCardDeck(
       mounted = true
       if (redeal) {
         revealAnim.snapTo(0f)
-        revealAnim.animateTo(1f, tween(480, easing = LinearEasing))
+        revealAnim.animateTo(1f, tween(650, easing = LinearEasing))
       } else if (revealAnim.value < 0.995f) {
-        revealAnim.animateTo(1f, tween(800, easing = LinearEasing))
+        val showMs = ((1f - revealAnim.value).coerceIn(0f, 1f) * 650f).roundToInt().coerceAtLeast(1)
+        revealAnim.animateTo(1f, tween(showMs, easing = LinearEasing))
       }
     } else {
       chargeAnim.snapTo(0f)
-      revealAnim.animateTo(0f, tween(800, easing = LinearEasing))
+      val hideMs = (revealAnim.value.coerceIn(0f, 1f) * 500f).roundToInt().coerceAtLeast(1)
+      revealAnim.animateTo(0f, tween(hideMs, easing = LinearEasing))
       mounted = false
       dealtLevel = null
     }

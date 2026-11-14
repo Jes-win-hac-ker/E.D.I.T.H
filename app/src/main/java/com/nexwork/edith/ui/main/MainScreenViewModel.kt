@@ -69,6 +69,7 @@ class MainScreenViewModel(
   private var otaJob: Job? = null
   private var monetThemeManager: MonetThemeManager? = null
   private var monetJob: Job? = null
+  private var monetEnsureJob: Job? = null
 
   init {
     refreshLauncherData()
@@ -189,6 +190,7 @@ class MainScreenViewModel(
   fun applyCrimsonMonet() {
     val manager = monetThemeManager ?: return
     if (monetJob?.isActive == true) return
+    monetEnsureJob?.cancel()
     monetJob = viewModelScope.launch {
       manager.applyCrimsonMonet()
     }
@@ -197,6 +199,7 @@ class MainScreenViewModel(
   fun resetMonetToDefault() {
     val manager = monetThemeManager ?: return
     if (monetJob?.isActive == true) return
+    monetEnsureJob?.cancel()
     monetJob = viewModelScope.launch {
       manager.resetToDefault()
     }
@@ -205,8 +208,8 @@ class MainScreenViewModel(
   fun ensureMonetPersisted() {
     val manager = monetThemeManager ?: return
     manager.refreshShizukuState()
-    if (monetJob?.isActive == true) return
-    monetJob = viewModelScope.launch {
+    if (monetJob?.isActive == true || monetEnsureJob?.isActive == true) return
+    monetEnsureJob = viewModelScope.launch {
       manager.ensureOverlayPersistedIfEnabled()
     }
   }

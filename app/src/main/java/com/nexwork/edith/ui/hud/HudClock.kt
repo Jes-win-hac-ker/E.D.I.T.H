@@ -102,12 +102,12 @@ fun HudClock(
   var mounted by remember { mutableStateOf(!isOpen) }
   LaunchedEffect(isOpen) {
     if (isOpen) {
-      val hideMs = (revealAnim.value.coerceIn(0f, 1f) * 650f).roundToInt().coerceAtLeast(1)
+      val hideMs = (revealAnim.value.coerceIn(0f, 1f) * 500f).roundToInt().coerceAtLeast(1)
       revealAnim.animateTo(0f, tween(hideMs, easing = LinearEasing))
       mounted = false
     } else {
       mounted = true
-      val showMs = ((1f - revealAnim.value).coerceIn(0f, 1f) * 900f).roundToInt().coerceAtLeast(180)
+      val showMs = ((1f - revealAnim.value).coerceIn(0f, 1f) * 650f).roundToInt().coerceAtLeast(1)
       revealAnim.animateTo(1f, tween(showMs, easing = LinearEasing))
     }
   }
