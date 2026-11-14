@@ -398,12 +398,15 @@ fun MainScreen(
       modifier = Modifier.fillMaxSize(),
     )
 
-    // The clock owns the top bay when awake on home, unwinding completely once idle or summoned.
+    // The clock crowns the globe horizon apex when awake on home, unwinding once idle or summoned.
     val topHudHidden = consoleOpen || state.isAmbientCentered
+    val clockTop = (maxHeight * 0.625f - 102.dp).coerceAtLeast(66.dp)
     HudClock(
       isOpen = topHudHidden,
       redrawSignal = clockRedrawSignal,
-      modifier = Modifier.align(Alignment.TopStart),
+      modifier = Modifier
+        .align(Alignment.TopStart)
+        .padding(top = clockTop),
     )
 
     HudOtaPill(

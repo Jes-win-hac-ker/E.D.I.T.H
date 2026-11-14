@@ -156,7 +156,7 @@ fun HudClock(
   Box(
     modifier
       .fillMaxWidth()
-      .padding(start = 18.dp, end = 18.dp, top = 66.dp)
+      .padding(horizontal = 18.dp)
       .height(114.dp)
       .graphicsLayer { alpha = phase(revealAnim.value, 0f, 0.18f) },
   ) {
@@ -171,8 +171,8 @@ fun HudClock(
 
           val cx = size.width * 0.5f
           val arcHalfSpan = size.width * 0.45f
-          val arcZenithY = Y(76f)
-          val arcWingY = Y(96f)
+          val arcZenithY = Y(74f)
+          val arcWingY = Y(98f)
           val sagitta = (arcWingY - arcZenithY).coerceAtLeast(4f)
           val arcRadius = (arcHalfSpan * arcHalfSpan + sagitta * sagitta) / (2f * sagitta)
           val arcCenterY = arcZenithY + arcRadius
