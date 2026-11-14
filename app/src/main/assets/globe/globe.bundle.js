@@ -1909,9 +1909,10 @@ function attachPulseShader(material, pulseUniforms, radarUniforms, isHaze = fals
                         // Kinetic point scale swell at the wavefront crest
                         pulseSettle += shape * 0.45 * ampNorm;
 
-                        // Subtle crimson wave tinting (#E01432) weighted toward coastlines
-                        float tintStrength = (aCoast > 0.5) ? 0.52 : 0.36;
-                        crimsonTint = max(crimsonTint, shape * ampNorm * tintStrength);
+                        // Stronger saturated crimson wave tinting (#DC143C / #E01432) weighted across a broader crest
+                        float crest = pow(shape, 0.65);
+                        float tintStrength = (aCoast > 0.5) ? 0.98 : 0.90;
+                        crimsonTint = max(crimsonTint, crest * ampNorm * tintStrength);
                         if (aCoast > 0.5) {
                             coastSilhouette += shape * 0.12 * ampNorm;
                         }
@@ -1922,10 +1923,10 @@ function attachPulseShader(material, pulseUniforms, radarUniforms, isHaze = fals
             if (distFrontier < 0.0 && uRadarAngle < 5.0) {
                 vColor = vec3(0.0);
             } else {
-                // Blend resting slate dots softly toward #E01432 crimson along the wave crest
+                // Blend resting slate dots strongly toward pre-exposure linear crimson (#DC143C) on crest
                 float radarEdge = (aCoast > 0.5 && uRadarAngle < 5.0) ? (1.0 - snapEased) * 0.18 : 0.0;
-                vec3 crimsonWaveColor = vec3(0.878, 0.078, 0.196);
-                vColor = mix(vColor, crimsonWaveColor, clamp(crimsonTint, 0.0, 0.55)) * (1.0 + radarEdge + coastSilhouette);
+                vec3 crimsonWaveColor = vec3(1.65, 0.04, 0.14);
+                vColor = mix(vColor * (1.0 + radarEdge), crimsonWaveColor * (1.0 + coastSilhouette), clamp(crimsonTint, 0.0, 0.98));
             }
             `
         );
