@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.nexwork.edith.theme.Crimson
 import com.nexwork.edith.theme.CrimsonBright
@@ -41,6 +42,7 @@ import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.math.tan
 import kotlinx.coroutines.delay
 
 private val OrbitalSlate = Color(0xFF64748B)
@@ -100,9 +102,13 @@ fun HudClock(
   isOpen: Boolean,
   modifier: Modifier = Modifier,
   redrawSignal: Int = 0,
+  screenWidth: Dp = 360.dp,
+  screenHeight: Dp = 800.dp,
 ) {
   val density = LocalDensity.current
   val crimsonMonetActive = rememberUpdatedState(LocalCrimsonMonetActive.current)
+  val screenWidthState = rememberUpdatedState(screenWidth)
+  val screenHeightState = rememberUpdatedState(screenHeight)
   val face = remember { ClockFace().apply { tick(System.currentTimeMillis()) } }
   val secondTick = remember { mutableIntStateOf(0) }
 
@@ -157,7 +163,7 @@ fun HudClock(
     modifier
       .fillMaxWidth()
       .padding(horizontal = 18.dp)
-      .height(114.dp)
+      .height(138.dp)
       .graphicsLayer { alpha = phase(revealAnim.value, 0f, 0.18f) },
   ) {
     Box(
@@ -165,18 +171,31 @@ fun HudClock(
         .fillMaxSize()
         .drawWithCache {
           val ux = size.width / 312f
-          val uy = size.height / 114f
+          val uy = size.height / 138f
           fun X(sx: Float) = sx * ux
           fun Y(sy: Float) = sy * uy
 
+          val fullW = screenWidthState.value.toPx().coerceAtLeast(size.width)
+          val fullH = screenHeightState.value.toPx().coerceAtLeast(size.height * 4f)
+          val aspect = fullW / fullH
+          val tanHalfFov = tan(Math.toRadians(22.5)).toFloat()
+          val halfH = 280f * tanHalfFov
+          val apexWorldY = -10f - 0.30f * halfH
+          val horizonScale = (aspect * 2.18f).coerceIn(0.86f, 1.22f)
+          val globeWorldRadius = 75f * horizonScale
+          val globeWorldY = apexWorldY - globeWorldRadius
+          // Camera at (0, 15, 280) looking at (0, -10, 0): forward = (0, -0.08893, -0.99604)
+          val dyCam = globeWorldY - 15f
+          val zCam = -dyCam * 0.08893f + 280f * 0.99604f
+          val globeScreenRadius = (globeWorldRadius / zCam) * (fullH * 0.5f / tanHalfFov)
+
           val cx = size.width * 0.5f
-          val arcHalfSpan = size.width * 0.45f
-          val arcZenithY = Y(74f)
-          val arcWingY = Y(98f)
-          val sagitta = (arcWingY - arcZenithY).coerceAtLeast(4f)
-          val arcRadius = (arcHalfSpan * arcHalfSpan + sagitta * sagitta) / (2f * sagitta)
+          val arcHalfSpan = (size.width * 0.44f).coerceAtMost(globeScreenRadius * 0.92f)
+          val arcZenithY = Y(72f)
+          val arcRadius = globeScreenRadius + 10.dp.toPx()
           val arcCenterY = arcZenithY + arcRadius
           val maxTheta = asin((arcHalfSpan / arcRadius).coerceIn(-1f, 1f))
+          val arcWingY = arcCenterY - arcRadius * cos(maxTheta)
 
           val tickU = FloatArray(60)
           val tickX = FloatArray(60)
@@ -207,8 +226,9 @@ fun HudClock(
           val eyebrowX = cx - eyebrowWidth * 0.5f
           val eyebrowBaseline = centerBaseline(eyebrowPaint, Y(10f))
           val timeBaseline = centerBaseline(timePaint, Y(41f))
-          val wingBaseline = centerBaseline(wingPaint, Y(105f))
-          val secBaseline = centerBaseline(secReadoutPaint, Y(105f))
+          val wingTextY = (arcWingY + 12.dp.toPx()).coerceAtMost(size.height - 4.dp.toPx())
+          val wingBaseline = centerBaseline(wingPaint, wingTextY)
+          val secBaseline = centerBaseline(secReadoutPaint, wingTextY)
           val secWidth = secReadoutPaint.measureText(":00")
 
           onDrawBehind {

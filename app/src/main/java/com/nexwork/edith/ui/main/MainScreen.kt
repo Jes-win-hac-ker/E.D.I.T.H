@@ -400,10 +400,13 @@ fun MainScreen(
 
     // The clock crowns the globe horizon apex when awake on home, unwinding once idle or summoned.
     val topHudHidden = consoleOpen || state.isAmbientCentered
-    val clockTop = (maxHeight * 0.625f - 102.dp).coerceAtLeast(66.dp)
+    val globeApexY = maxHeight * 0.64f
+    val clockTop = (globeApexY - 82.dp).coerceAtLeast(66.dp)
     HudClock(
       isOpen = topHudHidden,
       redrawSignal = clockRedrawSignal,
+      screenWidth = maxWidth,
+      screenHeight = maxHeight,
       modifier = Modifier
         .align(Alignment.TopStart)
         .padding(top = clockTop),
