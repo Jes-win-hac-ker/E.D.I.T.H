@@ -176,7 +176,8 @@ fun MainScreen(
   }
   LaunchedEffect(isGlobeAtHorizon, consoleOpen, state.isAmbientCentered) {
     if (!isGlobeAtHorizon && !consoleOpen && !state.isAmbientCentered) {
-      delay(1_400L)
+      // Deterministic 700ms Earth poseTransition plus headroom if WebView throttles.
+      delay(1_000L)
       globeController.markHorizonSettled()
     }
   }
