@@ -331,15 +331,18 @@ fun HudClock(
 
                 val isHead = (cell == face.second)
                 val isPassed = (cell <= face.second)
+                val isCardinal = (cell % 15 == 0)
                 val isMajor = (cell % 5 == 0)
 
                 val tickLen = when {
                   isHead -> 7.5f * uy
+                  isCardinal -> 5.8f * uy
                   isMajor -> 4.6f * uy
                   else -> 2.6f * uy
                 }
                 val tickStroke = when {
                   isHead -> 1.6f.dp.toPx()
+                  isCardinal -> 1.25f.dp.toPx()
                   isMajor -> 1.1f.dp.toPx()
                   else -> 0.8f.dp.toPx()
                 }
