@@ -203,6 +203,7 @@
             let userZoom = 1.0;
             let searchModeActive = false;
             let ambientCentered = false;
+            let pendingHorizonSettle = false;
             let targetRotY = 0;
             let targetRotX = 0;
             let userLat = 10.516;
@@ -335,13 +336,18 @@
                 const next = !!active;
                 if (searchModeActive === next) return;
                 searchModeActive = next;
+                if (searchModeActive) {
+                    pendingHorizonSettle = false;
+                }
                 applyTargetPresentation();
             };
 
             window.setAmbientCentered = function(centered) {
                 const next = !!centered;
                 if (ambientCentered === next) return;
+                const wasCentered = ambientCentered;
                 ambientCentered = next;
+                pendingHorizonSettle = wasCentered && !next && !searchModeActive;
                 if (!searchModeActive) {
                     applyTargetPresentation();
                 }
@@ -646,6 +652,14 @@
                 const lerpT = 1 - Math.pow(0.925, step60);
                 currentScale = THREE.MathUtils.lerp(currentScale, targetScale, lerpT);
                 currentPosY = THREE.MathUtils.lerp(currentPosY, targetPosY, lerpT);
+                if (pendingHorizonSettle && !ambientCentered && !searchModeActive) {
+                    if (Math.abs(targetPosY - currentPosY) <= 1.8 && Math.abs(targetScale - currentScale) <= 0.012) {
+                        pendingHorizonSettle = false;
+                        if (window.EdithGlobeBridge && typeof window.EdithGlobeBridge.onHorizonSettled === 'function') {
+                            window.EdithGlobeBridge.onHorizonSettled();
+                        }
+                    }
+                }
                 if (ambientCentered && Math.abs(1.0 - userZoom) > 0.001) {
                     userZoom = THREE.MathUtils.lerp(userZoom, 1.0, lerpT);
                     if (Math.abs(1.0 - userZoom) <= 0.001) userZoom = 1.0;

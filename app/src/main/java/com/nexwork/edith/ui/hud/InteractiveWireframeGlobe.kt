@@ -6,18 +6,24 @@ import android.graphics.Color
 import android.location.LocationManager
 import android.view.Choreographer
 import android.view.ViewGroup
+import android.webkit.JavascriptInterface
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.annotation.Keep
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Controller to drive live touch rotation, precision raycast waves, and location updates into the Three.js globe.
@@ -31,6 +37,8 @@ class GlobeController {
   private var flushScheduled = false
   private var lastSearchActive = false
   private var lastAmbientCentered = false
+  private val _isGlobeAtHorizon = MutableStateFlow(true)
+  val isGlobeAtHorizon: StateFlow<Boolean> = _isGlobeAtHorizon.asStateFlow()
 
   private val flushCallback = Choreographer.FrameCallback {
     flushScheduled = false
@@ -101,14 +109,25 @@ class GlobeController {
 
   fun setSearchActive(active: Boolean) {
     lastSearchActive = active
+    if (active) {
+      _isGlobeAtHorizon.value = true
+    }
     flushPending()
     webViewRef?.evaluateJavascript("if(window.setSearchActive) window.setSearchActive($active);", null)
   }
 
   fun setAmbientCentered(centered: Boolean) {
+    val wasCentered = lastAmbientCentered
     lastAmbientCentered = centered
+    if (centered || wasCentered) {
+      _isGlobeAtHorizon.value = false
+    }
     flushPending()
     webViewRef?.evaluateJavascript("if(window.setAmbientCentered) window.setAmbientCentered($centered);", null)
+  }
+
+  fun markHorizonSettled() {
+    _isGlobeAtHorizon.value = true
   }
 
   internal fun syncState(webView: WebView?) {
@@ -137,6 +156,14 @@ class GlobeController {
  * Firefox dashboard customization (Three.js, glowing Fibonacci landmass points,
  * country nodes, 3D SLERP great-circle arcs, and dynamic radar wave sweeps).
  */
+@Keep
+private class GlobeJsBridge(private val notifyHorizonSettled: () -> Unit) {
+  @JavascriptInterface
+  fun onHorizonSettled() {
+    notifyHorizonSettled()
+  }
+}
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun InteractiveWireframeGlobe(
@@ -144,6 +171,7 @@ fun InteractiveWireframeGlobe(
   controller: GlobeController? = null,
 ) {
   val context = LocalContext.current
+  val currentController = rememberUpdatedState(controller)
   val locationCoords = remember(context) {
     val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
     val lastKnown = try {
@@ -179,6 +207,10 @@ fun InteractiveWireframeGlobe(
         allowUniversalAccessFromFileURLs = true
         cacheMode = WebSettings.LOAD_DEFAULT
       }
+      addJavascriptInterface(
+        GlobeJsBridge { currentController.value?.markHorizonSettled() },
+        "EdithGlobeBridge",
+      )
       webViewClient = object : WebViewClient() {
         override fun onPageFinished(view: WebView?, url: String?) {
           val (lat, lon) = locationCoords
@@ -186,7 +218,7 @@ fun InteractiveWireframeGlobe(
             "if(window.setUserLocation) window.setUserLocation($lat, $lon);",
             null,
           )
-          controller?.syncState(view)
+          currentController.value?.syncState(view)
         }
       }
       loadUrl("file:///android_asset/globe/index.html")

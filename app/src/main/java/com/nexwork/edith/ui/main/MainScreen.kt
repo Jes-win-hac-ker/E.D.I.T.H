@@ -92,6 +92,7 @@ fun MainScreen(
   var lastAmbientWakeMs by remember { mutableLongStateOf(0L) }
   val isAmbientCenteredState = rememberUpdatedState(state.isAmbientCentered)
   val globeController = remember { GlobeController() }
+  val isGlobeAtHorizon by globeController.isGlobeAtHorizon.collectAsStateWithLifecycle()
   var isClockMounted by remember { mutableStateOf(true) }
   var clockRedrawSignal by remember { mutableIntStateOf(0) }
   var lastHomeWakeMs by remember { mutableLongStateOf(0L) }
@@ -171,6 +172,12 @@ fun MainScreen(
   val globeAmbientCentered = state.isAmbientCentered && !isClockMounted
   LaunchedEffect(globeAmbientCentered) {
     globeController.setAmbientCentered(globeAmbientCentered)
+  }
+  LaunchedEffect(isGlobeAtHorizon, state.isAmbientCentered) {
+    if (!isGlobeAtHorizon && !state.isAmbientCentered) {
+      delay(1_400L)
+      globeController.markHorizonSettled()
+    }
   }
   LaunchedEffect(state.isSpotlightSearchOpen, state.isAppBrowseOpen, state.searchQuery, state.browseGroup) {
     if (state.isSpotlightSearchOpen || state.isAppBrowseOpen) {
@@ -400,8 +407,8 @@ fun MainScreen(
       modifier = Modifier.fillMaxSize(),
     )
 
-    // The clock crowns the globe horizon apex when awake on home, unwinding once idle or summoned.
-    val topHudHidden = consoleOpen || state.isAmbientCentered
+    // The clock crowns the globe horizon apex once awake and landed at horizon, unwinding first when idle.
+    val topHudHidden = consoleOpen || state.isAmbientCentered || !isGlobeAtHorizon
     val globeApexY = maxHeight * 0.64f
     val clockTop = (globeApexY - 82.dp).coerceAtLeast(66.dp)
     HudClock(
