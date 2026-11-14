@@ -23,6 +23,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
@@ -35,8 +36,14 @@ import com.nexwork.edith.theme.CrimsonDim
 import com.nexwork.edith.theme.LocalCrimsonMonetActive
 import java.util.Calendar
 import java.util.TimeZone
+import kotlin.math.abs
+import kotlin.math.asin
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlinx.coroutines.delay
+
+private val OrbitalSlate = Color(0xFF64748B)
 
 private val Months = arrayOf(
   "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
@@ -139,215 +146,234 @@ fun HudClock(
 
   if (!mounted) return
 
-  val eyebrowPaint = remember(density) { monoPaint(density, 7.5f, 1.1f, Paint.Align.LEFT, 107) }
-  val timePaint = remember(density) { monoPaint(density, 26f, 1.4f, Paint.Align.LEFT, 255) }
-  val colonPaint = remember(density) { monoPaint(density, 26f, 0f, Paint.Align.LEFT, 255) }
-  val secPaint = remember(density) { monoPaint(density, 20f, 0.5f, Paint.Align.LEFT, 255) }
-  val captionPaint = remember(density) { monoPaint(density, 7.5f, 1.1f, Paint.Align.RIGHT, 107) }
-  val weekdayPaint = remember(density) { monoPaint(density, 11f, 0.8f, Paint.Align.CENTER, 140) }
-  val zonePaint = remember(density) { monoPaint(density, 7.5f, 1.1f, Paint.Align.CENTER, 107) }
+  val eyebrowPaint = remember(density) { monoPaint(density, 7.5f, 1.2f, Paint.Align.LEFT, 120) }
+  val timePaint = remember(density) { monoPaint(density, 46f, 0.8f, Paint.Align.CENTER, 255) }
+  val wingPaint = remember(density) { monoPaint(density, 8.5f, 1.0f, Paint.Align.LEFT, 185) }
+  val wingRightPaint = remember(density) { monoPaint(density, 8.5f, 1.0f, Paint.Align.RIGHT, 185) }
+  val secReadoutPaint = remember(density) { monoPaint(density, 10.5f, 0.8f, Paint.Align.RIGHT, 240) }
+  val secChars = remember { CharArray(3).apply { this[0] = ':' } }
 
   Box(
     modifier
       .fillMaxWidth()
-      .padding(horizontal = 18.dp, vertical = 84.dp)
-      .height(64.dp)
-      .graphicsLayer { alpha = phase(revealAnim.value, 0f, 0.22f) },
+      .padding(start = 18.dp, end = 18.dp, top = 66.dp)
+      .height(114.dp)
+      .graphicsLayer { alpha = phase(revealAnim.value, 0f, 0.18f) },
   ) {
     Box(
       Modifier
         .fillMaxSize()
         .drawWithCache {
           val ux = size.width / 312f
-          val uy = size.height / 64f
+          val uy = size.height / 114f
           fun X(sx: Float) = sx * ux
           fun Y(sy: Float) = sy * uy
-          val hair = 0.6f.dp.toPx()
 
-          val gridBitmap = cachedHudGridBitmap(size.width.roundToInt(), size.height.roundToInt(), 64f, hair)
-          val platePath = Path().apply {
-            moveTo(X(260f), Y(2f))
-            lineTo(size.width - 8f * ux, Y(2f))
-            lineTo(size.width, Y(2f) + 8f * uy)
-            lineTo(size.width, Y(62f))
-            lineTo(X(260f), Y(62f))
-            close()
+          val cx = size.width * 0.5f
+          val arcHalfSpan = size.width * 0.45f
+          val arcZenithY = Y(76f)
+          val arcWingY = Y(96f)
+          val sagitta = (arcWingY - arcZenithY).coerceAtLeast(4f)
+          val arcRadius = (arcHalfSpan * arcHalfSpan + sagitta * sagitta) / (2f * sagitta)
+          val arcCenterY = arcZenithY + arcRadius
+          val maxTheta = asin((arcHalfSpan / arcRadius).coerceIn(-1f, 1f))
+
+          val tickU = FloatArray(60)
+          val tickX = FloatArray(60)
+          val tickY = FloatArray(60)
+          val tickNx = FloatArray(60)
+          val tickNy = FloatArray(60)
+          for (i in 0 until 60) {
+            val u = -1f + 2f * (i / 59f)
+            val theta = u * maxTheta
+            val s = sin(theta)
+            val c = cos(theta)
+            tickU[i] = u
+            tickX[i] = cx + arcRadius * s
+            tickY[i] = arcCenterY - arcRadius * c
+            tickNx[i] = s
+            tickNy[i] = -c
           }
-          val bar = 1.2f.dp.toPx()
-          val plateStroke = Stroke(width = 0.8f.dp.toPx())
-          val perimeter = 2f * (size.width + size.height)
-          val cornerAt = floatArrayOf(
-            0f,
-            size.width / perimeter,
-            (size.width + size.height) / perimeter,
-            (2f * size.width + size.height) / perimeter,
-          )
 
-          val crossArm = 3f.dp.toPx()
-          val crossStroke = 1.2f.dp.toPx()
-          val stroke = 1f.dp.toPx()
+          val arcPath = Path()
+          val arcStroke = Stroke(width = 0.9f.dp.toPx(), cap = StrokeCap.Round)
+          val spineStroke = 0.8f.dp.toPx()
+          val zenithStroke = 1.3f.dp.toPx()
+          val crossArm = 2.8f.dp.toPx()
+          val crossStroke = 1.1f.dp.toPx()
 
-          val eyebrowBaseline = centerBaseline(eyebrowPaint, Y(17f))
-          val timeBaseline = centerBaseline(timePaint, Y(37f))
-          val colonBaseline = centerBaseline(colonPaint, Y(37f))
-          val secBaseline = centerBaseline(secPaint, Y(24f))
-          val captionBaseline = centerBaseline(captionPaint, Y(44f))
-          val weekdayBaseline = centerBaseline(weekdayPaint, Y(24f))
-          val zoneBaseline = centerBaseline(zonePaint, Y(40f))
-          val timeAdvance = timePaint.measureText("MM") - timePaint.measureText("M")
-          val secAdvance = secPaint.measureText("MM") - secPaint.measureText("M")
-          val timeLeft = X(33f)
-          val timeRight = timeLeft + timeAdvance * 5f
-          val secRight = X(248f)
-          val colonX = timeLeft + timeAdvance * 2f
-
-          val combLeft = X(33f)
-          val combRight = X(248f)
-          val combStep = (combRight - combLeft) / 60f
-          val combCell = combStep * 0.55f
-          val combTop = Y(56f)
-          val combH = 2.4f * uy
-          val combRise = 1.4f * uy
+          val eyebrowText = "SYS.TIME // ORBITAL"
+          val eyebrowWidth = eyebrowPaint.measureText(eyebrowText)
+          val eyebrowX = cx - eyebrowWidth * 0.5f
+          val eyebrowBaseline = centerBaseline(eyebrowPaint, Y(10f))
+          val timeBaseline = centerBaseline(timePaint, Y(41f))
+          val wingBaseline = centerBaseline(wingPaint, Y(105f))
+          val secBaseline = centerBaseline(secReadoutPaint, Y(105f))
+          val secWidth = secReadoutPaint.measureText(":00")
 
           onDrawBehind {
             val reveal = revealAnim.value
             val ticked = secondTick.intValue
             if (reveal <= 0.001f) return@onDrawBehind
 
-            val trace = phase(reveal, 0f, 0.6f)
-            val eyebrowP = phase(reveal, 0.34f, 0.68f)
-            val timeP = phase(reveal, 0.3f, 0.72f)
-            val secP = phase(reveal, 0.48f, 0.74f)
-            val captionP = phase(reveal, 0.56f, 0.78f)
-            val plateP = phase(reveal, 0.52f, 0.8f)
-            val crossP = phase(reveal, 0.42f, 0.6f)
-            val combP = phase(reveal, 0.62f, 1f)
+            val trace = phase(reveal, 0f, 0.62f)
+            val eyebrowP = phase(reveal, 0.18f, 0.58f)
+            val timeP = phase(reveal, 0.22f, 0.72f)
+            val wingP = phase(reveal, 0.38f, 0.78f)
+            val combP = phase(reveal, 0.50f, 1.00f)
+            val isMonet = crimsonMonetActive.value
 
-            fun drawPlateAndGrid() {
-              val isMonet = crimsonMonetActive.value
-              drawPath(platePath, if (isMonet) Color(0xFF0A0A0A) else Color(0xFF0F141E))
-              drawPath(platePath, if (isMonet) CrimsonBright.copy(alpha = 0.65f) else CrimsonDim, style = plateStroke)
-              gridBitmap?.let { drawImage(it) }
+            // 1. Curved Orbital Horizon Arc tracing outward from zenith center
+            if (trace > 0.01f) {
+              arcPath.reset()
+              val segments = 48
+              for (sIdx in 0..segments) {
+                val frac = sIdx / segments.toFloat()
+                val u = -trace + 2f * trace * frac
+                val theta = u * maxTheta
+                val px = cx + arcRadius * sin(theta)
+                val py = arcCenterY - arcRadius * cos(theta)
+                if (sIdx == 0) arcPath.moveTo(px, py) else arcPath.lineTo(px, py)
+              }
+              drawPath(
+                path = arcPath,
+                color = if (isMonet) Crimson.copy(alpha = 0.62f) else OrbitalSlate.copy(alpha = 0.52f),
+                style = arcStroke,
+              )
+
+              // Crimson zenith anchor mark
+              drawLine(
+                color = CrimsonBright.copy(alpha = 0.9f * phase(trace, 0f, 0.25f)),
+                start = Offset(cx, arcZenithY - 3f * uy),
+                end = Offset(cx, arcZenithY + 4f * uy),
+                strokeWidth = zenithStroke,
+                cap = StrokeCap.Round,
+              )
+
+              // Tracing laser heads on expanding left & right arc tips
+              if (trace in 0.02f..0.98f) {
+                val tipTheta = trace * maxTheta
+                val tipLx = cx - arcRadius * sin(tipTheta)
+                val tipRx = cx + arcRadius * sin(tipTheta)
+                val tipY = arcCenterY - arcRadius * cos(tipTheta)
+                drawCircle(CrimsonBright.copy(alpha = 0.35f), 4.2f.dp.toPx(), Offset(tipLx, tipY))
+                drawCircle(Color.White.copy(alpha = 0.92f), 1.5f.dp.toPx(), Offset(tipLx, tipY))
+                drawCircle(CrimsonBright.copy(alpha = 0.35f), 4.2f.dp.toPx(), Offset(tipRx, tipY))
+                drawCircle(Color.White.copy(alpha = 0.92f), 1.5f.dp.toPx(), Offset(tipRx, tipY))
+              }
+
+              val crossP = phase(trace, 0.85f, 1.0f)
+              if (crossP > 0f) {
+                drawCross(cx - arcHalfSpan, arcWingY + 4f * uy, crossArm, crossStroke, CrimsonBright.copy(alpha = 0.72f * crossP))
+                drawCross(cx + arcHalfSpan, arcWingY + 4f * uy, crossArm, crossStroke, Color.White.copy(alpha = 0.45f * crossP))
+              }
             }
 
-            val plateClip = phase(trace, 0f, cornerAt[1])
-            if (plateClip < 0.999f) {
-              clipRect(right = size.width * plateClip) { drawPlateAndGrid() }
-            } else {
-              drawPlateAndGrid()
-            }
-
-            if (crossP > 0f) {
-              drawCross(X(9.5f), Y(16.5f), crossArm, crossStroke, CrimsonBright.copy(0.7f * crossP))
-              drawCross(X(9.5f), Y(56.5f), crossArm, crossStroke, Color.White.copy(0.4f * crossP))
+            // 2. Centered Eyebrow & Zenith Status Dot
+            if (eyebrowP > 0f) {
+              drawDecrypt(eyebrowText, eyebrowP, 12, eyebrowPaint, eyebrowX, eyebrowBaseline)
+              drawCircle(
+                color = (if (ticked % 2 == 0) CrimsonBright else CrimsonDim).copy(alpha = eyebrowP),
+                radius = 2.0f.dp.toPx(),
+                center = Offset(cx, Y(21f)),
+              )
             }
 
             val canvas = drawContext.canvas.nativeCanvas
-            if (eyebrowP > 0f) {
-              drawDecrypt("SYS.TIME // T-00", eyebrowP, 12, eyebrowPaint, timeLeft, eyebrowBaseline)
-              if (eyebrowP > 0.5f) {
-                drawCircle(
-                  color = if (ticked % 2 == 0) CrimsonBright else CrimsonDim,
-                  radius = 2.2f * ux,
-                  center = Offset(X(18f), Y(16.5f)),
-                )
-              }
-            }
+
+            // 3. Giant Frameless HH:MM Numerals & Central Crimson Pulse Spine
             if (timeP > 0f) {
-              if (timeP < 0.999f) {
-                clipRect(right = timeLeft + (timeRight - timeLeft) * timeP) {
-                  canvas.drawText(face.digits, 0, 2, timeLeft, timeBaseline, timePaint)
-                  canvas.drawText(face.digits, 2, 2, timeLeft + timeAdvance * 3f, timeBaseline, timePaint)
-                }
-              } else {
-                canvas.drawText(face.digits, 0, 2, timeLeft, timeBaseline, timePaint)
-                canvas.drawText(face.digits, 2, 2, timeLeft + timeAdvance * 3f, timeBaseline, timePaint)
+              val timeRise = (1f - timeP) * 4f.dp.toPx()
+              clipRect(left = 0f, top = Y(16f), right = size.width, bottom = Y(16f) + Y(52f) * timeP) {
+                canvas.drawText(face.digits, 0, 2, cx - 46f * ux, timeBaseline + timeRise, timePaint)
+                canvas.drawText(face.digits, 2, 2, cx + 46f * ux, timeBaseline + timeRise, timePaint)
               }
-              if (timeP >= 1f) {
-                colonPaint.color = if (ticked % 2 == 0) {
-                  android.graphics.Color.argb(255, 255, 77, 94)
-                } else {
-                  android.graphics.Color.argb(70, 224, 20, 50)
-                }
-                canvas.drawText(":", colonX, colonBaseline, colonPaint)
-              }
+
+              drawLine(
+                color = OrbitalSlate.copy(alpha = 0.35f * timeP),
+                start = Offset(cx, Y(26f)),
+                end = Offset(cx, Y(55f)),
+                strokeWidth = spineStroke,
+                cap = StrokeCap.Round,
+              )
+              val colonColor = (if (ticked % 2 == 0) CrimsonBright else CrimsonDim).copy(
+                alpha = if (ticked % 2 == 0) timeP else 0.45f * timeP,
+              )
+              val pipSize = 3.2f.dp.toPx()
+              drawRect(
+                color = colonColor,
+                topLeft = Offset(cx - pipSize * 0.5f, Y(34f)),
+                size = Size(pipSize, pipSize),
+              )
+              drawRect(
+                color = colonColor,
+                topLeft = Offset(cx - pipSize * 0.5f, Y(45f)),
+                size = Size(pipSize, pipSize),
+              )
             }
-            if (secP > 0f) {
-              secPaint.color = if (ticked % 2 == 0) {
-                android.graphics.Color.argb((255 * secP).toInt(), 255, 255, 255)
-              } else {
-                android.graphics.Color.argb((220 * secP).toInt(), 203, 213, 225)
-              }
-              canvas.drawText(face.digits, 4, 2, secRight - secAdvance * 2f, secBaseline, secPaint)
-            }
-            if (captionP > 0f) {
-              captionPaint.alpha = (120 * captionP).toInt()
-              if (captionP < 0.999f) {
-                val width = captionPaint.measureText(face.date)
-                clipRect(right = secRight - width + width * captionP) {
-                  canvas.drawText(face.date, secRight, captionBaseline, captionPaint)
-                }
-              } else {
-                canvas.drawText(face.date, secRight, captionBaseline, captionPaint)
-              }
-            }
+
+            // 4. 60-Tick Radial Second Sweep Along the Orbital Arc
             if (combP > 0f) {
-              val head = face.second
-              val shown = combP * 60f
-              repeat(60) { cell ->
-                if (cell >= shown || cell > head) return@repeat
-                val isHead = (cell == head)
-                val major = cell % 5 == 0
-                val cellColor = if (isHead) CrimsonBright else Color.White.copy(alpha = (if (major) 0.55f else 0.30f) * combP)
-                val topPos = if (isHead) combTop - combRise * 1.4f else if (major) combTop - combRise else combTop
-                val height = if (isHead) combH + combRise * 1.4f else if (major) combH + combRise else combH
-                val cellW = if (isHead) combCell * 1.3f else combCell
+              for (cell in 0 until 60) {
+                if (abs(tickU[cell]) > combP) continue
+                val bx = tickX[cell]
+                val by = tickY[cell]
+                val nx = tickNx[cell]
+                val ny = tickNy[cell]
 
-                drawRect(
-                  color = cellColor,
-                  topLeft = Offset(combLeft + cell * combStep, topPos),
-                  size = Size(cellW, height),
+                val isHead = (cell == face.second)
+                val isPassed = (cell <= face.second)
+                val isMajor = (cell % 5 == 0)
+
+                val tickLen = when {
+                  isHead -> 7.5f * uy
+                  isMajor -> 4.6f * uy
+                  else -> 2.6f * uy
+                }
+                val tickStroke = when {
+                  isHead -> 1.6f.dp.toPx()
+                  isMajor -> 1.1f.dp.toPx()
+                  else -> 0.8f.dp.toPx()
+                }
+                val tickColor = when {
+                  isHead -> CrimsonBright.copy(alpha = combP)
+                  isPassed -> Color.White.copy(alpha = (if (isMajor) 0.65f else 0.34f) * combP)
+                  else -> OrbitalSlate.copy(alpha = (if (isMajor) 0.24f else 0.12f) * combP)
+                }
+
+                drawLine(
+                  color = tickColor,
+                  start = Offset(bx, by),
+                  end = Offset(bx + nx * tickLen, by + ny * tickLen),
+                  strokeWidth = tickStroke,
+                  cap = StrokeCap.Round,
                 )
+
                 if (isHead) {
-                  drawCircle(
-                    color = CrimsonBright.copy(alpha = 0.5f * combP),
-                    radius = combCell * 1.6f,
-                    center = Offset(combLeft + cell * combStep + cellW / 2f, topPos),
-                  )
+                  val orbCenter = Offset(bx + nx * (tickLen + 2.5f * uy), by + ny * (tickLen + 2.5f * uy))
+                  drawCircle(CrimsonBright.copy(alpha = 0.35f * combP), 4.0f.dp.toPx(), orbCenter)
+                  drawCircle(CrimsonBright.copy(alpha = combP), 2.1f.dp.toPx(), orbCenter)
                 }
               }
             }
-            if (plateP > 0f) {
-              weekdayPaint.alpha = (230 * plateP).toInt()
-              zonePaint.alpha = (140 * plateP).toInt()
-              canvas.drawText(face.weekday, X(286f), weekdayBaseline, weekdayPaint)
-              canvas.drawText(face.zone, X(286f), zoneBaseline, zonePaint)
+
+            // 5. Left & Right Wing Telemetry Below Arc Wings
+            if (wingP > 0f) {
+              drawDecrypt("${face.weekday} // ${face.date}", wingP, 19, wingPaint, cx - arcHalfSpan + 6f * ux, wingBaseline)
+
+              val rightWingX = cx + arcHalfSpan - 6f * ux
+              secChars[1] = face.digits[4]
+              secChars[2] = face.digits[5]
+              secReadoutPaint.color = if (ticked % 2 == 0) {
+                android.graphics.Color.argb((255 * wingP).toInt(), 255, 77, 94)
+              } else {
+                android.graphics.Color.argb((235 * wingP).toInt(), 248, 250, 252)
+              }
+              canvas.drawText(secChars, 0, 3, rightWingX, secBaseline, secReadoutPaint)
+
+              wingRightPaint.alpha = (165 * wingP).toInt()
+              canvas.drawText(face.zone, rightWingX - secWidth - 5f * ux, wingBaseline, wingRightPaint)
             }
-
-            val bracketTint = Color.White
-            drawHudCornerBrackets(
-              trace = trace,
-              cornerAt = cornerAt,
-              barPx = bar,
-              tint = bracketTint,
-              trTint = CrimsonBright.copy(alpha = 0.85f),
-              blTint = bracketTint,
-            )
-
-            drawRect(
-              color = CrimsonBright.copy(alpha = 0.75f * phase(reveal, 0.85f, 1f)),
-              topLeft = Offset(X(283.5f), Y(52f)),
-              size = Size(3f * ux, 3f * uy),
-            )
-
-            drawTracedRect(
-              width = size.width - stroke,
-              height = size.height - stroke,
-              progress = trace,
-              strokeWidth = stroke,
-              color = Color.White.copy(alpha = 0.85f),
-              head = if (trace in 0.02f..0.98f) 1f else 0f,
-            )
           }
         },
     )
