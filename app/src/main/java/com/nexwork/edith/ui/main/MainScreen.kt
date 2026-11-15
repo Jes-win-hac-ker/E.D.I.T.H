@@ -93,10 +93,12 @@ fun MainScreen(
   val isAmbientCenteredState = rememberUpdatedState(state.isAmbientCentered)
   val globeController = remember { GlobeController() }
   val isGlobeAtHorizon by globeController.isGlobeAtHorizon.collectAsStateWithLifecycle()
-  var isClockMounted by remember { mutableStateOf(true) }
+  val isStartupComplete by globeController.isStartupComplete.collectAsStateWithLifecycle()
+  var isClockMounted by remember { mutableStateOf(false) }
   var isOtaMounted by remember { mutableStateOf(false) }
   val isHudMounted = isClockMounted || isOtaMounted
   var clockRedrawSignal by remember { mutableIntStateOf(0) }
+  var lastHapticRedrawSignal by remember { mutableIntStateOf(0) }
   var lastHomeWakeMs by remember { mutableLongStateOf(0L) }
 
   val triggerHomeWake: () -> Unit = {
@@ -111,15 +113,6 @@ fun MainScreen(
       lastHomeWakeMs = now
       clockRedrawSignal++
       globeController.playStartupAnimation()
-    }
-  }
-
-  LaunchedEffect(clockRedrawSignal) {
-    if (clockRedrawSignal > 0) {
-      delay(1600L)
-      if (isResumed) {
-        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-      }
     }
   }
 
@@ -167,8 +160,34 @@ fun MainScreen(
     if (state.isSpotlightSearchOpen) viewModel.closeSpotlightSearch() else viewModel.closeAppBrowse()
   }
 
+  LaunchedEffect(clockRedrawSignal, isStartupComplete, consoleOpen, state.isAmbientCentered) {
+    if (clockRedrawSignal > lastHapticRedrawSignal) {
+      if (consoleOpen || state.isAmbientCentered) {
+        lastHapticRedrawSignal = clockRedrawSignal
+      } else if (isStartupComplete) {
+        delay(760L)
+        lastHapticRedrawSignal = clockRedrawSignal
+        if (isResumed) {
+          haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+      }
+    }
+  }
+
   // Sync search and idle-ambient center state to 3D globe after top HUD finishes dismissing
   val globeSearchActive = consoleOpen && !isHudMounted
+  LaunchedEffect(consoleOpen, isStartupComplete) {
+    if (consoleOpen && !isStartupComplete) {
+      globeController.finishStartupAnimation()
+    }
+  }
+  LaunchedEffect(isStartupComplete) {
+    if (!isStartupComplete) {
+      // Fallback watchdog matching the 2.10s Earth startup animation plus WebView headroom.
+      delay(2_600L)
+      globeController.markStartupComplete()
+    }
+  }
   LaunchedEffect(globeSearchActive) {
     globeController.setSearchActive(globeSearchActive)
   }
@@ -411,8 +430,8 @@ fun MainScreen(
       modifier = Modifier.fillMaxSize(),
     )
 
-    // The clock crowns the globe horizon apex once awake and landed at horizon, unwinding first when idle.
-    val topHudHidden = consoleOpen || state.isAmbientCentered || !isGlobeAtHorizon
+    // The clock crowns the globe horizon apex after startup assembly completes and the globe rests at horizon.
+    val topHudHidden = consoleOpen || state.isAmbientCentered || !isGlobeAtHorizon || !isStartupComplete
     val globeApexY = maxHeight * 0.64f
     val clockTop = (globeApexY - 82.dp).coerceAtLeast(66.dp)
     HudClock(

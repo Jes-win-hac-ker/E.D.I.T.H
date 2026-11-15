@@ -442,6 +442,41 @@
                 return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
             }
 
+            function notifyStartupComplete() {
+                if (window.EdithGlobeBridge && typeof window.EdithGlobeBridge.onStartupComplete === 'function') {
+                    window.EdithGlobeBridge.onStartupComplete();
+                }
+            }
+
+            function completeStartupVisuals() {
+                startupActive = false;
+                startupScaleMult = 1.0;
+                globeGroup.rotation.z = axialTiltRad;
+                equatorTracerLine.visible = false;
+                if (graticule && typeof graticule.setRibsProgress === 'function') {
+                    graticule.setRibsProgress(1, 1);
+                }
+                if (graticule && typeof graticule.setOccluderActive === 'function') {
+                    graticule.setOccluderActive(true, 1.0);
+                }
+                if (landmass && typeof landmass.setRadarSweep === 'function') {
+                    landmass.setRadarSweep(10.0);
+                }
+                if (solarTerminator && solarTerminator.group) solarTerminator.group.visible = true;
+                if (nodes && nodes.group) nodes.group.visible = true;
+                if (userLocation && userLocation.group) userLocation.group.visible = true;
+                wakeLoop(400);
+                notifyStartupComplete();
+            }
+
+            window.finishStartupAnimation = function() {
+                if (startupActive) {
+                    completeStartupVisuals();
+                } else {
+                    notifyStartupComplete();
+                }
+            };
+
             window.triggerStartupAnimation = function() {
                 const nowMs = performance.now();
                 if (nowMs - lastStartupTriggerMs < 400) return;
@@ -646,22 +681,7 @@
                     }
 
                     if (st >= 2.10) {
-                        startupActive = false;
-                        startupScaleMult = 1.0;
-                        globeGroup.rotation.z = axialTiltRad;
-                        equatorTracerLine.visible = false;
-                        if (graticule && typeof graticule.setRibsProgress === 'function') {
-                            graticule.setRibsProgress(1, 1);
-                        }
-                        if (graticule && typeof graticule.setOccluderActive === 'function') {
-                            graticule.setOccluderActive(true, 1.0);
-                        }
-                        if (landmass && typeof landmass.setRadarSweep === 'function') {
-                            landmass.setRadarSweep(10.0);
-                        }
-                        if (solarTerminator && solarTerminator.group) solarTerminator.group.visible = true;
-                        if (nodes && nodes.group) nodes.group.visible = true;
-                        if (userLocation && userLocation.group) userLocation.group.visible = true;
+                        completeStartupVisuals();
                     }
                 }
 

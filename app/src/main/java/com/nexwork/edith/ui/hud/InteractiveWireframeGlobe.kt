@@ -39,6 +39,8 @@ class GlobeController {
   private var lastAmbientCentered = false
   private val _isGlobeAtHorizon = MutableStateFlow(true)
   val isGlobeAtHorizon: StateFlow<Boolean> = _isGlobeAtHorizon.asStateFlow()
+  private val _isStartupComplete = MutableStateFlow(false)
+  val isStartupComplete: StateFlow<Boolean> = _isStartupComplete.asStateFlow()
 
   private val flushCallback = Choreographer.FrameCallback {
     flushScheduled = false
@@ -99,8 +101,19 @@ class GlobeController {
   }
 
   fun playStartupAnimation() {
+    _isStartupComplete.value = false
     flushPending()
     webViewRef?.evaluateJavascript("if(window.triggerStartupAnimation) window.triggerStartupAnimation();", null)
+  }
+
+  fun markStartupComplete() {
+    _isStartupComplete.value = true
+  }
+
+  fun finishStartupAnimation() {
+    _isStartupComplete.value = true
+    flushPending()
+    webViewRef?.evaluateJavascript("if(window.finishStartupAnimation) window.finishStartupAnimation();", null)
   }
 
   fun setLocation(lat: Double, lon: Double) {
@@ -158,10 +171,18 @@ class GlobeController {
  * country nodes, 3D SLERP great-circle arcs, and dynamic radar wave sweeps).
  */
 @Keep
-private class GlobeJsBridge(private val notifyHorizonSettled: () -> Unit) {
+private class GlobeJsBridge(
+  private val notifyHorizonSettled: () -> Unit,
+  private val notifyStartupComplete: () -> Unit,
+) {
   @JavascriptInterface
   fun onHorizonSettled() {
     notifyHorizonSettled()
+  }
+
+  @JavascriptInterface
+  fun onStartupComplete() {
+    notifyStartupComplete()
   }
 }
 
@@ -209,7 +230,10 @@ fun InteractiveWireframeGlobe(
         cacheMode = WebSettings.LOAD_DEFAULT
       }
       addJavascriptInterface(
-        GlobeJsBridge { currentController.value?.markHorizonSettled() },
+        GlobeJsBridge(
+          notifyHorizonSettled = { currentController.value?.markHorizonSettled() },
+          notifyStartupComplete = { currentController.value?.markStartupComplete() },
+        ),
         "EdithGlobeBridge",
       )
       webViewClient = object : WebViewClient() {
