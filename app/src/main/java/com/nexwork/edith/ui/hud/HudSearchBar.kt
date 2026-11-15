@@ -93,6 +93,8 @@ fun HudSearchBar(
   scopeLabel: String? = null,
   scopeCount: Int = 0,
   onExitGroup: () -> Unit = {},
+  commandHint: String? = null,
+  onSubmitQuery: () -> Boolean = { false },
 ) {
   val density = LocalDensity.current
   val haptic = LocalHapticFeedback.current
@@ -126,17 +128,22 @@ fun HudSearchBar(
 
   val trimmedQuery = shownQuery.trim()
   val typing = trimmedQuery.isNotEmpty()
-  val isCommand = trimmedQuery.startsWith("!")
+  val parsedCommand = remember(trimmedQuery) { parseHudCommand(trimmedQuery) }
+  val isMath = parsedCommand is HudCommand.MathResult
+  val isCommand = parsedCommand != null || trimmedQuery.startsWith("!") || trimmedQuery.startsWith("?")
   val isLaunchLocked = isCommand || (typing && matchingApps.size == 1)
   val scope = scopeLabel?.takeIf { !typing }
 
   val eyebrowText = when {
+    !commandHint.isNullOrBlank() && typing -> commandHint.uppercase()
+    parsedCommand is HudCommand.MathResult -> "CALC // = ${parsedCommand.formatted}"
     isCommand -> "CMD // EXECUTE"
     typing -> "SYS.QUERY // ACTIVE"
     scope != null -> "◀ $scope"
     else -> "SYS.QUERY // STANDBY"
   }
   val countLabel = when {
+    isMath -> "CALC"
     isCommand -> "CMD"
     typing -> "${matchingApps.size} ${if (matchingApps.size == 1) "HIT" else "HITS"}"
     scope != null -> "$scopeCount APPS"
@@ -445,6 +452,9 @@ fun HudSearchBar(
             onSearch = {
               keyboardController?.hide()
               focusManager.clearFocus()
+              if (onSubmitQuery()) {
+                return@KeyboardActions
+              }
               val top = matchingApps.firstOrNull()
               if (top != null) {
                 onLaunchApp(top)

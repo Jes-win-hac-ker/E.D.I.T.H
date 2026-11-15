@@ -26,6 +26,7 @@ import android.view.WindowManager
 import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.model.AppFootprint
 import com.nexwork.edith.model.DeviceTelemetry
+import java.net.URLEncoder
 import java.util.Collections
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
@@ -142,6 +143,7 @@ class LauncherRepository(private var context: Context? = null) {
                 isPinned = isPinned,
                 usageTimeMillis14d = usage14d,
                 isEssentialQuickAccess = isEssential,
+                androidCategory = info.applicationInfo.category,
               )
             )
           }
@@ -171,6 +173,7 @@ class LauncherRepository(private var context: Context? = null) {
                 isPinned = isPinned,
                 usageTimeMillis14d = usage14d,
                 isEssentialQuickAccess = isEssential,
+                androidCategory = ri.activityInfo.applicationInfo.category,
               )
             )
           }
@@ -392,6 +395,11 @@ class LauncherRepository(private var context: Context? = null) {
     return footprint
   }
 
+  /** Clears cached storage measurements for [packageName], or all packages when null. */
+  fun invalidateFootprintCache(packageName: String? = null) {
+    if (packageName == null) footprintCache.clear() else footprintCache.remove(packageName)
+  }
+
   /**
    * Hands the system an explicit empty transition: no zoom-from-icon, no cross-fade, and no exit
    * animation on our own window either. The app appears at full size on the frame it is ready.
@@ -541,8 +549,78 @@ class LauncherRepository(private var context: Context? = null) {
     }
   }
 
+  /** Opens the Android internet connectivity panel, falling back to Wi-Fi settings. */
+  fun openWifiSettings() {
+    startSettingsAction(
+      primaryAction = Settings.Panel.ACTION_INTERNET_CONNECTIVITY,
+      fallbackAction = Settings.ACTION_WIFI_SETTINGS,
+    )
+  }
+
+  /** Opens system Bluetooth settings. */
+  fun openBluetoothSettings() {
+    startSettingsAction(Settings.ACTION_BLUETOOTH_SETTINGS)
+  }
+
+  /** Opens system Display settings. */
+  fun openDisplaySettings() {
+    startSettingsAction(Settings.ACTION_DISPLAY_SETTINGS)
+  }
+
+  /** Opens Do Not Disturb priority settings, falling back to Sound settings. */
+  fun openDndSettings() {
+    startSettingsAction(
+      primaryAction = Settings.ACTION_ZEN_MODE_PRIORITY_SETTINGS,
+      fallbackAction = Settings.ACTION_SOUND_SETTINGS,
+    )
+  }
+
+  /** Opens [query] directly when it is a web URL, or launches a Google search in the browser. */
+  fun openWebSearch(query: String) {
+    val ctx = context ?: return
+    val targetUrl = resolveWebSearchUrl(query) ?: return
+    runCatching {
+      val intent =
+        Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+      ctx.startActivity(intent)
+    }
+  }
+
+  private fun startSettingsAction(primaryAction: String, fallbackAction: String? = null) {
+    val ctx = context ?: return
+    runCatching {
+      ctx.startActivity(Intent(primaryAction).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+    }.onFailure {
+      if (fallbackAction != null) {
+        runCatching {
+          ctx.startActivity(Intent(fallbackAction).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+        }
+      }
+    }
+  }
+
   companion object {
     private const val KEY_PINNED_PACKAGES = "pinned_packages"
+
+    private val BARE_DOMAIN_REGEX =
+      Regex("""^[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)+([/?#].*)?$""")
+
+    internal fun resolveWebSearchUrl(query: String): String? {
+      val trimmed = query.trim()
+      if (trimmed.isEmpty()) return null
+      return when {
+        trimmed.startsWith("https://", ignoreCase = true) ->
+          "https://" + trimmed.substring(8)
+        trimmed.startsWith("http://", ignoreCase = true) ->
+          "http://" + trimmed.substring(7)
+        !trimmed.contains(' ') && BARE_DOMAIN_REGEX.matches(trimmed) ->
+          "https://$trimmed"
+        else ->
+          "https://www.google.com/search?q=${URLEncoder.encode(trimmed, "UTF-8")}"
+      }
+    }
 
     private val DEFAULT_ESSENTIAL_KEYWORDS =
       setOf(

@@ -65,6 +65,7 @@ fun HudAppCard(
   modifier: Modifier = Modifier,
   usageFraction: Float = 0.24f,
   footprint: AppFootprint? = null,
+  unreadCount: Int = 0,
   reveal: () -> Float = { 1f },
   charge: () -> Float = { 0f },
   focused: () -> Boolean = { true },
@@ -76,7 +77,7 @@ fun HudAppCard(
   val ghost = remember(app.label) { app.label.filter { it.isLetterOrDigit() }.take(2).uppercase() }
   val fineText = remember(footprint) { footprint?.let(::footprintLine) }
   val label = remember(app.label) { app.label.uppercase() }
-  val meta = remember(app) { cardMetaLine(app) }
+  val meta = remember(app, unreadCount) { cardMetaLine(app, unreadCount) }
   val peakValue = remember(usageFraction) { (usageFraction.coerceIn(0.04f, 1f) * 100f).roundToInt() }
   val iconRise = remember(density) { with(density) { 2.dp.toPx() } }
   val leaderBrush = remember {
@@ -459,7 +460,7 @@ private fun footprintParts(footprint: AppFootprint): List<FootprintPart> =
     FootprintPart(footprint.cacheBytes, 0.18f, "CCH"),
   ).filter { it.bytes > 0L }
 
-private fun cardMetaLine(app: AppEntry): String {
+private fun cardMetaLine(app: AppEntry, unreadCount: Int = 0): String {
   val minutes = app.usageTimeMillis14d / 60_000L
   val hours = minutes / 60L
   val usage = if (hours > 0) "${hours}H ${minutes % 60}M" else "${minutes}M"
@@ -468,7 +469,7 @@ private fun cardMetaLine(app: AppEntry): String {
     app.isPinned -> "PINNED"
     else -> "14D ROTATION"
   }
-  return "$tag  ·  $usage"
+  return if (unreadCount > 0) "$tag  ·  $usage  ·  $unreadCount MSG" else "$tag  ·  $usage"
 }
 
 private fun footprintLine(footprint: AppFootprint): String =

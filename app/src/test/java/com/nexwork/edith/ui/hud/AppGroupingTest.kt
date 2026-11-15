@@ -1,5 +1,6 @@
 package com.nexwork.edith.ui.hud
 
+import android.content.pm.ApplicationInfo
 import com.nexwork.edith.model.AppEntry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -13,6 +14,7 @@ class AppGroupingTest {
     usage: Long = 0L,
     system: Boolean = false,
     moto: Boolean = false,
+    androidCategory: Int = ApplicationInfo.CATEGORY_UNDEFINED,
   ) = AppEntry(
     label = label,
     packageName = pkg,
@@ -20,6 +22,7 @@ class AppGroupingTest {
     isSystemApp = system,
     isMotoApp = moto,
     usageTimeMillis14d = usage,
+    androidCategory = androidCategory,
   )
 
   @Test
@@ -85,5 +88,72 @@ class AppGroupingTest {
   @Test
   fun emptyInputYieldsNoGroups() {
     assertTrue(groupApps(emptyList()).isEmpty())
+  }
+
+  @Test
+  fun androidCategoryMapsUnknownPackagesBeforeFallback() {
+    assertEquals(
+      "GAMES",
+      categoryOf(app("Puzzle", "com.example.puzzle", androidCategory = ApplicationInfo.CATEGORY_GAME)),
+    )
+    assertEquals(
+      "MEDIA",
+      categoryOf(app("Tune", "com.example.tune", androidCategory = ApplicationInfo.CATEGORY_AUDIO)),
+    )
+    assertEquals(
+      "MEDIA",
+      categoryOf(app("Stream", "com.example.stream", androidCategory = ApplicationInfo.CATEGORY_VIDEO)),
+    )
+    assertEquals(
+      "MEDIA",
+      categoryOf(app("Canvas", "com.example.canvas", androidCategory = ApplicationInfo.CATEGORY_IMAGE)),
+    )
+    assertEquals(
+      "SOCIAL",
+      categoryOf(app("Circle", "com.example.circle", androidCategory = ApplicationInfo.CATEGORY_SOCIAL)),
+    )
+    assertEquals(
+      "TOOLS",
+      categoryOf(app("Atlas", "com.example.atlas", androidCategory = ApplicationInfo.CATEGORY_MAPS)),
+    )
+    assertEquals(
+      "TOOLS",
+      categoryOf(app("Notes", "com.example.notes", androidCategory = ApplicationInfo.CATEGORY_PRODUCTIVITY)),
+    )
+    assertEquals(
+      "TOOLS",
+      categoryOf(app("Daily", "com.example.daily", androidCategory = ApplicationInfo.CATEGORY_NEWS)),
+    )
+    assertEquals(
+      "TOOLS",
+      categoryOf(app("Reader", "com.example.reader", androidCategory = ApplicationInfo.CATEGORY_ACCESSIBILITY)),
+    )
+  }
+
+  @Test
+  fun knownCategoriesAndKeywordsOverrideAndroidCategory() {
+    assertEquals(
+      "COMMS",
+      categoryOf(app("WhatsApp", "com.whatsapp", androidCategory = ApplicationInfo.CATEGORY_SOCIAL)),
+    )
+    assertEquals(
+      "FINANCE",
+      categoryOf(app("Ledger", "com.example.bankapp", androidCategory = ApplicationInfo.CATEGORY_PRODUCTIVITY)),
+    )
+  }
+
+  @Test
+  fun androidCategoryOverridesSystemFlagWhenDeclared() {
+    assertEquals(
+      "MEDIA",
+      categoryOf(
+        app(
+          "System Player",
+          "com.vendor.proprietary",
+          system = true,
+          androidCategory = ApplicationInfo.CATEGORY_AUDIO,
+        )
+      ),
+    )
   }
 }

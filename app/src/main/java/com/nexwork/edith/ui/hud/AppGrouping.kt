@@ -1,5 +1,6 @@
 package com.nexwork.edith.ui.hud
 
+import android.content.pm.ApplicationInfo
 import com.nexwork.edith.model.AppEntry
 
 /** One category bucket of the browse deck: a name and the apps filed under it. */
@@ -25,7 +26,10 @@ fun groupApps(apps: List<AppEntry>): List<AppGroup> {
     )
 }
 
-/** Category name for one app. Package identity wins over keywords, keywords over app type. */
+/**
+ * Category name for one app. Package identity wins over keywords, keywords over Android
+ * `ApplicationInfo.category`, and Android category over SYSTEM/OTHER fallback.
+ */
 internal fun categoryOf(app: AppEntry): String {
   val pkg = app.packageName.lowercase()
   KnownCategories[pkg]?.let { return it }
@@ -36,9 +40,22 @@ internal fun categoryOf(app: AppEntry): String {
     SocialHints.any { it in pkg } -> "SOCIAL"
     MediaHints.any { it in pkg } -> "MEDIA"
     ToolHints.any { it in pkg } -> "TOOLS"
-    app.isMotoApp || app.isSystemApp -> "SYSTEM"
-    else -> "OTHER"
+    else -> mapAndroidCategory(app.androidCategory)
+      ?: if (app.isMotoApp || app.isSystemApp) "SYSTEM" else "OTHER"
   }
+}
+
+private fun mapAndroidCategory(androidCategory: Int): String? = when (androidCategory) {
+  ApplicationInfo.CATEGORY_GAME -> "GAMES"
+  ApplicationInfo.CATEGORY_AUDIO,
+  ApplicationInfo.CATEGORY_VIDEO,
+  ApplicationInfo.CATEGORY_IMAGE -> "MEDIA"
+  ApplicationInfo.CATEGORY_SOCIAL -> "SOCIAL"
+  ApplicationInfo.CATEGORY_MAPS,
+  ApplicationInfo.CATEGORY_PRODUCTIVITY,
+  ApplicationInfo.CATEGORY_NEWS,
+  ApplicationInfo.CATEGORY_ACCESSIBILITY -> "TOOLS"
+  else -> null
 }
 
 private val KnownCategories: Map<String, String> = buildMap {

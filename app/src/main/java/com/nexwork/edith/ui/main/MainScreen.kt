@@ -2,9 +2,12 @@ package com.nexwork.edith.ui.main
 
 import android.app.KeyguardManager
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
@@ -145,6 +148,36 @@ fun MainScreen(
     ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
     onDispose {
       runCatching { context.unregisterReceiver(receiver) }
+    }
+  }
+  DisposableEffect(context) {
+    val packageReceiver = object : BroadcastReceiver() {
+      override fun onReceive(ctx: Context?, intent: Intent?) {
+        val pkg = intent?.data?.schemeSpecificPart
+        viewModel.refreshLauncherData(invalidatedPackage = pkg)
+      }
+    }
+    val packageFilter = IntentFilter().apply {
+      addAction(Intent.ACTION_PACKAGE_ADDED)
+      addAction(Intent.ACTION_PACKAGE_REMOVED)
+      addAction(Intent.ACTION_PACKAGE_CHANGED)
+      addAction(Intent.ACTION_PACKAGE_REPLACED)
+      addDataScheme("package")
+    }
+    ContextCompat.registerReceiver(context, packageReceiver, packageFilter, ContextCompat.RECEIVER_EXPORTED)
+    onDispose {
+      runCatching { context.unregisterReceiver(packageReceiver) }
+    }
+  }
+  LaunchedEffect(context, viewModel) {
+    viewModel.feedbackEvents.collect { event ->
+      event.clipboardText?.let { value ->
+        runCatching {
+          val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+          cm?.setPrimaryClip(ClipData.newPlainText("E.D.I.T.H", value))
+        }
+      }
+      Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
     }
   }
 
@@ -479,6 +512,8 @@ fun MainScreen(
       idleDismiss = false,
       scopeLabel = state.browseGroup,
       scopeCount = browseGroupCount,
+      commandHint = state.commandHint,
+      onSubmitQuery = viewModel::submitConsoleQuery,
       onExitGroup = viewModel::closeAppGroup,
       modifier = Modifier.align(Alignment.TopStart),
     )
@@ -531,6 +566,7 @@ fun MainScreen(
       footprintOf = viewModel::footprintOf,
       onOpenAppInfo = viewModel::openAppInfo,
       onUninstallApp = viewModel::requestUninstall,
+      notificationCounts = state.notificationCounts,
       onActionArmedChange = { armed ->
         isCardActionArmed = armed
         if (armed) {

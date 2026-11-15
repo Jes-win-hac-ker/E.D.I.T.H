@@ -1,5 +1,6 @@
 package com.nexwork.edith.model
 
+import android.content.pm.ApplicationInfo
 import android.graphics.drawable.Drawable
 
 data class AppEntry(
@@ -12,6 +13,7 @@ data class AppEntry(
   val isPinned: Boolean = false,
   val usageTimeMillis14d: Long = 0L,
   val isEssentialQuickAccess: Boolean = false,
+  val androidCategory: Int = ApplicationInfo.CATEGORY_UNDEFINED,
 ) {
   val initial: Char
     get() = label.trim().firstOrNull()?.uppercaseChar()?.takeIf { it in 'A'..'Z' } ?: '#'
@@ -31,6 +33,15 @@ enum class WeatherCondition(val label: String, val tempCelsius: Int) {  PARTLY_C
   OVERCAST("Overcast", 22),
   LIGHT_RAIN("Light Rain", 20),
 }
+
+/** Live weather reading resolved from IP geolocation + Open-Meteo or restored from cache. */
+data class LiveWeather(
+  val label: String,
+  val tempCelsius: Int,
+  val city: String = "",
+  val fetchedAtMs: Long = 0L,
+  val isLive: Boolean = false,
+)
 
 data class DeviceTelemetry(
   val batteryPct: Int = 84,

@@ -3,10 +3,13 @@ package com.nexwork.edith.ui.main
 import com.nexwork.edith.data.DataRepository
 import junit.framework.TestCase.assertEquals
 import junit.framework.TestCase.assertFalse
+import junit.framework.TestCase.assertNull
 import junit.framework.TestCase.assertTrue
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
@@ -196,6 +199,63 @@ class MainScreenViewModelTest {
     assertFalse(viewModel.launcherState.value.isAppBrowseOpen)
     assertEquals(null, viewModel.launcherState.value.browseGroup)
     assertFalse(viewModel.launcherState.value.isAmbientCentered)
+  }
+
+  @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+  @Test
+  fun consoleMath_previewsInHintAndEmitsClipboardFeedback() = runTest {
+    val viewModel = MainScreenViewModel(FakeMyModelRepository())
+    val events = mutableListOf<HudFeedbackEvent>()
+    val collectJob = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+      viewModel.feedbackEvents.collect { events.add(it) }
+    }
+
+    viewModel.openSpotlightSearch()
+    viewModel.onSearchQueryChange("12+8")
+    assertEquals("= 20", viewModel.launcherState.value.commandHint)
+
+    val handled = viewModel.submitConsoleQuery()
+    assertTrue(handled)
+    assertEquals("= 20  ·  COPIED", viewModel.launcherState.value.commandHint)
+    assertEquals(1, events.size)
+    assertEquals("20", events[0].clipboardText)
+
+    viewModel.closeSpotlightSearch()
+    assertNull(viewModel.launcherState.value.commandHint)
+    collectJob.cancel()
+  }
+
+  @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+  @Test
+  fun consoleCommands_previewTelemetryPinAndHelp() = runTest {
+    val viewModel = MainScreenViewModel(FakeMyModelRepository())
+    val events = mutableListOf<HudFeedbackEvent>()
+    val collectJob = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+      viewModel.feedbackEvents.collect { events.add(it) }
+    }
+
+    viewModel.openSpotlightSearch()
+    viewModel.onSearchQueryChange("!bat")
+    assertTrue(viewModel.launcherState.value.commandHint!!.startsWith("BAT "))
+    assertTrue(viewModel.submitConsoleQuery())
+
+    viewModel.onSearchQueryChange("!ram")
+    assertTrue(viewModel.launcherState.value.commandHint!!.startsWith("RAM "))
+    assertTrue(viewModel.submitConsoleQuery())
+
+    viewModel.onSearchQueryChange("!pin da")
+    assertEquals("PIN  ·  DOLBY ATMOS", viewModel.launcherState.value.commandHint)
+
+    viewModel.onSearchQueryChange("!pin ch")
+    assertEquals("UNPIN  ·  CHROME", viewModel.launcherState.value.commandHint)
+
+    viewModel.onSearchQueryChange("!help")
+    assertTrue(viewModel.launcherState.value.commandHint!!.contains("!PIN"))
+    assertTrue(viewModel.submitConsoleQuery())
+
+    assertEquals(3, events.size)
+    assertTrue(events.last().message.contains("!pin"))
+    collectJob.cancel()
   }
 }
 

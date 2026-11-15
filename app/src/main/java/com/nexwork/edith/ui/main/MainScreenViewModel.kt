@@ -1,5 +1,8 @@
 package com.nexwork.edith.ui.main
 
+import android.app.NotificationManager
+import android.content.Context
+import android.provider.Settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nexwork.edith.data.DataRepository
@@ -9,19 +12,28 @@ import com.nexwork.edith.data.MonetThemeManager
 import com.nexwork.edith.data.MonetUiState
 import com.nexwork.edith.data.OtaState
 import com.nexwork.edith.data.OtaUpdater
+import com.nexwork.edith.data.ShizukuControlManager
+import com.nexwork.edith.data.WeatherRepository
 import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.model.AppFootprint
 import com.nexwork.edith.model.DeviceTelemetry
+import com.nexwork.edith.model.LiveWeather
 import com.nexwork.edith.model.WeatherCondition
 import com.nexwork.edith.notifications.EdithNotificationListener
+import com.nexwork.edith.ui.hud.HudCommand
+import com.nexwork.edith.ui.hud.filterMatchingApps
+import com.nexwork.edith.ui.hud.parseHudCommand
 import com.nexwork.edith.ui.hud.warmAppIcons
 import com.nexwork.edith.ui.main.MainScreenUiState.Success
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
@@ -29,6 +41,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+data class HudFeedbackEvent(
+  val message: String,
+  val clipboardText: String? = null,
+)
 
 data class LauncherHomeState(
   val apps: List<AppEntry> = LauncherRepository.sampleApps(),
@@ -43,6 +60,9 @@ data class LauncherHomeState(
   val use24Hour: Boolean = false,
   val isDefaultLauncher: Boolean = true,
   val weather: WeatherCondition = WeatherCondition.PARTLY_CLOUDY,
+  val liveWeather: LiveWeather? = null,
+  val commandHint: String? = null,
+  val shizukuControlAuthorized: Boolean = false,
   val telemetry: DeviceTelemetry = DeviceTelemetry(),
   val notificationCounts: Map<String, Int> = emptyMap(),
   val hasNotificationAccess: Boolean = false,
@@ -53,6 +73,7 @@ data class LauncherHomeState(
 class MainScreenViewModel(
   dataRepository: DataRepository = DefaultDataRepository(),
   private val launcherRepository: LauncherRepository = LauncherRepository(null),
+  private val weatherRepository: WeatherRepository = WeatherRepository(null),
 ) : ViewModel() {
 
   val uiState: StateFlow<MainScreenUiState> =
@@ -64,12 +85,19 @@ class MainScreenViewModel(
   private val _launcherState = MutableStateFlow(LauncherHomeState())
   val launcherState: StateFlow<LauncherHomeState> = _launcherState.asStateFlow()
 
+  private val _feedbackEvents = MutableSharedFlow<HudFeedbackEvent>(extraBufferCapacity = 8)
+  val feedbackEvents: SharedFlow<HudFeedbackEvent> = _feedbackEvents.asSharedFlow()
+
+  private var appContext: Context? = null
   private var telemetryObservationJob: Job? = null
   private var otaUpdater: OtaUpdater? = null
   private var otaJob: Job? = null
   private var monetThemeManager: MonetThemeManager? = null
   private var monetJob: Job? = null
   private var monetEnsureJob: Job? = null
+  private var shizukuControlManager: ShizukuControlManager? = null
+  private var weatherJob: Job? = null
+  private var controlJob: Job? = null
 
   init {
     refreshLauncherData()
@@ -84,14 +112,23 @@ class MainScreenViewModel(
   }
 
   fun initContext(context: android.content.Context) {
+    val appCtx = context.applicationContext
+    appContext = appCtx
     launcherRepository.setContext(context)
+    weatherRepository.setContext(appCtx)
+    weatherRepository.getCachedWeather()?.let { cached ->
+      _launcherState.update { it.copy(liveWeather = cached) }
+    }
+    if (shizukuControlManager == null) {
+      shizukuControlManager = ShizukuControlManager(appCtx)
+    }
     if (otaUpdater == null) {
-      otaUpdater = OtaUpdater(context.applicationContext).also {
+      otaUpdater = OtaUpdater(appCtx).also {
         it.requestShizukuPermissionUpfront()
       }
     }
     if (monetThemeManager == null) {
-      val manager = MonetThemeManager(context.applicationContext)
+      val manager = MonetThemeManager(appCtx)
       monetThemeManager = manager
       viewModelScope.launch {
         manager.uiState.collect { monetState ->
@@ -103,7 +140,39 @@ class MainScreenViewModel(
     }
     refreshLauncherData()
     startTelemetryObservation()
+    refreshWeather(forceRefresh = false)
+    syncShizukuControlAndPermissions()
     checkForUpdates(force = false)
+  }
+
+  private fun syncShizukuControlAndPermissions() {
+    val manager = shizukuControlManager ?: return
+    viewModelScope.launch {
+      val authorized = manager.isShizukuAuthorized()
+      _launcherState.update { it.copy(shizukuControlAuthorized = authorized) }
+      if (authorized &&
+        (!launcherRepository.hasUsageStatsPermission() || !launcherRepository.hasNotificationListenerAccess())
+      ) {
+        manager.autoGrantPermissionsIfReady()
+        refreshLauncherData()
+      }
+    }
+  }
+
+  fun refreshWeather(forceRefresh: Boolean = false, announceResult: Boolean = false) {
+    weatherJob?.cancel()
+    weatherJob = viewModelScope.launch {
+      val live = weatherRepository.fetchWeather(forceRefresh = forceRefresh)
+      if (live != null) {
+        _launcherState.update { it.copy(liveWeather = live) }
+      }
+      if (announceResult) {
+        val current = live ?: _launcherState.value.liveWeather
+        val text = formatWeatherFeedback(current)
+        _launcherState.update { it.copy(commandHint = formatWeatherHint(current)) }
+        _feedbackEvents.tryEmit(HudFeedbackEvent(text))
+      }
+    }
   }
 
   private fun startTelemetryObservation() {
@@ -115,7 +184,15 @@ class MainScreenViewModel(
     }
   }
 
-  fun refreshLauncherData() {
+  fun refreshLauncherData(
+    invalidatedPackage: String? = null,
+    clearAllFootprints: Boolean = false,
+  ) {
+    if (clearAllFootprints) {
+      launcherRepository.invalidateFootprintCache(null)
+    } else if (invalidatedPackage != null) {
+      launcherRepository.invalidateFootprintCache(invalidatedPackage)
+    }
     viewModelScope.launch {
       val apps = launcherRepository.loadInstalledApps()
       val telemetry = launcherRepository.readTelemetry()
@@ -163,28 +240,306 @@ class MainScreenViewModel(
 
   fun onSearchQueryChange(query: String) {
     val trimmed = query.trim()
-    if (trimmed.equals("!ota", ignoreCase = true)) {
-      closeSpotlightSearch()
-      checkForUpdates(force = true)
-      return
-    }
-    if (trimmed.startsWith("!ota https://", ignoreCase = true)) {
-      val customUrl = trimmed.substringAfter(" ").trim()
-      otaUpdater?.setFeedUrl(customUrl)
-      closeSpotlightSearch()
-      checkForUpdates(force = true)
-      return
-    }
     if (trimmed.equals("!monet", ignoreCase = true) || trimmed.equals("!theme", ignoreCase = true)) {
       monetThemeManager?.refreshShizukuState()
     } else if (trimmed.equals("!monet apply", ignoreCase = true)) {
       applyCrimsonMonet()
     } else if (trimmed.equals("!monet reset", ignoreCase = true) || trimmed.equals("!reset", ignoreCase = true)) {
       resetMonetToDefault()
+    } else if (trimmed.equals("!wx", ignoreCase = true) || trimmed.equals("!weather", ignoreCase = true)) {
+      refreshWeather(forceRefresh = false)
     }
+    val parsed = parseHudCommand(query)
+    val hint = parsed?.let { previewCommandHint(it) }
     _launcherState.update { state ->
-      state.copy(searchQuery = query)
+      state.copy(searchQuery = query, commandHint = hint)
     }
+  }
+
+  fun submitConsoleQuery(): Boolean {
+    val query = _launcherState.value.searchQuery.trim()
+    if (query.isEmpty()) return false
+    val command = parseHudCommand(query)
+    if (command == null) {
+      val matches = filterMatchingApps(query, _launcherState.value.apps)
+      if (matches.isNotEmpty()) return false
+      launcherRepository.openWebSearch(query)
+      _feedbackEvents.tryEmit(HudFeedbackEvent("Searching web for \"$query\""))
+      closeSpotlightSearch()
+      return true
+    }
+
+    when (command) {
+      is HudCommand.MathResult -> {
+        _launcherState.update { it.copy(commandHint = "= ${command.formatted}  ·  COPIED") }
+        _feedbackEvents.tryEmit(
+          HudFeedbackEvent(
+            message = "${command.expression} = ${command.formatted} (copied)",
+            clipboardText = command.formatted,
+          )
+        )
+      }
+      is HudCommand.OtaCheck -> {
+        command.customFeedUrl?.let { otaUpdater?.setFeedUrl(it) }
+        closeSpotlightSearch()
+        checkForUpdates(force = true)
+      }
+      HudCommand.MonetStatus -> {
+        monetThemeManager?.refreshShizukuState()
+      }
+      HudCommand.MonetApply -> {
+        applyCrimsonMonet()
+      }
+      HudCommand.MonetReset -> {
+        resetMonetToDefault()
+      }
+      HudCommand.GrantUsage -> {
+        handleShizukuOrSettingsPermission(
+          alreadyGranted = launcherRepository.hasUsageStatsPermission(),
+          alreadyMessage = "Usage access already granted",
+          shizukuGrantedMessage = "Usage access granted via Shizuku",
+          openFallback = launcherRepository::openUsageAccessSettings,
+        )
+      }
+      HudCommand.GrantNotifications -> {
+        handleShizukuOrSettingsPermission(
+          alreadyGranted = launcherRepository.hasNotificationListenerAccess(),
+          alreadyMessage = "Notification access already granted",
+          shizukuGrantedMessage = "Notification access granted via Shizuku",
+          openFallback = launcherRepository::openNotificationListenerSettings,
+        )
+      }
+      HudCommand.OpenHomeChooser -> {
+        launcherRepository.openHomeSettings()
+        closeSpotlightSearch()
+      }
+      is HudCommand.PinToggle -> {
+        val target = if (command.query.isBlank()) {
+          null
+        } else {
+          filterMatchingApps(command.query, _launcherState.value.apps).firstOrNull()
+        }
+        if (target == null) {
+          _feedbackEvents.tryEmit(HudFeedbackEvent("No app matched \"${command.query}\""))
+        } else {
+          val willPin = !target.isPinned
+          togglePinApp(target)
+          _feedbackEvents.tryEmit(
+            HudFeedbackEvent("${if (willPin) "Pinned" else "Unpinned"} ${target.label}")
+          )
+          closeSpotlightSearch()
+        }
+      }
+      HudCommand.ShowBattery -> {
+        val t = _launcherState.value.telemetry
+        val msg = "Battery ${t.batteryPct}% (${if (t.isCharging) "charging" else "discharging"})"
+        _launcherState.update { it.copy(commandHint = msg.uppercase()) }
+        _feedbackEvents.tryEmit(HudFeedbackEvent(msg))
+      }
+      HudCommand.ShowSystem -> {
+        val t = _launcherState.value.telemetry
+        val msg = "RAM ${t.availableRamGb}/${t.totalRamGb} GB · ${t.refreshRateHz} Hz"
+        _launcherState.update { it.copy(commandHint = msg.uppercase()) }
+        _feedbackEvents.tryEmit(HudFeedbackEvent(msg))
+      }
+      HudCommand.ShowWeather -> {
+        refreshWeather(forceRefresh = true, announceResult = true)
+      }
+      HudCommand.ToggleWifi -> {
+        executeShizukuToggle(
+          currentState = readWifiEnabled() == true,
+          shizukuAction = { manager, next -> manager.toggleWifi(next) },
+          settingsFallback = launcherRepository::openWifiSettings,
+        )
+      }
+      HudCommand.ToggleBluetooth -> {
+        executeShizukuToggle(
+          currentState = readBluetoothEnabled() == true,
+          shizukuAction = { manager, next -> manager.toggleBluetooth(next) },
+          settingsFallback = launcherRepository::openBluetoothSettings,
+        )
+      }
+      HudCommand.ToggleDnd -> {
+        executeShizukuToggle(
+          currentState = readDndEnabled() == true,
+          shizukuAction = { manager, next -> manager.toggleDnd(next) },
+          settingsFallback = launcherRepository::openDndSettings,
+        )
+      }
+      is HudCommand.SetRefreshRate -> {
+        val manager = shizukuControlManager
+        controlJob?.cancel()
+        controlJob = viewModelScope.launch {
+          if (manager != null && manager.isShizukuAuthorized()) {
+            val res = manager.setRefreshRate(command.hz ?: 120)
+            _launcherState.update { it.copy(shizukuControlAuthorized = true) }
+            _feedbackEvents.tryEmit(HudFeedbackEvent(res.formatStatusMessage()))
+            if (res.ok) {
+              delay(200L)
+              val refreshed = launcherRepository.readTelemetry()
+              _launcherState.update { it.copy(telemetry = refreshed) }
+            } else {
+              launcherRepository.openDisplaySettings()
+            }
+          } else {
+            launcherRepository.openDisplaySettings()
+          }
+          closeSpotlightSearch()
+        }
+      }
+      HudCommand.ShowHelp -> {
+        _launcherState.update {
+          it.copy(commandHint = "!PIN !WIFI !BT !DND !HZ !BAT !RAM !WX !OTA")
+        }
+        _feedbackEvents.tryEmit(
+          HudFeedbackEvent("Commands: !pin !wifi !bt !dnd !refresh !bat !ram !wx !ota !monet !usage !notif !home ?web =math")
+        )
+      }
+      is HudCommand.WebSearch -> {
+        if (command.query.isBlank()) {
+          _feedbackEvents.tryEmit(HudFeedbackEvent("Type a search query after ? or !g"))
+        } else {
+          launcherRepository.openWebSearch(command.query)
+          closeSpotlightSearch()
+        }
+      }
+      is HudCommand.Unknown -> {
+        _feedbackEvents.tryEmit(HudFeedbackEvent("Unknown command: ${command.raw}. Type !help"))
+      }
+    }
+    return true
+  }
+
+  private fun handleShizukuOrSettingsPermission(
+    alreadyGranted: Boolean,
+    alreadyMessage: String,
+    shizukuGrantedMessage: String,
+    openFallback: () -> Unit,
+  ) {
+    if (alreadyGranted) {
+      _feedbackEvents.tryEmit(HudFeedbackEvent(alreadyMessage))
+      closeSpotlightSearch()
+      return
+    }
+    val manager = shizukuControlManager
+    controlJob?.cancel()
+    controlJob = viewModelScope.launch {
+      if (manager != null && manager.isShizukuAuthorized()) {
+        val grantResult = manager.autoGrantPermissionsIfReady()
+        refreshLauncherData()
+        if (grantResult.ok) {
+          _feedbackEvents.tryEmit(HudFeedbackEvent(shizukuGrantedMessage))
+          closeSpotlightSearch()
+          return@launch
+        }
+      }
+      openFallback()
+      closeSpotlightSearch()
+    }
+  }
+
+  private fun executeShizukuToggle(
+    currentState: Boolean,
+    shizukuAction: suspend (ShizukuControlManager, Boolean) -> com.nexwork.edith.data.ShizukuActionResult,
+    settingsFallback: () -> Unit,
+  ) {
+    val manager = shizukuControlManager
+    controlJob?.cancel()
+    controlJob = viewModelScope.launch {
+      if (manager != null && manager.isShizukuAuthorized()) {
+        val result = shizukuAction(manager, !currentState)
+        _launcherState.update { it.copy(shizukuControlAuthorized = true) }
+        _feedbackEvents.tryEmit(HudFeedbackEvent(result.formatStatusMessage()))
+        if (!result.ok) {
+          settingsFallback()
+        }
+      } else {
+        settingsFallback()
+      }
+      closeSpotlightSearch()
+    }
+  }
+
+  private fun readWifiEnabled(): Boolean? {
+    val ctx = appContext ?: return null
+    return runCatching {
+      Settings.Global.getInt(ctx.contentResolver, "wifi_on", 0) == 1
+    }.getOrNull()
+  }
+
+  private fun readBluetoothEnabled(): Boolean? {
+    val ctx = appContext ?: return null
+    return runCatching {
+      Settings.Global.getInt(ctx.contentResolver, "bluetooth_on", 0) == 1
+    }.getOrNull()
+  }
+
+  private fun readDndEnabled(): Boolean? {
+    val ctx = appContext ?: return null
+    return runCatching {
+      val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+      nm != null && nm.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL
+    }.getOrNull()
+  }
+
+  private fun previewCommandHint(command: HudCommand): String {
+    val state = _launcherState.value
+    val shizukuReady = state.shizukuControlAuthorized
+    return when (command) {
+      is HudCommand.MathResult -> "= ${command.formatted}"
+      is HudCommand.OtaCheck ->
+        if (command.customFeedUrl != null) "OTA  ·  CUSTOM FEED" else "OTA  ·  CHECK RELEASE"
+      HudCommand.MonetStatus -> "MONET  ·  STATUS"
+      HudCommand.MonetApply -> "MONET  ·  APPLY CRIMSON"
+      HudCommand.MonetReset -> "MONET  ·  RESET DEFAULT"
+      HudCommand.GrantUsage ->
+        if (state.telemetry.hasUsageAccess) "USAGE  ·  GRANTED" else "USAGE  ·  GRANT ACCESS"
+      HudCommand.GrantNotifications ->
+        if (state.hasNotificationAccess) "NOTIF  ·  GRANTED" else "NOTIF  ·  GRANT ACCESS"
+      HudCommand.OpenHomeChooser -> "HOME  ·  DEFAULT APP"
+      is HudCommand.PinToggle -> {
+        if (command.query.isBlank()) {
+          "PIN  ·  TYPE APP NAME"
+        } else {
+          val match = filterMatchingApps(command.query, state.apps).firstOrNull()
+          if (match == null) {
+            "PIN  ·  NO MATCH"
+          } else {
+            "${if (match.isPinned) "UNPIN" else "PIN"}  ·  ${match.label.uppercase()}"
+          }
+        }
+      }
+      HudCommand.ShowBattery -> {
+        val t = state.telemetry
+        "BAT ${t.batteryPct}%${if (t.isCharging) " CHARGING" else ""}"
+      }
+      HudCommand.ShowSystem -> {
+        val t = state.telemetry
+        "RAM ${t.availableRamGb}/${t.totalRamGb}G  ·  ${t.refreshRateHz}HZ"
+      }
+      HudCommand.ShowWeather -> formatWeatherHint(state.liveWeather)
+      HudCommand.ToggleWifi -> if (shizukuReady) "WIFI  ·  TOGGLE" else "WIFI  ·  SETTINGS"
+      HudCommand.ToggleBluetooth -> if (shizukuReady) "BT  ·  TOGGLE" else "BT  ·  SETTINGS"
+      HudCommand.ToggleDnd -> if (shizukuReady) "DND  ·  TOGGLE" else "DND  ·  SETTINGS"
+      is HudCommand.SetRefreshRate ->
+        if (command.hz == null) "HZ  ·  AUTO" else "HZ  ·  ${command.hz}HZ"
+      HudCommand.ShowHelp -> "!PIN !WIFI !BT !DND !BAT !RAM !WX !OTA"
+      is HudCommand.WebSearch ->
+        if (command.query.isBlank()) "WEB  ·  TYPE QUERY" else "WEB  ·  ${command.query.take(18).uppercase()}"
+      is HudCommand.Unknown -> "UNKNOWN CMD  ·  !HELP"
+    }
+  }
+
+  private fun formatWeatherHint(weather: LiveWeather?): String {
+    if (weather == null) return "WX  ·  FETCHING..."
+    val cityTag = weather.city.takeIf { it.isNotBlank() }?.let { " · ${it.uppercase()}" } ?: ""
+    return "${weather.tempCelsius}C  ·  ${weather.label.uppercase()}$cityTag"
+  }
+
+  private fun formatWeatherFeedback(weather: LiveWeather?): String {
+    if (weather == null) return "Weather unavailable right now"
+    val place = if (weather.city.isNotBlank()) " in ${weather.city}" else ""
+    return "${weather.tempCelsius}°C · ${weather.label}$place"
   }
 
   fun applyCrimsonMonet() {
@@ -418,6 +773,7 @@ class MainScreenViewModel(
         isAppBrowseOpen = false,
         browseGroup = null,
         searchQuery = "",
+        commandHint = null,
         isAmbientCentered = false,
       )
     }
@@ -429,6 +785,7 @@ class MainScreenViewModel(
         isSpotlightSearchOpen = false,
         browseGroup = null,
         searchQuery = "",
+        commandHint = null,
         isAmbientCentered = false,
       )
     }
@@ -441,6 +798,7 @@ class MainScreenViewModel(
         isSpotlightSearchOpen = false,
         browseGroup = null,
         searchQuery = "",
+        commandHint = null,
         isAmbientCentered = false,
       )
     }
@@ -450,12 +808,14 @@ class MainScreenViewModel(
   fun openAppGroup(name: String) {
     _launcherState.update { state ->
       if (!state.isAppBrowseOpen) state
-      else state.copy(browseGroup = name, searchQuery = "")
+      else state.copy(browseGroup = name, searchQuery = "", commandHint = null)
     }
   }
 
   fun closeAppGroup() {
-    _launcherState.update { state -> state.copy(browseGroup = null, searchQuery = "") }
+    _launcherState.update { state ->
+      state.copy(browseGroup = null, searchQuery = "", commandHint = null)
+    }
   }
 
   fun closeAppBrowse() {
@@ -464,6 +824,7 @@ class MainScreenViewModel(
         isAppBrowseOpen = false,
         browseGroup = null,
         searchQuery = "",
+        commandHint = null,
         isAmbientCentered = false,
       )
     }
@@ -493,6 +854,7 @@ class MainScreenViewModel(
         isAppBrowseOpen = false,
         browseGroup = null,
         searchQuery = "",
+        commandHint = null,
         isAmbientCentered = true,
       )
     }
