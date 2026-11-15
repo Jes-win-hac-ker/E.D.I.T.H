@@ -11,9 +11,6 @@ import kotlin.math.pow
 sealed interface HudCommand {
   data class MathResult(val expression: String, val formatted: String) : HudCommand
   data class OtaCheck(val customFeedUrl: String? = null) : HudCommand
-  data object MonetStatus : HudCommand
-  data object MonetApply : HudCommand
-  data object MonetReset : HudCommand
   data object GrantUsage : HudCommand
   data object GrantNotifications : HudCommand
   data object OpenHomeChooser : HudCommand
@@ -68,14 +65,6 @@ private fun parseBangCommand(trimmed: String): HudCommand {
   return when (verb) {
     "help", "cmd" -> if (arg.isEmpty()) HudCommand.ShowHelp else HudCommand.Unknown(trimmed)
     "ota" -> HudCommand.OtaCheck(arg.takeIf { it.isNotEmpty() })
-    "monet" -> when (arg.lowercase()) {
-      "", "status" -> HudCommand.MonetStatus
-      "apply" -> HudCommand.MonetApply
-      "reset" -> HudCommand.MonetReset
-      else -> HudCommand.Unknown(trimmed)
-    }
-    "theme" -> if (arg.isEmpty()) HudCommand.MonetStatus else HudCommand.Unknown(trimmed)
-    "reset" -> if (arg.isEmpty()) HudCommand.MonetReset else HudCommand.Unknown(trimmed)
     "usage" -> if (arg.isEmpty()) HudCommand.GrantUsage else HudCommand.Unknown(trimmed)
     "notif" -> if (arg.isEmpty()) HudCommand.GrantNotifications else HudCommand.Unknown(trimmed)
     "home" -> if (arg.isEmpty()) HudCommand.OpenHomeChooser else HudCommand.Unknown(trimmed)

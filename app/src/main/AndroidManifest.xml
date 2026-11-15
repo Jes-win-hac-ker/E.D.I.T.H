@@ -80,12 +80,10 @@
         <receiver
             android:name=".data.MonetCommandReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-                <action android:name="com.nexwork.edith.action.MONET_APPLY" />
-                <action android:name="com.nexwork.edith.action.MONET_RESET" />
             </intent-filter>
         </receiver>
     </application>

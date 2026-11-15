@@ -62,11 +62,11 @@ class CommandEngineTest {
       HudCommand.OtaCheck("https://example.com/feed.json"),
       parseHudCommand("!OTA https://example.com/feed.json"),
     )
-    assertEquals(HudCommand.MonetStatus, parseHudCommand("!monet"))
-    assertEquals(HudCommand.MonetStatus, parseHudCommand("!theme"))
-    assertEquals(HudCommand.MonetApply, parseHudCommand("!Monet Apply"))
-    assertEquals(HudCommand.MonetReset, parseHudCommand("!monet reset"))
-    assertEquals(HudCommand.MonetReset, parseHudCommand("!reset"))
+    assertEquals(HudCommand.Unknown("!monet"), parseHudCommand("!monet"))
+    assertEquals(HudCommand.Unknown("!theme"), parseHudCommand("!theme"))
+    assertEquals(HudCommand.Unknown("!Monet Apply"), parseHudCommand("!Monet Apply"))
+    assertEquals(HudCommand.Unknown("!monet reset"), parseHudCommand("!monet reset"))
+    assertEquals(HudCommand.Unknown("!reset"), parseHudCommand("!reset"))
     assertEquals(HudCommand.GrantUsage, parseHudCommand("!usage"))
     assertEquals(HudCommand.GrantNotifications, parseHudCommand("!notif"))
     assertEquals(HudCommand.OpenHomeChooser, parseHudCommand("!home"))

@@ -240,13 +240,7 @@ class MainScreenViewModel(
 
   fun onSearchQueryChange(query: String) {
     val trimmed = query.trim()
-    if (trimmed.equals("!monet", ignoreCase = true) || trimmed.equals("!theme", ignoreCase = true)) {
-      monetThemeManager?.refreshShizukuState()
-    } else if (trimmed.equals("!monet apply", ignoreCase = true)) {
-      applyCrimsonMonet()
-    } else if (trimmed.equals("!monet reset", ignoreCase = true) || trimmed.equals("!reset", ignoreCase = true)) {
-      resetMonetToDefault()
-    } else if (trimmed.equals("!wx", ignoreCase = true) || trimmed.equals("!weather", ignoreCase = true)) {
+    if (trimmed.equals("!wx", ignoreCase = true) || trimmed.equals("!weather", ignoreCase = true)) {
       refreshWeather(forceRefresh = false)
     }
     val parsed = parseHudCommand(query)
@@ -283,15 +277,6 @@ class MainScreenViewModel(
         command.customFeedUrl?.let { otaUpdater?.setFeedUrl(it) }
         closeSpotlightSearch()
         checkForUpdates(force = true)
-      }
-      HudCommand.MonetStatus -> {
-        monetThemeManager?.refreshShizukuState()
-      }
-      HudCommand.MonetApply -> {
-        applyCrimsonMonet()
-      }
-      HudCommand.MonetReset -> {
-        resetMonetToDefault()
       }
       HudCommand.GrantUsage -> {
         handleShizukuOrSettingsPermission(
@@ -392,7 +377,7 @@ class MainScreenViewModel(
           it.copy(commandHint = "!PIN !WIFI !BT !DND !HZ !BAT !RAM !WX !OTA")
         }
         _feedbackEvents.tryEmit(
-          HudFeedbackEvent("Commands: !pin !wifi !bt !dnd !refresh !bat !ram !wx !ota !monet !usage !notif !home ?web =math")
+          HudFeedbackEvent("Commands: !pin !wifi !bt !dnd !refresh !bat !ram !wx !ota !usage !notif !home ?web =math")
         )
       }
       is HudCommand.WebSearch -> {
@@ -489,9 +474,6 @@ class MainScreenViewModel(
       is HudCommand.MathResult -> "= ${command.formatted}"
       is HudCommand.OtaCheck ->
         if (command.customFeedUrl != null) "OTA  ·  CUSTOM FEED" else "OTA  ·  CHECK RELEASE"
-      HudCommand.MonetStatus -> "MONET  ·  STATUS"
-      HudCommand.MonetApply -> "MONET  ·  APPLY CRIMSON"
-      HudCommand.MonetReset -> "MONET  ·  RESET DEFAULT"
       HudCommand.GrantUsage ->
         if (state.telemetry.hasUsageAccess) "USAGE  ·  GRANTED" else "USAGE  ·  GRANT ACCESS"
       HudCommand.GrantNotifications ->

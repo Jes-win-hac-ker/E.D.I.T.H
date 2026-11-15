@@ -61,7 +61,6 @@ import com.nexwork.edith.theme.EDITHTheme
 import com.nexwork.edith.ui.hud.CrimeSceneFocusOverlay
 import com.nexwork.edith.ui.hud.HudCardDeck
 import com.nexwork.edith.ui.hud.HudClock
-import com.nexwork.edith.ui.hud.HudMonetCard
 import com.nexwork.edith.ui.hud.HudOtaPill
 import com.nexwork.edith.ui.hud.HudSearchBar
 import com.nexwork.edith.ui.hud.GlobeController
@@ -183,11 +182,6 @@ fun MainScreen(
 
   val consoleOpen = state.isSpotlightSearchOpen || state.isAppBrowseOpen
   val searchOpen = state.isSpotlightSearchOpen
-  val isMonetCommand = state.searchQuery.trim().let { q ->
-    q.startsWith("!monet", ignoreCase = true) ||
-      q.startsWith("!theme", ignoreCase = true) ||
-      q.equals("!reset", ignoreCase = true)
-  }
   val dismissConsole: () -> Unit = {
     lastScreenActivityMs = System.currentTimeMillis()
     if (state.isSpotlightSearchOpen) viewModel.closeSpotlightSearch() else viewModel.closeAppBrowse()
@@ -252,7 +246,7 @@ fun MainScreen(
   ) {
     if (!isResumed) return@LaunchedEffect
     if (consoleOpen) {
-      if (isCardActionArmed || isMonetCommand) return@LaunchedEffect
+      if (isCardActionArmed) return@LaunchedEffect
       val timeoutMs = if (searchOpen && state.searchQuery.isEmpty()) 4_000L else 10_000L
       val remainingMs = (timeoutMs - (System.currentTimeMillis() - lastScreenActivityMs)).coerceAtLeast(0L)
       delay(remainingMs)
@@ -518,27 +512,6 @@ fun MainScreen(
       modifier = Modifier.align(Alignment.TopStart),
     )
 
-    if (consoleOpen && isMonetCommand) {
-      HudMonetCard(
-        monetUiState = state.monetUiState,
-        onApply = {
-          lastScreenActivityMs = System.currentTimeMillis()
-          keyboardController?.hide()
-          focusManager.clearFocus()
-          viewModel.applyCrimsonMonet()
-        },
-        onReset = {
-          lastScreenActivityMs = System.currentTimeMillis()
-          keyboardController?.hide()
-          focusManager.clearFocus()
-          viewModel.resetMonetToDefault()
-        },
-        modifier = Modifier
-          .align(Alignment.TopStart)
-          .padding(top = 152.dp),
-      )
-    }
-
     // Results as a cascading deck; the leader is sharp, the rest defocus. Browse mode opens on
     // category plates and drills into one category's app deck; the strip's drag walks the window
     // past the five dealt cards, and a pull past the head of a category climbs back out.
@@ -554,7 +527,7 @@ fun MainScreen(
     )
 
     HudCardDeck(
-      isOpen = consoleOpen && !isMonetCommand,
+      isOpen = consoleOpen,
       searchQuery = state.searchQuery,
       onDismiss = dismissConsole,
       apps = state.apps,
