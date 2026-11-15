@@ -82,7 +82,14 @@ private val ContainerPlateBrush = Brush.verticalGradient(listOf(Color(0xE0050505
 
 private const val ROOT_COLLAPSED_ALPHA = 0.46f
 private const val ROOT_COLLAPSED_SCALE = 0.94f
-private const val EXIT_DURATION_MS = 240
+private const val ROOT_ENTER_DURATION_MS = 1080
+private const val ROOT_RETURN_DURATION_MS = 560
+private const val ROOT_COLLAPSE_DURATION_MS = 420
+private const val BRANCH_ENTER_DURATION_MS = 920
+private const val BRANCH_EXIT_DURATION_MS = 560
+private const val DETAIL_ENTER_DURATION_MS = 760
+private const val DETAIL_EXIT_DURATION_MS = 540
+private const val EXIT_DURATION_MS = 640
 
 /**
  * Shared pixel-exact geometry derived from screen dimensions and the orbital globe horizon
@@ -313,21 +320,25 @@ fun HudSettingsRootLayer(
       if (wasUnmounted) {
         exitAnim.snapTo(1f)
         collapseAnim.snapTo(0f)
-        delay(180L)
-        val remMs = ((1f - rootAnim.value).coerceIn(0f, 1f) * 660f).roundToInt().coerceAtLeast(1)
+        delay(260L)
+        val remMs = ((1f - rootAnim.value).coerceIn(0f, 1f) * ROOT_ENTER_DURATION_MS)
+          .roundToInt()
+          .coerceAtLeast(1)
         rootAnim.animateTo(1f, tween(remMs, easing = LinearEasing))
       } else {
         coroutineScope {
           launch {
-            val eMs = ((1f - exitAnim.value).coerceIn(0f, 1f) * 140f).roundToInt().coerceAtLeast(1)
+            val eMs = ((1f - exitAnim.value).coerceIn(0f, 1f) * 200f).roundToInt().coerceAtLeast(1)
             exitAnim.animateTo(1f, tween(eMs, easing = LinearEasing))
           }
           launch {
-            val cMs = (collapseAnim.value.coerceIn(0f, 1f) * 280f).roundToInt().coerceAtLeast(1)
+            val cMs = (collapseAnim.value.coerceIn(0f, 1f) * ROOT_RETURN_DURATION_MS)
+              .roundToInt()
+              .coerceAtLeast(1)
             collapseAnim.animateTo(0f, tween(cMs, easing = LinearEasing))
           }
           launch {
-            val remMs = ((1f - rootAnim.value).coerceIn(0f, 1f) * 420f).roundToInt().coerceAtLeast(1)
+            val remMs = ((1f - rootAnim.value).coerceIn(0f, 1f) * 520f).roundToInt().coerceAtLeast(1)
             rootAnim.animateTo(1f, tween(remMs, easing = LinearEasing))
           }
         }
@@ -335,14 +346,16 @@ fun HudSettingsRootLayer(
     } else {
       coroutineScope {
         launch {
-          val eMs = ((1f - exitAnim.value).coerceIn(0f, 1f) * 120f).roundToInt().coerceAtLeast(1)
+          val eMs = ((1f - exitAnim.value).coerceIn(0f, 1f) * 180f).roundToInt().coerceAtLeast(1)
           exitAnim.animateTo(1f, tween(eMs, easing = LinearEasing))
         }
         launch {
           if (rootAnim.value < 0.99f) rootAnim.snapTo(1f)
         }
         launch {
-          val cMs = ((1f - collapseAnim.value).coerceIn(0f, 1f) * 280f).roundToInt().coerceAtLeast(1)
+          val cMs = ((1f - collapseAnim.value).coerceIn(0f, 1f) * ROOT_COLLAPSE_DURATION_MS)
+            .roundToInt()
+            .coerceAtLeast(1)
           collapseAnim.animateTo(1f, tween(cMs, easing = LinearEasing))
         }
       }
@@ -356,10 +369,11 @@ fun HudSettingsRootLayer(
   val exitP = exitAnim.value.coerceIn(0f, 1f)
   val rootScale = 1f - (1f - ROOT_COLLAPSED_SCALE) * collapseP
   val rootDrop = geo.rootDropPx * collapseP
-  val layerAlpha = (1f - (1f - ROOT_COLLAPSED_ALPHA) * collapseP) * (exitP * 1.35f).coerceIn(0f, 1f)
+  val exitAlpha = (exitP / 0.16f).coerceIn(0f, 1f)
+  val layerAlpha = (1f - (1f - ROOT_COLLAPSED_ALPHA) * collapseP) * exitAlpha
   val effectiveP = if (isClosing) (rootAnim.value * exitP) else rootAnim.value
-  val cardsMaster = hudEaseOutCubic(phase(effectiveP, 0.70f, 1.00f))
-  val canClickRoot = stage == SettingsStage.ROOT_BRANCHES && exitP > 0.85f && effectiveP > 0.74f
+  val cardsMaster = hudEaseOutCubic(phase(effectiveP, 0.50f, 1.00f))
+  val canClickRoot = stage == SettingsStage.ROOT_BRANCHES && exitP > 0.85f && effectiveP > 0.65f
 
   Box(
     modifier = modifier
@@ -376,8 +390,8 @@ fun HudSettingsRootLayer(
       val p = effectiveP
       if (p <= 0.005f) return@Canvas
 
-      // Phase 1 (0.00..0.38): bilateral orbital horizon arcs sweep inward from both screen edges
-      val arcP = hudEaseOutCubic(phase(p, 0.00f, 0.38f))
+      // Phase 1 (0.00..0.32): bilateral orbital horizon arcs sweep inward from both screen edges
+      val arcP = hudEaseOutCubic(phase(p, 0.00f, 0.32f))
       val arcAlpha = (1f - 0.70f * collapseP).coerceIn(0f, 1f)
       if (arcP > 0.005f && arcAlpha > 0.01f) {
         val arcTopLeft = Offset(geo.cx - geo.arcRadius, geo.arcCenterY - geo.arcRadius)
@@ -420,15 +434,15 @@ fun HudSettingsRootLayer(
       }
 
       // Center join ignition spark at (cx, arcZenithY)
-      if (p in 0.34f..0.52f && collapseP < 0.5f) {
-        val sparkP = 1f - phase(p, 0.36f, 0.52f)
+      if (p in 0.28f..0.44f && collapseP < 0.5f) {
+        val sparkP = 1f - phase(p, 0.30f, 0.44f)
         val join = Offset(geo.cx, geo.arcZenithY)
         drawCircle(accent.copy(alpha = 0.44f * sparkP), 6.dp.toPx(), join)
         drawCircle(Color.White.copy(alpha = 0.95f * sparkP), 2.1f.dp.toPx(), join)
       }
 
-      // Phase 2 (0.36..0.58): perpendicular laser stem rises straight up from arc zenith
-      val stemP = hudEaseOutCubic(phase(p, 0.36f, 0.58f))
+      // Phase 2 (0.28..0.44): perpendicular laser stem rises straight up from arc zenith
+      val stemP = hudEaseOutCubic(phase(p, 0.28f, 0.44f))
       if (stemP > 0.005f) {
         val curY = geo.arcZenithY + (geo.rootStemSplitY - geo.arcZenithY) * stemP
         drawLine(
@@ -443,8 +457,8 @@ fun HudSettingsRootLayer(
         }
       }
 
-      // Phase 3 (0.54..0.80): split orthogonally into 3 branches to left / center / right cards
-      val splitP = hudEaseOutCubic(phase(p, 0.54f, 0.80f))
+      // Phase 3 (0.40..0.58): split orthogonally into 3 branches to left / center / right cards
+      val splitP = hudEaseOutCubic(phase(p, 0.40f, 0.58f))
       if (splitP > 0.005f) {
         val strokeW = 1.1f.dp.toPx()
         for (idx in 0 until 3) {
@@ -608,22 +622,25 @@ fun HudSettingsOverlayLayer(
       } else {
         coroutineScope {
           launch {
-            val eMs = ((1f - masterExitAnim.value).coerceIn(0f, 1f) * 140f).roundToInt().coerceAtLeast(1)
+            val eMs = ((1f - masterExitAnim.value).coerceIn(0f, 1f) * 200f).roundToInt().coerceAtLeast(1)
             masterExitAnim.animateTo(1f, tween(eMs, easing = LinearEasing))
           }
           launch {
             coroutineScope {
               if (detailCardAnim.value > 0f) {
                 launch {
-                  val dMs = (detailCardAnim.value.coerceIn(0f, 1f) * 160f).roundToInt().coerceAtLeast(1)
+                  val dMs = (detailCardAnim.value.coerceIn(0f, 1f) * DETAIL_EXIT_DURATION_MS)
+                    .roundToInt()
+                    .coerceAtLeast(1)
                   detailCardAnim.animateTo(0f, tween(dMs, easing = LinearEasing))
                 }
+                delay(120L)
               }
               if (branchTreeAnim.value > 0f) {
-                launch {
-                  val bMs = (branchTreeAnim.value.coerceIn(0f, 1f) * 200f).roundToInt().coerceAtLeast(1)
-                  branchTreeAnim.animateTo(0f, tween(bMs, easing = LinearEasing))
-                }
+                val bMs = (branchTreeAnim.value.coerceIn(0f, 1f) * BRANCH_EXIT_DURATION_MS)
+                  .roundToInt()
+                  .coerceAtLeast(1)
+                branchTreeAnim.animateTo(0f, tween(bMs, easing = LinearEasing))
               }
             }
             retainedSection = null
@@ -641,29 +658,35 @@ fun HudSettingsOverlayLayer(
       if (switchedBranch) {
         branchTreeAnim.snapTo(0f)
         detailCardAnim.snapTo(0f)
-        delay(140L)
+        delay(180L)
       }
-      val remMs = ((1f - branchTreeAnim.value).coerceIn(0f, 1f) * 620f).roundToInt().coerceAtLeast(1)
+      val remMs = ((1f - branchTreeAnim.value).coerceIn(0f, 1f) * BRANCH_ENTER_DURATION_MS)
+        .roundToInt()
+        .coerceAtLeast(1)
       branchTreeAnim.animateTo(1f, tween(remMs, easing = LinearEasing))
     }
   }
 
   LaunchedEffect(stage, selectedSection) {
-    if (stage == SettingsStage.CLOSED) return@LaunchedEffect
-    if (stage == SettingsStage.LAUNCHER_TREE && selectedSection != null) {
+    if (stage != SettingsStage.LAUNCHER_TREE) return@LaunchedEffect
+    if (selectedSection != null) {
+      if (detailCardAnim.value > 0.01f && retainedSection != null && retainedSection != selectedSection) {
+        val switchOutMs = (detailCardAnim.value.coerceIn(0f, 1f) * 280f).roundToInt().coerceAtLeast(1)
+        detailCardAnim.animateTo(0f, tween(switchOutMs, easing = LinearEasing))
+      }
       retainedSection = selectedSection
       if (branchTreeAnim.value < 0.35f) {
-        delay(160L)
+        delay(180L)
       }
       detailCardAnim.snapTo(0f)
-      detailCardAnim.animateTo(1f, tween(460, easing = LinearEasing))
+      detailCardAnim.animateTo(1f, tween(DETAIL_ENTER_DURATION_MS, easing = LinearEasing))
     } else if (detailCardAnim.value > 0f) {
-      val ms = (detailCardAnim.value.coerceIn(0f, 1f) * 180f).roundToInt().coerceAtLeast(1)
+      val ms = (detailCardAnim.value.coerceIn(0f, 1f) * DETAIL_EXIT_DURATION_MS)
+        .roundToInt()
+        .coerceAtLeast(1)
       detailCardAnim.animateTo(0f, tween(ms, easing = LinearEasing))
-      if (selectedSection == null) {
-        retainedSection = null
-      }
-    } else if (selectedSection == null) {
+      retainedSection = null
+    } else {
       retainedSection = null
     }
   }
@@ -681,7 +704,7 @@ fun HudSettingsOverlayLayer(
     modifier = modifier
       .fillMaxSize()
       .graphicsLayer {
-        alpha = (exitP * 1.35f).coerceIn(0f, 1f)
+        alpha = (exitP / 0.16f).coerceIn(0f, 1f)
       },
   ) {
     // ------------------------------------------------------------------
@@ -721,7 +744,7 @@ fun HudSettingsOverlayLayer(
       Canvas(modifier = Modifier.fillMaxSize()) {
         if (effectiveTreeP > 0.005f) {
           // 1. Laser rises directly from sunken 01 LAUNCHER top center, turns 90 deg to trunkX, climbs to row 0
-          val stemP = hudEaseOutCubic(phase(effectiveTreeP, 0.00f, 0.34f))
+          val stemP = hudEaseOutCubic(phase(effectiveTreeP, 0.00f, 0.28f))
           if (stemP > 0.005f) {
             val tip = drawOrthogonalPolyline(
               points = listOf(
@@ -739,8 +762,8 @@ fun HudSettingsOverlayLayer(
 
           // 2. Sharp 90 deg right turns into each of the 5 left CompactHudCards
           sections.forEachIndexed { idx, section ->
-            val branchStart = 0.20f + idx * 0.11f
-            val branchP = hudEaseOutCubic(phase(effectiveTreeP, branchStart, (branchStart + 0.22f).coerceAtMost(1f)))
+            val branchStart = 0.16f + idx * 0.09f
+            val branchP = hudEaseOutCubic(phase(effectiveTreeP, branchStart, (branchStart + 0.18f).coerceAtMost(1f)))
             val midY = rowMidY(idx)
             val isSelected = section == activeSection
             if (branchP > 0.005f) {
@@ -761,8 +784,8 @@ fun HudSettingsOverlayLayer(
         // 3. Stage 3 orthogonal 90 deg elbow connector from pressed left card's right edge -> right HUD container
         val activeIdx = activeSection?.let { sections.indexOf(it) } ?: -1
         if (activeIdx >= 0 && effectiveDetailP > 0.005f) {
-          val linkP = hudEaseOutCubic(phase(effectiveDetailP, 0.00f, 0.34f))
-          val boxP = hudEaseOutCubic(phase(effectiveDetailP, 0.24f, 0.64f))
+          val linkP = hudEaseOutCubic(phase(effectiveDetailP, 0.00f, 0.30f))
+          val boxP = hudEaseOutCubic(phase(effectiveDetailP, 0.14f, 0.96f))
           val sourceY = rowMidY(activeIdx)
           val targetY = topRowPx + 32.dp.toPx()
 
@@ -802,7 +825,9 @@ fun HudSettingsOverlayLayer(
         verticalArrangement = Arrangement.spacedBy(cardGapDp),
       ) {
         sections.forEachIndexed { idx, section ->
-          val cardReveal = hudEaseOutCubic(phase(effectiveTreeP, 0.28f + idx * 0.11f, (0.64f + idx * 0.09f).coerceAtMost(1f)))
+          val cardReveal = hudEaseOutCubic(
+            phase(effectiveTreeP, 0.22f + idx * 0.09f, (0.76f + idx * 0.06f).coerceAtMost(1f)),
+          )
           val isSelected = section == activeSection
           CompactHudCard(
             eyebrow = section.tag,
@@ -812,7 +837,7 @@ fun HudSettingsOverlayLayer(
             accent = accent,
             titleSizeSp = 10.6f,
             reveal = { cardReveal },
-            enabled = isInteractive && cardReveal > 0.35f,
+            enabled = isInteractive && cardReveal > 0.30f,
             modifier = Modifier.fillMaxWidth().height(cardHeightDp),
             onClick = {
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -823,8 +848,8 @@ fun HudSettingsOverlayLayer(
       }
 
       // Right-hand Stage 3 Detail HUD Container + Staggered Option CompactHudCards
-      if (activeSection != null && effectiveDetailP > 0.24f) {
-        val innerReveal = hudEaseOutCubic(phase(effectiveDetailP, 0.36f, 1.00f))
+      if (activeSection != null && effectiveDetailP > 0.06f) {
+        val innerReveal = hudEaseOutCubic(phase(effectiveDetailP, 0.16f, 0.86f))
         Box(
           modifier = Modifier
             .padding(start = rightCardLeftDp, top = topRowDp)
@@ -911,8 +936,8 @@ fun HudSettingsOverlayLayer(
 
       Canvas(modifier = Modifier.fillMaxSize()) {
         if (effectiveTreeP <= 0.005f) return@Canvas
-        val stemP = hudEaseOutCubic(phase(effectiveTreeP, 0.00f, 0.52f))
-        val boxP = hudEaseOutCubic(phase(effectiveTreeP, 0.42f, 0.84f))
+        val stemP = hudEaseOutCubic(phase(effectiveTreeP, 0.00f, 0.36f))
+        val boxP = hudEaseOutCubic(phase(effectiveTreeP, 0.24f, 0.96f))
 
         if (stemP > 0.005f) {
           val pts = if (abs(origin.x - cardCenterX) < 2f) {
@@ -946,7 +971,7 @@ fun HudSettingsOverlayLayer(
         }
       }
 
-      val bodyReveal = hudEaseOutCubic(phase(effectiveTreeP, 0.58f, 1.00f))
+      val bodyReveal = hudEaseOutCubic(phase(effectiveTreeP, 0.30f, 0.84f))
       if (bodyReveal > 0.01f) {
         Box(
           modifier = Modifier
@@ -1322,13 +1347,9 @@ private fun CompactHudCard(
         val bar = 1.15f.dp.toPx()
         val keylineW = (size.width - stroke).coerceAtLeast(1f)
         val keylineH = (size.height - stroke).coerceAtLeast(1f)
-        val perimeter = (2f * (size.width + size.height)).coerceAtLeast(1f)
-        val cornerAt = floatArrayOf(
-          0f,
-          size.width / perimeter,
-          (size.width + size.height) / perimeter,
-          (2f * size.width + size.height) / perimeter,
-        )
+        val halfPerim = (size.width + size.height).coerceAtLeast(1f)
+        val midCorner = size.width / halfPerim
+        val cornerAt = floatArrayOf(0f, midCorner, 0f, midCorner)
         val bracketScale = minOf(
           size.width / 150f.dp.toPx(),
           size.height / 72f.dp.toPx(),
@@ -1388,12 +1409,12 @@ private fun CompactHudCard(
 
           val isFocused = curFocused.value
           val activeAccent = curAccent.value
-          val trace = phase(p, 0f, 0.58f)
-          val plateClip = phase(trace, 0f, cornerAt[1].coerceAtLeast(0.06f))
-          val eyebrowP = phase(p, 0.24f, 0.68f)
-          val titleP = phase(p, 0.34f, 0.86f)
-          val badgeP = phase(p, 0.46f, 0.96f)
-          val pipP = phase(p, 0.26f, 0.62f)
+          val trace = phase(p, 0f, 1.00f)
+          val plateClip = hudEaseOutCubic(phase(p, 0f, 0.30f))
+          val eyebrowP = phase(p, 0.08f, 0.46f)
+          val titleP = phase(p, 0.12f, 0.58f)
+          val badgeP = phase(p, 0.18f, 0.64f)
+          val pipP = phase(p, 0.06f, 0.38f)
 
           val plateBrush = if (isFocused) FocusedPlateBrush else UnfocusedPlateBrush
           if (plateClip < 0.999f) {
@@ -1479,7 +1500,7 @@ private fun CompactHudCard(
             blTint = if (isFocused) activeAccent.copy(alpha = 0.48f) else bracketTint,
           )
 
-          drawTracedRect(
+          drawDualTracedRect(
             width = keylineW,
             height = keylineH,
             progress = trace,
@@ -1586,14 +1607,10 @@ private fun DrawScope.drawHudContainerFrame(
   if (width <= 2f || height <= 2f || progress <= 0.005f) return
   val stroke = 1.dp.toPx()
   val bar = 1.2f.dp.toPx()
-  val perimeter = (2f * (width + height)).coerceAtLeast(1f)
-  val cornerAt = floatArrayOf(
-    0f,
-    width / perimeter,
-    (width + height) / perimeter,
-    (2f * width + height) / perimeter,
-  )
-  val plateClip = phase(progress, 0f, cornerAt[1].coerceAtLeast(0.06f))
+  val halfPerim = (width + height).coerceAtLeast(1f)
+  val midCorner = width / halfPerim
+  val cornerAt = floatArrayOf(0f, midCorner, 0f, midCorner)
+  val plateClip = hudEaseOutCubic(phase(progress, 0f, 0.28f))
 
   withTransform({ translate(left, top) }) {
     if (plateClip < 0.999f) {
@@ -1614,7 +1631,7 @@ private fun DrawScope.drawHudContainerFrame(
       wOverride = width,
       hOverride = height,
     )
-    drawTracedRect(
+    drawDualTracedRect(
       width = (width - stroke).coerceAtLeast(1f),
       height = (height - stroke).coerceAtLeast(1f),
       progress = progress,
@@ -1622,6 +1639,52 @@ private fun DrawScope.drawHudContainerFrame(
       color = accent.copy(alpha = 0.82f),
       head = if (progress in 0.02f..0.98f) 1f else 0f,
     )
+  }
+}
+
+private fun DrawScope.drawDualTracedRect(
+  width: Float,
+  height: Float,
+  progress: Float,
+  strokeWidth: Float,
+  color: Color,
+  head: Float = 0f,
+) {
+  if (width <= 0f || height <= 0f || progress <= 0f) return
+  val inset = strokeWidth * 0.5f
+  val x0 = inset
+  val y0 = inset
+  val remain = (width + height) * progress.coerceIn(0f, 1f)
+
+  // Beam 1: Top-Left -> Top-Right -> Bottom-Right
+  val topLen = minOf(remain, width)
+  val topEnd = Offset(x0 + topLen, y0)
+  drawLine(color, Offset(x0, y0), topEnd, strokeWidth, cap = StrokeCap.Round)
+  var tip1 = topEnd
+  val rem1 = remain - topLen
+  if (rem1 > 0f) {
+    val rightLen = minOf(rem1, height)
+    tip1 = Offset(x0 + width, y0 + rightLen)
+    drawLine(color, Offset(x0 + width, y0), tip1, strokeWidth, cap = StrokeCap.Round)
+  }
+
+  // Beam 2: Bottom-Right -> Bottom-Left -> Top-Left
+  val bottomLen = minOf(remain, width)
+  val bottomEnd = Offset(x0 + width - bottomLen, y0 + height)
+  drawLine(color, Offset(x0 + width, y0 + height), bottomEnd, strokeWidth, cap = StrokeCap.Round)
+  var tip2 = bottomEnd
+  val rem2 = remain - bottomLen
+  if (rem2 > 0f) {
+    val leftLen = minOf(rem2, height)
+    tip2 = Offset(x0, y0 + height - leftLen)
+    drawLine(color, Offset(x0, y0 + height), tip2, strokeWidth, cap = StrokeCap.Round)
+  }
+
+  if (head > 0f && progress < 1f) {
+    drawCircle(Color.White.copy(alpha = 0.20f * head), strokeWidth * 4.5f, tip1)
+    drawCircle(Color.White.copy(alpha = 0.92f * head), strokeWidth * 1.4f, tip1)
+    drawCircle(Color.White.copy(alpha = 0.20f * head), strokeWidth * 4.5f, tip2)
+    drawCircle(Color.White.copy(alpha = 0.92f * head), strokeWidth * 1.4f, tip2)
   }
 }
 

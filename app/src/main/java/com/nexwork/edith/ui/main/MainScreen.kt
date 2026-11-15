@@ -107,6 +107,7 @@ fun MainScreen(
   var isSettingsRootMounted by remember { mutableStateOf(false) }
   var isSettingsOverlayMounted by remember { mutableStateOf(false) }
   val isSettingsMounted = isSettingsRootMounted || isSettingsOverlayMounted
+  var lastActiveSettingsStage by remember { mutableStateOf(SettingsStage.CLOSED) }
   var clockRedrawSignal by remember { mutableIntStateOf(0) }
   var lastHapticRedrawSignal by remember { mutableIntStateOf(0) }
   var lastHomeWakeMs by remember { mutableLongStateOf(0L) }
@@ -135,6 +136,9 @@ fun MainScreen(
   }
 
   LaunchedEffect(state.settingsStage) {
+    if (state.settingsStage != SettingsStage.CLOSED) {
+      lastActiveSettingsStage = state.settingsStage
+    }
     val behindGlobe = state.settingsStage != SettingsStage.CLOSED &&
       state.settingsStage != SettingsStage.ROOT_BRANCHES
     globeController.setSettingsBackdropActive(behindGlobe)
@@ -469,15 +473,20 @@ fun MainScreen(
       }
     }
 
-    // Root settings branch sits above the globe (zIndex 2f) when active, and sinks behind
-    // the transparent-background 3D globe (zIndex 0f < 1f) when receding into Stage 2/3.
+    // Root settings branch sits above the globe (zIndex 2f) when active or unwinding from root,
+    // and sinks behind the transparent-background 3D globe (zIndex 0f < 1f) during Stage 2/3.
+    val rootLayerStage = if (state.settingsStage == SettingsStage.CLOSED) {
+      lastActiveSettingsStage
+    } else {
+      state.settingsStage
+    }
     HudSettingsRootLayer(
       stage = state.settingsStage,
       screenWidth = maxWidth,
       screenHeight = maxHeight,
       onSelectBranch = viewModel::selectSettingsBranch,
       onMountedChange = { isSettingsRootMounted = it },
-      modifier = Modifier.zIndex(if (state.settingsStage == SettingsStage.ROOT_BRANCHES) 2f else 0f),
+      modifier = Modifier.zIndex(if (rootLayerStage == SettingsStage.ROOT_BRANCHES) 2f else 0f),
     )
 
     // Wireframe Earth backdrop with synchronized rack-focus dolly zoom and stepped blur
