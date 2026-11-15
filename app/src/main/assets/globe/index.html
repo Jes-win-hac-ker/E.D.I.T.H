@@ -197,8 +197,6 @@
             let searchScale = 0.60;
             let targetScale = horizonScale;
             let currentScale = horizonScale;
-            let targetPosX = 0;
-            let currentPosX = 0;
             let targetPosY = horizonPosY;
             let currentPosY = horizonPosY;
             let hasInitializedPose = false;
@@ -257,8 +255,7 @@
             function applyTargetPresentation() {
                 if (searchModeActive) {
                     targetScale = searchScale;
-                    targetPosX = 24;
-                    targetPosY = -36;
+                    targetPosY = -28;
                     if (W.latLonToVector3) {
                         const localVec = W.latLonToVector3(userLat, userLon, radius);
                         targetRotY = -Math.atan2(localVec.x, localVec.z);
@@ -267,13 +264,11 @@
                     wakeLoop(520);
                 } else if (ambientCentered) {
                     targetScale = centerScale;
-                    targetPosX = 0;
                     targetPosY = centerPosY;
                     targetRotX = 0;
                     wakeLoop(950);
                 } else {
                     targetScale = horizonScale;
-                    targetPosX = 0;
                     targetPosY = horizonPosY;
                     targetRotX = 0;
                     wakeLoop(950);
@@ -298,7 +293,7 @@
                 centerScale = Math.min(0.48, Math.max(0.36, aspect * 1.02));
                 centerPosY = -10;
 
-                searchScale = Math.min(0.56, Math.max(0.44, aspect * 1.24));
+                searchScale = Math.min(0.60, Math.max(0.46, aspect * 1.32));
 
                 camera.position.set(0, 15, 280);
                 camera.lookAt(0, -10, 0);
@@ -339,14 +334,13 @@
 
             // 8B. SEARCH & AMBIENT CENTER TRANSITIONS
             function startPoseTransition(durMs) {
-                const posDelta = Math.abs(targetPosX - currentPosX) + Math.abs(targetPosY - currentPosY);
+                const posDelta = Math.abs(targetPosY - currentPosY);
                 const scaleDelta = Math.abs(targetScale - currentScale);
                 const effectiveDur = (posDelta < 0.5 && scaleDelta < 0.002) ? 0 : durMs;
                 poseTransition = {
                     startMs: performance.now(),
                     durationMs: effectiveDur,
                     startScale: currentScale,
-                    startPosX: currentPosX,
                     startPosY: currentPosY,
                     startZoom: userZoom,
                     startRotX: globeGroup.rotation.x,
@@ -595,7 +589,7 @@
 
                 const rawNow = typeof now === 'number' ? now : performance.now();
                 const scaleGap = Math.abs(targetScale - currentScale);
-                const posGap = Math.abs(targetPosX - currentPosX) + Math.abs(targetPosY - currentPosY);
+                const posGap = Math.abs(targetPosY - currentPosY);
                 const zoomGap = ambientCentered ? Math.abs(1.0 - userZoom) : 0;
                 const rotGap = searchModeActive
                     ? Math.abs(targetRotY - globeGroup.rotation.y) + Math.abs(targetRotX - globeGroup.rotation.x)
@@ -700,7 +694,6 @@
                         : clamp01((rawNow - poseTransition.startMs) / poseTransition.durationMs);
                     const eased = easeInOutCubic(u);
                     currentScale = THREE.MathUtils.lerp(poseTransition.startScale, targetScale, eased);
-                    currentPosX = THREE.MathUtils.lerp(poseTransition.startPosX, targetPosX, eased);
                     currentPosY = THREE.MathUtils.lerp(poseTransition.startPosY, targetPosY, eased);
                     if (ambientCentered) {
                         userZoom = THREE.MathUtils.lerp(poseTransition.startZoom, 1.0, eased);
@@ -710,7 +703,6 @@
                     }
                     if (u >= 1) {
                         currentScale = targetScale;
-                        currentPosX = targetPosX;
                         currentPosY = targetPosY;
                         if (ambientCentered) userZoom = 1.0;
                         if (!searchModeActive && !isDragging) globeGroup.rotation.x = targetRotX;
@@ -722,7 +714,6 @@
                     }
                 } else {
                     currentScale = THREE.MathUtils.lerp(currentScale, targetScale, lerpT);
-                    currentPosX = THREE.MathUtils.lerp(currentPosX, targetPosX, lerpT);
                     currentPosY = THREE.MathUtils.lerp(currentPosY, targetPosY, lerpT);
                     if (ambientCentered && Math.abs(1.0 - userZoom) > 0.001) {
                         userZoom = THREE.MathUtils.lerp(userZoom, 1.0, lerpT);
@@ -732,7 +723,7 @@
 
                 const effectiveScale = currentScale * userZoom * startupScaleMult;
                 globeGroup.scale.set(effectiveScale, effectiveScale, effectiveScale);
-                globeGroup.position.set(currentPosX, currentPosY, 0);
+                globeGroup.position.set(0, currentPosY, 0);
 
                 if (searchModeActive) {
                     const searchT = 1 - Math.pow(0.92, step60);
@@ -767,7 +758,6 @@
                 const keepFast = startupActive || isDragging || poseTransition !== null ||
                     (!searchModeActive && (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001)) ||
                     Math.abs(targetScale - currentScale) > 0.0008 ||
-                    Math.abs(targetPosX - currentPosX) > 0.04 ||
                     Math.abs(targetPosY - currentPosY) > 0.04 ||
                     (ambientCentered && Math.abs(1.0 - userZoom) > 0.001) ||
                     (searchModeActive && (Math.abs(targetRotY - globeGroup.rotation.y) + Math.abs(targetRotX - globeGroup.rotation.x)) > 0.002) ||

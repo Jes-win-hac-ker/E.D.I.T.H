@@ -12,10 +12,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
@@ -38,7 +38,6 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -58,12 +57,9 @@ import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.LocalCrimsonMonetActive
 import com.nexwork.edith.theme.TextPureWhite
 import com.nexwork.edith.theme.TextSilver
-import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.roundToInt
-import kotlin.math.sin
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -154,9 +150,8 @@ fun HudCardDeck(
   // Which level the currently dealt cards belong to.
   var dealtLevel by remember { mutableStateOf<String?>(null) }
 
-  val rowPitchPx = remember(density) { with(density) { 78.dp.toPx() } }
-  val curvePx = remember(density) { with(density) { 10.dp.toPx() } }
-  val elbowDx = remember(density) { with(density) { 14.dp.toPx() } }
+  val settleFwd = remember(density) { with(density) { 18.dp.toPx() } }
+  val settleBack = remember(density) { with(density) { 30.dp.toPx() } }
 
   fun animateFocusTo(target: Float) {
     snapJob?.cancel()
@@ -280,93 +275,20 @@ fun HudCardDeck(
   val liveSwipePkg by rememberUpdatedState(swipePkg)
   val liveArmedPkg by rememberUpdatedState(armedPkg)
 
-  val monetCrimson = LocalCrimsonMonetActive.current
-
   BoxWithConstraints(
     modifier
       .fillMaxWidth()
       .fillMaxHeight(),
   ) {
-    val nodeWidthDp = (maxWidth * 0.65f).coerceIn(190.dp, 238.dp)
-    val nodeWidthPx = with(density) { nodeWidthDp.toPx() }
-    val nodeHeightPx = with(density) { RadialNodeHeight.toPx() }
-    val visibleRows = (pool.size - spot).coerceIn(1, 4)
-    val stackBottom = (visibleRows - 1) * rowPitchPx + nodeHeightPx + with(density) { 8.dp.toPx() }
-    val leadColor = if (monetCrimson) Crimson else CrimsonBright
+    val cardPx = with(density) { (maxWidth * 124f / 312f).toPx() }
+    val followers = (pool.size - 1 - spot).coerceIn(0, 4)
+    val stackBottom = cardPx + with(density) { (followers * 18).dp.toPx() + 6.dp.toPx() }
 
-    // Radial elbow tethers drawn behind the node plates, pinned to the corner-parked globe.
-    Box(
-      Modifier
-        .fillMaxSize()
-        .drawBehind {
-          val globeCx = size.width * 0.89f
-          val globeCy = (nodeHeightPx * 3.1f).coerceIn(size.height * 0.48f, size.height * 0.72f)
-          val pinRadius = size.width * 0.20f
-          val focus = focusPos.floatValue
-          val leaderColor = leadColor
-          val trailColor = RadialNodeSlate
-
-          pool.forEachIndexed { slot, card ->
-            val depth = slot - focus
-            if (depth < -0.6f || depth > 3.9f) return@forEachIndexed
-            val step = if (exiting) last - slot else slot
-            val progress = staggeredReveal(revealAnim.value, step, steps, Stagger)
-            val nodeAlpha = radialNodeAlpha(depth) * progress
-            if (nodeAlpha <= 0.03f) return@forEachIndexed
-
-            val left = radialNodeLeftPx(depth, curvePx)
-            val top = depth * rowPitchPx
-            val cardPkg = (card as? DeckCard.App)?.entry?.packageName
-            val swipeShift = if (cardPkg != null && (cardPkg == swipePkg || cardPkg == armedPkg)) {
-              swipePos.floatValue * trayWidthPx
-            } else {
-              0f
-            }
-            val startX = (left + nodeWidthPx - swipeShift).coerceAtLeast(left + nodeHeightPx)
-            val startY = top + nodeHeightPx * 0.5f
-            val elbowX = startX + elbowDx
-
-            val angleDeg = 215f - depth.coerceIn(-0.4f, 3.6f) * 19f
-            val angleRad = angleDeg * PI / 180.0
-            val pinX = globeCx + (cos(angleRad) * pinRadius).toFloat()
-            val pinY = globeCy + (sin(angleRad) * pinRadius).toFloat()
-
-            val isFocused = slot == spot
-            val strokePx = (if (isFocused) 1.25.dp else 0.85.dp).toPx()
-            val wireColor = (if (isFocused) leaderColor else trailColor)
-              .copy(alpha = (if (isFocused) 0.92f else 0.52f) * nodeAlpha)
-
-            val elbowPt = Offset(
-              x = startX + (elbowX - startX) * progress,
-              y = startY,
-            )
-            val endPt = Offset(
-              x = elbowX + (pinX - elbowX) * progress,
-              y = startY + (pinY - startY) * progress,
-            )
-            drawLine(wireColor, Offset(startX, startY), elbowPt, strokeWidth = strokePx)
-            if (progress > 0.22f) {
-              drawLine(wireColor, elbowPt, endPt, strokeWidth = strokePx)
-              val dotR = (if (isFocused) 2.2.dp else 1.7.dp).toPx()
-              drawCircle(wireColor, radius = dotR, center = endPt)
-              if (isFocused) {
-                drawCircle(
-                  leaderColor.copy(alpha = 0.72f * nodeAlpha),
-                  radius = 4.6.dp.toPx(),
-                  center = endPt,
-                  style = Stroke(width = 1.dp.toPx()),
-                )
-              }
-            }
-          }
-        },
-    )
-
-    // Render only the visible 4-node radial arc plus 1 pre-warmed slot above/below; focusedState
-    // tracks integer spot boundaries so continuous drag/snap moves GPU layers without recomposing.
+    // Render only the visible 5-card fan plus 1 pre-warmed card below; focusedState tracks integer
+    // spot boundaries so continuous drag/snap moves GPU layers without invalidating card DrawScopes.
     pool.forEachIndexed { slot, card ->
       val slotDist = slot - spot
-      if (slotDist < -1 || slotDist > 4) return@forEachIndexed
+      if (slotDist < -1 || slotDist > 5) return@forEachIndexed
 
       val cardKey = when (card) {
         is DeckCard.App -> "a:${card.entry.packageName}"
@@ -378,7 +300,7 @@ fun HudCardDeck(
           { staggeredReveal(revealAnim.value, step, steps, Stagger) }
         }
         val cardCharge = remember(slot) { { if (slot == 0) chargeAnim.value else 0f } }
-        val focusedState = remember(slot) { derivedStateOf { slot == spot } }
+        val focusedState = remember(slot) { derivedStateOf { slot <= spot } }
         val cardFocused = remember(focusedState) { { focusedState.value } }
         val isTrayOwner = (card as? DeckCard.App)?.entry?.packageName?.let {
           it == swipePkg || it == armedPkg
@@ -386,23 +308,25 @@ fun HudCardDeck(
 
         Box(
           Modifier
-            .width(nodeWidthDp)
-            .height(RadialNodeHeight)
-            .zIndex(if (slot == spot) 2f else -slot.toFloat())
+            .fillMaxWidth()
+            .aspectRatio(312f / 124f)
+            .zIndex(-slot.toFloat())
             .graphicsLayer {
               val depth = slot - focusPos.floatValue
               val progress = cardReveal()
-              val targetAlpha = radialNodeAlpha(depth)
-              if (progress <= 0.001f || targetAlpha <= 0.001f) {
+              if (progress <= 0.001f || depth < -1.2f || depth > 5.0f) {
                 alpha = 0f
               } else {
-                alpha = targetAlpha * progress
-                translationX = radialNodeLeftPx(depth, curvePx) +
-                  if (slot == 0 || !exiting) 0f else (1f - progress) * -12f
-                translationY = depth * rowPitchPx
-                val scale = if (depth <= 0.05f && depth >= -0.35f) 1f else (1f - 0.025f * abs(depth)).coerceAtLeast(0.92f)
-                scaleX = scale * (0.985f + 0.015f * progress)
-                scaleY = scale * (0.985f + 0.015f * progress)
+                alpha = when {
+                  depth <= 0f -> (1f + depth).coerceIn(0f, 1f)
+                  depth <= 4f -> (1f - 0.17f * depth).coerceAtLeast(0.34f)
+                  else -> (0.34f * (5f - depth)).coerceIn(0f, 0.34f)
+                }
+                translationY = if (depth > 0f) depth * settleFwd else depth * settleBack
+                val scale = (if (depth > 0f) 1f - 0.06f * depth else 1f + 0.08f * -depth) *
+                  (0.985f + 0.015f * progress)
+                scaleX = scale
+                scaleY = scale
               }
             }
             .clipToBounds(),
@@ -435,14 +359,12 @@ fun HudCardDeck(
                 reveal = cardReveal,
                 charge = cardCharge,
                 focused = cardFocused,
-                slotIndex = slot,
               )
               is DeckCard.Group -> HudGroupCard(
                 group = card.group,
                 usageFraction = card.usageMillis.toFloat() / peak,
                 reveal = cardReveal,
                 focused = cardFocused,
-                slotIndex = slot,
               )
             }
           }
@@ -452,24 +374,25 @@ fun HudCardDeck(
 
     // Unified gesture layer across the entire deck surface
     val maxIndex = (pool.size - 1).coerceAtLeast(0)
-    val hitPadPx = with(density) { 8.dp.toPx() }
     Box(
       Modifier
         .fillMaxSize()
-        .pointerInput(pool.size, activeGroup?.name, nodeWidthPx) {
-          val pitch = rowPitchPx
+        .pointerInput(pool.size, activeGroup?.name) {
+          val pitch = 44.dp.toPx()
           val slop = viewConfiguration.touchSlop
 
-          fun findHitSlot(x: Float, y: Float): Int? {
+          fun findHitSlot(y: Float): Int? {
             val currentFocus = focusPos.floatValue
             return livePool.indices
               .map { s -> s to (s - currentFocus) }
-              .filter { (_, depth) -> radialNodeAlpha(depth) > 0.05f }
+              .filter { (_, depth) ->
+                val alpha = if (depth > 0f) (1f - 0.17f * depth).coerceAtLeast(0.34f)
+                else (1f + depth).coerceIn(0f, 1f)
+                alpha > 0.05f
+              }
               .firstOrNull { (_, depth) ->
-                val left = radialNodeLeftPx(depth, curvePx)
-                val top = depth * rowPitchPx
-                x in (left - hitPadPx)..(left + nodeWidthPx + hitPadPx) &&
-                  y in top..(top + nodeHeightPx)
+                val top = if (depth > 0f) depth * settleFwd else depth * settleBack
+                y >= top && y <= top + cardPx
               }
               ?.first
           }
@@ -485,7 +408,7 @@ fun HudCardDeck(
             var totalDragY = 0f
             var downwardPullAtHead = 0f
 
-            val downSlot = findHitSlot(startX, startY)
+            val downSlot = findHitSlot(startY)
             val downApp = (downSlot?.let { livePool.getOrNull(it) } as? DeckCard.App)?.entry
             val curArmed = liveArmedPkg
             var swipeStartFrac = 0f
@@ -592,20 +515,15 @@ fun HudCardDeck(
                   val armedSlot = livePool.indexOfFirst { (it as? DeckCard.App)?.entry?.packageName == openPkg }
                   val armedCard = armedSlot.takeIf { it >= 0 }?.let { livePool[it] as? DeckCard.App }?.entry
                   val depth = armedSlot - focusPos.floatValue
-                  val left = radialNodeLeftPx(depth, curvePx)
-                  val top = depth * rowPitchPx
+                  val top = if (depth > 0f) depth * settleFwd else depth * settleBack
                   down.consume()
-                  if (
-                    armedCard != null &&
-                    startX in left..(left + nodeWidthPx) &&
-                    startY in top..(top + nodeHeightPx)
-                  ) {
+                  if (armedCard != null && startY in top..(top + cardPx)) {
                     when (
                       cardTrayHitAction(
-                        x = startX - left,
-                        width = nodeWidthPx,
+                        x = startX,
+                        width = size.width.toFloat(),
                         localY = startY - top,
-                        cardHeight = nodeHeightPx,
+                        cardHeight = cardPx,
                         trayWidth = trayWidthPx,
                         isSystemApp = armedCard.isSystemApp,
                       )
@@ -630,7 +548,7 @@ fun HudCardDeck(
                     animateSwipeTo(0f, nextArmed = null)
                   }
                 } else {
-                  val hit = findHitSlot(startX, startY)
+                  val hit = findHitSlot(startY)
                   if (hit != null) {
                     down.consume()
                     haptic.performHapticFeedback(HapticFeedbackType.KeyboardTap)
@@ -647,7 +565,7 @@ fun HudCardDeck(
                       spot = hit
                       animateFocusTo(hit.toFloat())
                     }
-                  } else if (startY > stackBottom + 12.dp.toPx() || startX > nodeWidthPx + curvePx + 18.dp.toPx()) {
+                  } else if (startY > stackBottom + 12.dp.toPx()) {
                     down.consume()
                     if (liveGrouped) onExitGroup() else onDismiss()
                   }
@@ -658,18 +576,6 @@ fun HudCardDeck(
         },
     )
   }
-}
-
-internal fun radialNodeLeftPx(depth: Float, curvePx: Float): Float {
-  val u = ((depth - 1.6f) / 1.8f).coerceIn(-1.2f, 1.2f)
-  return ((u * u) * curvePx).coerceIn(0f, curvePx * 1.44f)
-}
-
-internal fun radialNodeAlpha(depth: Float): Float = when {
-  depth < -0.7f || depth > 3.9f -> 0f
-  depth < 0f -> (1f + depth / 0.7f).coerceIn(0f, 1f)
-  depth <= 3f -> (1f - 0.14f * depth).coerceAtLeast(0.54f)
-  else -> (0.54f * ((3.9f - depth) / 0.9f)).coerceIn(0f, 0.54f)
 }
 
 @Composable

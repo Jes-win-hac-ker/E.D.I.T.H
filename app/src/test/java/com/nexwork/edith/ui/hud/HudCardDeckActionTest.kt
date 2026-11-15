@@ -49,22 +49,4 @@ class HudCardDeckActionTest {
     assertTrue(shouldArmCardSwipe(0.48f))
     assertTrue(shouldArmCardSwipe(1.0f))
   }
-
-  @Test
-  fun radialNodeArc_curvesAroundCenterAndFadesCleanly() {
-    val curve = 10f
-    // Middle radial slots hug closer to the left edge than top/bottom orbital nodes
-    val topX = radialNodeLeftPx(0f, curve)
-    val midX = radialNodeLeftPx(1.6f, curve)
-    val bottomX = radialNodeLeftPx(3f, curve)
-    assertEquals(0f, midX, 0.001f)
-    assertTrue(topX > midX)
-    assertTrue(bottomX > midX)
-
-    // Alpha peaks on focused slot 0, dims gently through 3 visible trailing slots, and clips beyond
-    assertEquals(1f, radialNodeAlpha(0f), 0.001f)
-    assertTrue(radialNodeAlpha(2f) > 0.5f)
-    assertEquals(0f, radialNodeAlpha(-0.8f), 0.001f)
-    assertEquals(0f, radialNodeAlpha(4.0f), 0.001f)
-  }
 }
