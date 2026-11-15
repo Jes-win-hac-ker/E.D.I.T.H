@@ -554,7 +554,6 @@ fun MainScreen(
       screenHeight = maxHeight,
       onSelectSection = viewModel::selectLauncherSetting,
       onBackStep = { viewModel.handleBackPress() },
-      onCloseAll = viewModel::dismissSettings,
       onAccentChange = viewModel::updateLauncherAccent,
       onFontChange = viewModel::updateLauncherFont,
       onFontScaleChange = viewModel::updateLauncherFontScale,

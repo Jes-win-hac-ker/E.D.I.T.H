@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -203,7 +202,6 @@ fun HudSettingsTree(
   onSelectBranch: (SettingsStage) -> Unit,
   onSelectSection: (LauncherSettingsSection?) -> Unit,
   onBackStep: () -> Unit,
-  onCloseAll: () -> Unit,
   onAccentChange: (LauncherAccentPreset) -> Unit,
   onFontChange: (LauncherFontStyle) -> Unit,
   onFontScaleChange: (Float) -> Unit,
@@ -247,7 +245,6 @@ fun HudSettingsTree(
       screenHeight = maxHeight,
       onSelectSection = onSelectSection,
       onBackStep = onBackStep,
-      onCloseAll = onCloseAll,
       onAccentChange = onAccentChange,
       onFontChange = onFontChange,
       onFontScaleChange = onFontScaleChange,
@@ -546,7 +543,6 @@ fun HudSettingsOverlayLayer(
   screenHeight: Dp,
   onSelectSection: (LauncherSettingsSection?) -> Unit,
   onBackStep: () -> Unit,
-  onCloseAll: () -> Unit,
   onAccentChange: (LauncherAccentPreset) -> Unit,
   onFontChange: (LauncherFontStyle) -> Unit,
   onFontScaleChange: (Float) -> Unit,
@@ -688,58 +684,6 @@ fun HudSettingsOverlayLayer(
         alpha = (exitP * 1.35f).coerceIn(0f, 1f)
       },
   ) {
-    // Top Header Bar (Breadcrumb + Close) — never shows empty "< " when closing
-    if (activeStage != SettingsStage.CLOSED) {
-      val headerTitle = when (activeStage) {
-        SettingsStage.CLOSED -> ""
-        SettingsStage.ROOT_BRANCHES -> "E.D.I.T.H // ROOT"
-        SettingsStage.LAUNCHER_TREE -> "< SYS.01 // LAUNCHER"
-        SettingsStage.AGENT_PLACEHOLDER -> "< SYS.02 // AI AGENT"
-        SettingsStage.SHIZUKU_PLACEHOLDER -> "< SYS.03 // SHIZUKU OS"
-      }
-      Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .statusBarsPadding()
-          .padding(horizontal = 14.dp, vertical = 10.dp)
-          .graphicsLayer {
-            alpha = exitP
-            translationY = -(1f - exitP) * with(density) { 8.dp.toPx() }
-          },
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        CompactHudCard(
-          title = headerTitle,
-          reveal = { exitP },
-          accent = accent,
-          focused = activeStage != SettingsStage.ROOT_BRANCHES,
-          titleSizeSp = 10f,
-          centerText = true,
-          enabled = isInteractive,
-          modifier = Modifier.height(30.dp).width(if (activeStage == SettingsStage.ROOT_BRANCHES) 172.dp else 196.dp),
-          onClick = {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            if (activeStage == SettingsStage.ROOT_BRANCHES) onCloseAll() else onBackStep()
-          },
-        )
-        CompactHudCard(
-          title = "CLOSE",
-          reveal = { exitP },
-          accent = accent,
-          focused = false,
-          titleSizeSp = 10f,
-          centerText = true,
-          enabled = isInteractive,
-          modifier = Modifier.height(30.dp).width(68.dp),
-          onClick = {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            onCloseAll()
-          },
-        )
-      }
-    }
-
     // ------------------------------------------------------------------
     // STAGE 2 & 3: LAUNCHER Deep Tree (Sunken Card 01 Origin -> Left Tree -> Right Detail HUD)
     // ------------------------------------------------------------------
