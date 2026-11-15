@@ -388,7 +388,7 @@ fun MainScreen(
     val consoleBlurSteps = remember {
       if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
         List(12) { idx ->
-          val radius = (idx + 1).toFloat()
+          val radius = ((idx + 1) / 12f) * 3.5f
           android.graphics.RenderEffect.createBlurEffect(
             radius,
             radius,
@@ -504,13 +504,10 @@ fun MainScreen(
       )
     }
 
-    // Results as a cascading deck; the leader is sharp, the rest defocus. Browse mode opens on
-    // category plates and drills into one category's app deck; the strip's drag walks the window
-    // past the five dealt cards, and a pull past the head of a category climbs back out.
-    // Once the IME retracts the leader card parks with its centre at half screen height.
+    // Option 4 radial nodes occupy the upper-to-mid left corridor tethered to the corner Earth.
     val density = LocalDensity.current
-    val cardHeight = (maxWidth - 36.dp) * 124f / 312f
-    val deckResting = maxHeight * 0.5f - cardHeight / 2f
+    val imeDeckTop = 158.dp
+    val deckResting = 184.dp
     val keyboardUp = consoleOpen && WindowInsets.isImeVisible
     val deckShift = animateFloatAsState(
       targetValue = if (keyboardUp) 0f else 1f,
@@ -541,9 +538,9 @@ fun MainScreen(
       },
       modifier = Modifier
         .align(Alignment.TopStart)
-        .padding(start = 18.dp, end = 18.dp, top = 236.dp, bottom = 28.dp)
+        .padding(start = 18.dp, end = 18.dp, top = imeDeckTop, bottom = 28.dp)
         .graphicsLayer {
-          translationY = with(density) { (deckResting - 236.dp).toPx() } * deckShift.value
+          translationY = with(density) { (deckResting - imeDeckTop).toPx() } * deckShift.value
         },
     )
   }
