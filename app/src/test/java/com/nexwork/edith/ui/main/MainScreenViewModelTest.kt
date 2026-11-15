@@ -1,6 +1,10 @@
 package com.nexwork.edith.ui.main
 
 import com.nexwork.edith.data.DataRepository
+import com.nexwork.edith.model.LauncherAccentPreset
+import com.nexwork.edith.model.LauncherFontStyle
+import com.nexwork.edith.model.LauncherSettingsSection
+import com.nexwork.edith.model.SettingsStage
 import junit.framework.TestCase.assertEquals
 import junit.framework.TestCase.assertFalse
 import junit.framework.TestCase.assertNull
@@ -256,6 +260,72 @@ class MainScreenViewModelTest {
     assertEquals(3, events.size)
     assertTrue(events.last().message.contains("!pin"))
     collectJob.cancel()
+  }
+
+  @Test
+  fun settingsTree_stageTransitionsAndStepBackUnwinding() = runTest {
+    val viewModel = MainScreenViewModel(FakeMyModelRepository())
+    assertEquals(SettingsStage.CLOSED, viewModel.launcherState.value.settingsStage)
+
+    viewModel.openSettingsRoot()
+    assertEquals(SettingsStage.ROOT_BRANCHES, viewModel.launcherState.value.settingsStage)
+    assertNull(viewModel.launcherState.value.selectedSettingsSection)
+
+    // Cannot enter ambient center while settings overlay is active
+    viewModel.enterAmbientCenter()
+    assertFalse(viewModel.launcherState.value.isAmbientCentered)
+
+    viewModel.selectSettingsBranch(SettingsStage.LAUNCHER_TREE)
+    assertEquals(SettingsStage.LAUNCHER_TREE, viewModel.launcherState.value.settingsStage)
+
+    viewModel.selectLauncherSetting(LauncherSettingsSection.FONT_SCALE)
+    assertEquals(LauncherSettingsSection.FONT_SCALE, viewModel.launcherState.value.selectedSettingsSection)
+
+    // Back 1: detail card -> left list
+    assertTrue(viewModel.handleBackPress())
+    assertNull(viewModel.launcherState.value.selectedSettingsSection)
+    assertEquals(SettingsStage.LAUNCHER_TREE, viewModel.launcherState.value.settingsStage)
+
+    // Back 2: left list -> 3-branch root
+    assertTrue(viewModel.handleBackPress())
+    assertEquals(SettingsStage.ROOT_BRANCHES, viewModel.launcherState.value.settingsStage)
+
+    // Agent standby branch unwinds cleanly back to root
+    viewModel.selectSettingsBranch(SettingsStage.AGENT_PLACEHOLDER)
+    assertEquals(SettingsStage.AGENT_PLACEHOLDER, viewModel.launcherState.value.settingsStage)
+    assertTrue(viewModel.handleBackPress())
+    assertEquals(SettingsStage.ROOT_BRANCHES, viewModel.launcherState.value.settingsStage)
+
+    // Back 3: 3-branch root -> closed home screen
+    assertTrue(viewModel.handleBackPress())
+    assertEquals(SettingsStage.CLOSED, viewModel.launcherState.value.settingsStage)
+    assertFalse(viewModel.handleBackPress())
+  }
+
+  @Test
+  fun launcherSettings_updatesIndependentOfOsMonet_andOtaCommandIntact() = runTest {
+    val viewModel = MainScreenViewModel(FakeMyModelRepository())
+    assertFalse(viewModel.launcherState.value.monetUiState.isEnabledPersisted)
+
+    viewModel.updateLauncherAccent(LauncherAccentPreset.SOLAR_AMBER)
+    viewModel.updateLauncherFont(LauncherFontStyle.MONOSPACE)
+    viewModel.updateLauncherFontScale(1.12f)
+    viewModel.setUse24Hour(false)
+
+    val cfg = viewModel.launcherState.value.launcherSettings
+    assertEquals(LauncherAccentPreset.SOLAR_AMBER, cfg.accentPreset)
+    assertEquals(LauncherFontStyle.MONOSPACE, cfg.fontStyle)
+    assertEquals(1.12f, cfg.fontScale, 0.001f)
+    assertFalse(cfg.use24Hour)
+    assertFalse(viewModel.launcherState.value.use24Hour)
+    // Launcher theme customization must never alter OS-wide Shizuku Monet state
+    assertFalse(viewModel.launcherState.value.monetUiState.isEnabledPersisted)
+
+    // !ota command remains available alongside the Settings OTA button
+    viewModel.openSpotlightSearch()
+    viewModel.onSearchQueryChange("!ota")
+    assertEquals("OTA  ·  CHECK RELEASE", viewModel.launcherState.value.commandHint)
+    assertTrue(viewModel.submitConsoleQuery())
   }
 }
 

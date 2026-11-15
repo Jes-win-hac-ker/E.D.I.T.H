@@ -52,3 +52,38 @@ data class DeviceTelemetry(
   val deviceModel: String = "Moto G45 5G",
   val hasUsageAccess: Boolean = false,
 )
+
+enum class LauncherAccentPreset(val label: String, val code: String) {
+  ICE_CYAN("Ice Cyan", "CYAN"),
+  STARK_CRIMSON("Crimson", "RED"),
+  SOLAR_AMBER("Solar Amber", "AMBER"),
+}
+
+enum class LauncherFontStyle(val label: String, val code: String) {
+  DEFAULT("System", "SYS"),
+  MONOSPACE("Tactical Mono", "MONO"),
+  CLEAN_SANS("Clean Sans", "SANS"),
+}
+
+enum class SettingsStage {
+  CLOSED,
+  ROOT_BRANCHES,
+  LAUNCHER_TREE,
+  AGENT_PLACEHOLDER,
+  SHIZUKU_PLACEHOLDER,
+}
+
+enum class LauncherSettingsSection(val title: String, val tag: String) {
+  THEME_COLOR("THEME & COLOR", "ACCENT"),
+  FONT_SCALE("FONT & SCALE", "TYPE"),
+  CLOCK_DATE("CLOCK & DATE", "TIME"),
+  DISPLAY_WEATHER("DISPLAY & WX", "120HZ"),
+  PERMS_OTA("PERMS & OTA", "SYSTEM"),
+}
+
+data class LauncherSettingsConfig(
+  val accentPreset: LauncherAccentPreset = LauncherAccentPreset.ICE_CYAN,
+  val fontStyle: LauncherFontStyle = LauncherFontStyle.DEFAULT,
+  val fontScale: Float = 1.0f,
+  val use24Hour: Boolean = true,
+)

@@ -17,7 +17,12 @@ import com.nexwork.edith.data.WeatherRepository
 import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.model.AppFootprint
 import com.nexwork.edith.model.DeviceTelemetry
+import com.nexwork.edith.model.LauncherAccentPreset
+import com.nexwork.edith.model.LauncherFontStyle
+import com.nexwork.edith.model.LauncherSettingsConfig
+import com.nexwork.edith.model.LauncherSettingsSection
 import com.nexwork.edith.model.LiveWeather
+import com.nexwork.edith.model.SettingsStage
 import com.nexwork.edith.model.WeatherCondition
 import com.nexwork.edith.notifications.EdithNotificationListener
 import com.nexwork.edith.ui.hud.HudCommand
@@ -68,6 +73,9 @@ data class LauncherHomeState(
   val hasNotificationAccess: Boolean = false,
   val otaState: OtaState = OtaState.Idle,
   val monetUiState: MonetUiState = MonetUiState(),
+  val settingsStage: SettingsStage = SettingsStage.CLOSED,
+  val selectedSettingsSection: LauncherSettingsSection? = null,
+  val launcherSettings: LauncherSettingsConfig = LauncherSettingsConfig(),
 )
 
 class MainScreenViewModel(
@@ -198,6 +206,7 @@ class MainScreenViewModel(
       val telemetry = launcherRepository.readTelemetry()
       val isDefault = launcherRepository.isDefaultLauncher()
       val notifAccess = launcherRepository.hasNotificationListenerAccess()
+      val savedSettings = if (launcherRepository.hasContext()) launcherRepository.getLauncherSettings() else null
       val quickAll = launcherRepository.selectQuickAccessApps(apps, maxCount = 20)
       val essentials = quickAll.take(4)
       val essentialPkgs = essentials.map { it.packageName }.toSet()
@@ -232,6 +241,8 @@ class MainScreenViewModel(
           telemetry = telemetry,
           isDefaultLauncher = isDefault,
           hasNotificationAccess = notifAccess,
+          launcherSettings = savedSettings ?: state.launcherSettings,
+          use24Hour = savedSettings?.use24Hour ?: state.use24Hour,
         )
       }
       withContext(Dispatchers.Default) { warmAppIcons(apps) }
@@ -352,25 +363,7 @@ class MainScreenViewModel(
         )
       }
       is HudCommand.SetRefreshRate -> {
-        val manager = shizukuControlManager
-        controlJob?.cancel()
-        controlJob = viewModelScope.launch {
-          if (manager != null && manager.isShizukuAuthorized()) {
-            val res = manager.setRefreshRate(command.hz ?: 120)
-            _launcherState.update { it.copy(shizukuControlAuthorized = true) }
-            _feedbackEvents.tryEmit(HudFeedbackEvent(res.formatStatusMessage()))
-            if (res.ok) {
-              delay(200L)
-              val refreshed = launcherRepository.readTelemetry()
-              _launcherState.update { it.copy(telemetry = refreshed) }
-            } else {
-              launcherRepository.openDisplaySettings()
-            }
-          } else {
-            launcherRepository.openDisplaySettings()
-          }
-          closeSpotlightSearch()
-        }
+        setRefreshRatePreset(command.hz, closeConsole = true)
       }
       HudCommand.ShowHelp -> {
         _launcherState.update {
@@ -694,9 +687,103 @@ class MainScreenViewModel(
     )
   }
 
+  fun setRefreshRatePreset(hz: Int?, closeConsole: Boolean = false) {
+    val manager = shizukuControlManager
+    controlJob?.cancel()
+    controlJob = viewModelScope.launch {
+      if (manager != null && manager.isShizukuAuthorized()) {
+        val res = manager.setRefreshRate(hz ?: 120)
+        _launcherState.update { it.copy(shizukuControlAuthorized = true) }
+        _feedbackEvents.tryEmit(HudFeedbackEvent(res.formatStatusMessage()))
+        if (res.ok) {
+          delay(200L)
+          val refreshed = launcherRepository.readTelemetry()
+          _launcherState.update { it.copy(telemetry = refreshed) }
+        } else {
+          launcherRepository.openDisplaySettings()
+        }
+      } else {
+        launcherRepository.openDisplaySettings()
+      }
+      if (closeConsole) {
+        closeSpotlightSearch()
+      }
+    }
+  }
+
   fun toggleTimeFormat() {
+    setUse24Hour(!_launcherState.value.launcherSettings.use24Hour)
+  }
+
+  fun setUse24Hour(enabled: Boolean) {
+    updateLauncherSettings { it.copy(use24Hour = enabled) }
+  }
+
+  /** Applies a launcher-only accent preset without altering OS-wide Shizuku Monet. */
+  fun updateLauncherAccent(preset: LauncherAccentPreset) {
+    updateLauncherSettings { it.copy(accentPreset = preset) }
+  }
+
+  fun updateLauncherFont(style: LauncherFontStyle) {
+    updateLauncherSettings { it.copy(fontStyle = style) }
+  }
+
+  fun updateLauncherFontScale(scale: Float) {
+    val clamped = scale.coerceIn(0.85f, 1.25f)
+    updateLauncherSettings { it.copy(fontScale = clamped) }
+  }
+
+  private fun updateLauncherSettings(transform: (LauncherSettingsConfig) -> LauncherSettingsConfig) {
+    var updated = LauncherSettingsConfig()
     _launcherState.update { state ->
-      state.copy(use24Hour = !state.use24Hour)
+      updated = transform(state.launcherSettings)
+      state.copy(
+        launcherSettings = updated,
+        use24Hour = updated.use24Hour,
+      )
+    }
+    launcherRepository.saveLauncherSettings(updated)
+  }
+
+  fun openSettingsRoot() {
+    _launcherState.update { state ->
+      state.copy(
+        settingsStage = SettingsStage.ROOT_BRANCHES,
+        selectedSettingsSection = null,
+        isSpotlightSearchOpen = false,
+        isAppBrowseOpen = false,
+        browseGroup = null,
+        searchQuery = "",
+        commandHint = null,
+        isAmbientCentered = false,
+      )
+    }
+  }
+
+  fun selectSettingsBranch(stage: SettingsStage) {
+    _launcherState.update { state ->
+      if (state.settingsStage == SettingsStage.CLOSED) state
+      else state.copy(
+        settingsStage = stage,
+        selectedSettingsSection = null,
+        isAmbientCentered = false,
+      )
+    }
+  }
+
+  fun selectLauncherSetting(section: LauncherSettingsSection?) {
+    _launcherState.update { state ->
+      if (state.settingsStage != SettingsStage.LAUNCHER_TREE) state
+      else state.copy(selectedSettingsSection = section)
+    }
+  }
+
+  fun dismissSettings() {
+    _launcherState.update { state ->
+      state.copy(
+        settingsStage = SettingsStage.CLOSED,
+        selectedSettingsSection = null,
+      )
     }
   }
 
@@ -757,6 +844,8 @@ class MainScreenViewModel(
         searchQuery = "",
         commandHint = null,
         isAmbientCentered = false,
+        settingsStage = SettingsStage.CLOSED,
+        selectedSettingsSection = null,
       )
     }
   }
@@ -782,6 +871,8 @@ class MainScreenViewModel(
         searchQuery = "",
         commandHint = null,
         isAmbientCentered = false,
+        settingsStage = SettingsStage.CLOSED,
+        selectedSettingsSection = null,
       )
     }
   }
@@ -815,8 +906,15 @@ class MainScreenViewModel(
   /** Parks the globe at center screen when no screen activity occurs. */
   fun enterAmbientCenter() {
     _launcherState.update { state ->
-      if (state.isSpotlightSearchOpen || state.isAppBrowseOpen || state.isAmbientCentered) state
-      else state.copy(isAmbientCentered = true)
+      if (state.isSpotlightSearchOpen ||
+        state.isAppBrowseOpen ||
+        state.settingsStage != SettingsStage.CLOSED ||
+        state.isAmbientCentered
+      ) {
+        state
+      } else {
+        state.copy(isAmbientCentered = true)
+      }
     }
   }
 
@@ -852,7 +950,26 @@ class MainScreenViewModel(
       if (current.browseGroup != null) closeAppGroup() else closeAppBrowse()
       return true
     }
-    return false
+    when (current.settingsStage) {
+      SettingsStage.CLOSED -> return false
+      SettingsStage.LAUNCHER_TREE -> {
+        if (current.selectedSettingsSection != null) {
+          selectLauncherSetting(null)
+        } else {
+          selectSettingsBranch(SettingsStage.ROOT_BRANCHES)
+        }
+        return true
+      }
+      SettingsStage.AGENT_PLACEHOLDER,
+      SettingsStage.SHIZUKU_PLACEHOLDER, -> {
+        selectSettingsBranch(SettingsStage.ROOT_BRANCHES)
+        return true
+      }
+      SettingsStage.ROOT_BRANCHES -> {
+        dismissSettings()
+        return true
+      }
+    }
   }
 }
 

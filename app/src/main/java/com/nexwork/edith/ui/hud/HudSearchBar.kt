@@ -61,8 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.theme.Crimson
-import com.nexwork.edith.theme.CrimsonBright
-import com.nexwork.edith.theme.LocalCrimsonMonetActive
+import com.nexwork.edith.theme.LocalLauncherStyle
 import com.nexwork.edith.theme.TextPureWhite
 import com.nexwork.edith.theme.TextSilver
 import kotlin.math.asin
@@ -98,7 +97,8 @@ fun HudSearchBar(
 ) {
   val density = LocalDensity.current
   val haptic = LocalHapticFeedback.current
-  val crimsonMonetActive = rememberUpdatedState(LocalCrimsonMonetActive.current)
+  val launcherStyle = LocalLauncherStyle.current
+  val accentColor = rememberUpdatedState(launcherStyle.accent)
   val focusRequester = remember { FocusRequester() }
   val focusManager = LocalFocusManager.current
   val keyboardController = LocalSoftwareKeyboardController.current
@@ -294,7 +294,7 @@ fun HudSearchBar(
               eyebrowOffsetY = (1f - hudEaseOutCubic(phase(r, 0.26f, 0.74f))) * 3.dp.toPx()
             }
 
-            val isMonet = crimsonMonetActive.value
+            val activeAccent = accentColor.value
 
             // 1. Shallow inverted orbital horizon arc + twin laser heads / idle orbital pulse
             if (trace > 0.01f) {
@@ -309,8 +309,8 @@ fun HudSearchBar(
                 if (i == 0) arcPath.moveTo(px, py) else arcPath.lineTo(px, py)
               }
               val arcColor = when {
-                isLaunchLocked -> Crimson.copy(alpha = 0.85f * arcAlpha)
-                typing || isMonet -> Crimson.copy(alpha = 0.65f * arcAlpha)
+                isLaunchLocked -> activeAccent.copy(alpha = 0.85f * arcAlpha)
+                typing -> activeAccent.copy(alpha = 0.65f * arcAlpha)
                 else -> SearchOrbitalSlate.copy(alpha = 0.52f * arcAlpha)
               }
               drawPath(path = arcPath, color = arcColor, style = arcStroke)
@@ -320,9 +320,9 @@ fun HudSearchBar(
                 val lx = cx - arcRadius * sin(tipTheta)
                 val rx = cx + arcRadius * sin(tipTheta)
                 val ty = arcCenterY - arcRadius * cos(tipTheta)
-                drawCircle(CrimsonBright.copy(alpha = 0.35f * arcAlpha), 4.0f.dp.toPx(), Offset(lx, ty))
+                drawCircle(activeAccent.copy(alpha = 0.35f * arcAlpha), 4.0f.dp.toPx(), Offset(lx, ty))
                 drawCircle(Color.White.copy(alpha = 0.92f * arcAlpha), 1.4f.dp.toPx(), Offset(lx, ty))
-                drawCircle(CrimsonBright.copy(alpha = 0.35f * arcAlpha), 4.0f.dp.toPx(), Offset(rx, ty))
+                drawCircle(activeAccent.copy(alpha = 0.35f * arcAlpha), 4.0f.dp.toPx(), Offset(rx, ty))
                 drawCircle(Color.White.copy(alpha = 0.92f * arcAlpha), 1.4f.dp.toPx(), Offset(rx, ty))
               } else if (trace >= 0.985f && !isDismissing) {
                 // Travelling telemetry dot gliding smoothly along the inverted orbital arc
@@ -330,13 +330,13 @@ fun HudSearchBar(
                 val sx = cx + arcRadius * sin(sweepTheta)
                 val sy = arcCenterY - arcRadius * cos(sweepTheta)
                 val dotAlpha = if (typing) 0.88f else 0.45f
-                drawCircle(CrimsonBright.copy(alpha = 0.28f * dotAlpha), 3.6f.dp.toPx(), Offset(sx, sy))
+                drawCircle(activeAccent.copy(alpha = 0.28f * dotAlpha), 3.6f.dp.toPx(), Offset(sx, sy))
                 drawCircle(TextPureWhite.copy(alpha = 0.9f * dotAlpha), 1.2f.dp.toPx(), Offset(sx, sy))
               }
             }
 
             if (sparkAlpha > 0.01f) {
-              drawCircle(CrimsonBright.copy(alpha = 0.38f * sparkAlpha), 4.8f.dp.toPx(), Offset(cx, arcApexY))
+              drawCircle(activeAccent.copy(alpha = 0.38f * sparkAlpha), 4.8f.dp.toPx(), Offset(cx, arcApexY))
               drawCircle(Color.White.copy(alpha = 0.95f * sparkAlpha), 1.6f.dp.toPx(), Offset(cx, arcApexY))
             }
 
@@ -357,7 +357,7 @@ fun HudSearchBar(
                 val strokeW = if (isCenter) 1.5.dp.toPx() else 1.dp.toPx()
                 val lit = isCenter || isLaunchLocked || (typing && distIdx <= 1)
                 val tickColor = if (lit) {
-                  CrimsonBright.copy(alpha = 0.92f * localPop)
+                  activeAccent.copy(alpha = 0.92f * localPop)
                 } else {
                   SearchOrbitalSlate.copy(alpha = 0.55f * localPop)
                 }
@@ -424,8 +424,8 @@ fun HudSearchBar(
     ) {
       Text(
         text = ">",
-        color = if (typing) CrimsonBright else TextSilver.copy(alpha = 0.65f),
-        fontSize = 18.sp,
+        color = if (typing) launcherStyle.accent else TextSilver.copy(alpha = 0.65f),
+        fontSize = (18f * launcherStyle.fontScale).sp,
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.Bold,
       )
@@ -441,12 +441,12 @@ fun HudSearchBar(
           singleLine = true,
           textStyle = TextStyle(
             color = TextPureWhite,
-            fontSize = 19.sp,
+            fontSize = (19f * launcherStyle.fontScale).sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Medium,
             letterSpacing = 1.6.sp,
           ),
-          cursorBrush = SolidColor(CrimsonBright),
+          cursorBrush = SolidColor(launcherStyle.accent),
           keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
           keyboardActions = KeyboardActions(
             onSearch = {
@@ -486,7 +486,7 @@ fun HudSearchBar(
       Spacer(Modifier.width(8.dp))
       Text(
         text = countLabel,
-        color = if (typing) CrimsonBright else TextSilver.copy(alpha = 0.75f),
+        color = if (typing) launcherStyle.accent else TextSilver.copy(alpha = 0.75f),
         fontSize = 10.sp,
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.Bold,

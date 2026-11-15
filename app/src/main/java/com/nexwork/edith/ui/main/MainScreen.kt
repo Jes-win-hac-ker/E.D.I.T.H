@@ -57,12 +57,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
 import kotlinx.coroutines.delay
+import com.nexwork.edith.model.SettingsStage
 import com.nexwork.edith.theme.EDITHTheme
 import com.nexwork.edith.ui.hud.CrimeSceneFocusOverlay
 import com.nexwork.edith.ui.hud.HudCardDeck
 import com.nexwork.edith.ui.hud.HudClock
 import com.nexwork.edith.ui.hud.HudOtaPill
 import com.nexwork.edith.ui.hud.HudSearchBar
+import com.nexwork.edith.ui.hud.HudSettingsTree
 import com.nexwork.edith.ui.hud.GlobeController
 import com.nexwork.edith.ui.hud.InteractiveWireframeGlobe
 import com.nexwork.edith.ui.hud.groupApps
@@ -181,6 +183,7 @@ fun MainScreen(
   }
 
   val consoleOpen = state.isSpotlightSearchOpen || state.isAppBrowseOpen
+  val settingsOpen = state.settingsStage != SettingsStage.CLOSED
   val searchOpen = state.isSpotlightSearchOpen
   val dismissConsole: () -> Unit = {
     lastScreenActivityMs = System.currentTimeMillis()
@@ -237,6 +240,7 @@ fun MainScreen(
   LaunchedEffect(
     isResumed,
     consoleOpen,
+    settingsOpen,
     searchOpen,
     state.searchQuery,
     state.browseGroup,
@@ -245,6 +249,7 @@ fun MainScreen(
     lastScreenActivityMs,
   ) {
     if (!isResumed) return@LaunchedEffect
+    if (settingsOpen) return@LaunchedEffect
     if (consoleOpen) {
       if (isCardActionArmed) return@LaunchedEffect
       val timeoutMs = if (searchOpen && state.searchQuery.isEmpty()) 4_000L else 10_000L
@@ -260,13 +265,16 @@ fun MainScreen(
     }
   }
 
-  // Back climbs one level: a category back to the categories, then the console closed.
-  BackHandler(enabled = consoleOpen) {
+  // Back climbs one level: detail -> branch -> root settings -> home, or search/browse unwind.
+  BackHandler(enabled = consoleOpen || settingsOpen) {
     lastScreenActivityMs = System.currentTimeMillis()
     viewModel.handleBackPress()
   }
 
-  EDITHTheme(crimsonMonetActive = state.monetUiState.isEnabledPersisted) {
+  EDITHTheme(
+    crimsonMonetActive = state.monetUiState.isEnabledPersisted,
+    launcherSettings = state.launcherSettings,
+  ) {
   BoxWithConstraints(
     modifier = modifier
       .fillMaxSize()
@@ -289,8 +297,8 @@ fun MainScreen(
           }
         }
       }
-      .pointerInput(consoleOpen) {
-        if (!consoleOpen) {
+      .pointerInput(consoleOpen, settingsOpen) {
+        if (!consoleOpen && !settingsOpen) {
           awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val downTimeMs = System.currentTimeMillis()
@@ -322,15 +330,28 @@ fun MainScreen(
             var totalDy = 0f
             var isDrag = false
             var isPinch = false
+            var settingsTriggered = false
             var prevSpan = 0f
             // 0 = UNDECIDED, 1 = GLOBE_ROTATE, 2 = HUD_SWIPE
             var gestureMode = if (startedOnGlobe || isSystemEdge) 1 else 0
 
             while (true) {
-              val event = awaitPointerEvent()
+              val elapsedHoldMs = System.currentTimeMillis() - downTimeMs
+              val remainingHoldMs = (1_000L - elapsedHoldMs).coerceAtLeast(1L)
+              val event = if (startedOnGlobe && !isDrag && !isPinch && !settingsTriggered) {
+                withTimeoutOrNull(remainingHoldMs) { awaitPointerEvent() }
+              } else {
+                awaitPointerEvent()
+              }
+              if (event == null) {
+                settingsTriggered = true
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                viewModel.openSettingsRoot()
+                continue
+              }
               val activeChanges = event.changes.filter { it.pressed }
               if (activeChanges.isEmpty()) {
-                if (!isDrag && !isPinch) {
+                if (!isDrag && !isPinch && !settingsTriggered) {
                   event.changes.forEach { it.consume() }
                   haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                   val normX = normStartX.coerceIn(0f, 1f)
@@ -458,12 +479,13 @@ fun MainScreen(
     )
 
     // The clock crowns the globe horizon apex after startup assembly completes and the globe rests at horizon.
-    val topHudHidden = consoleOpen || state.isAmbientCentered || !isGlobeAtHorizon || !isStartupComplete
+    val topHudHidden = consoleOpen || settingsOpen || state.isAmbientCentered || !isGlobeAtHorizon || !isStartupComplete
     val globeApexY = maxHeight * 0.64f
     val clockTop = (globeApexY - 82.dp).coerceAtLeast(66.dp)
     HudClock(
       isOpen = topHudHidden,
       redrawSignal = clockRedrawSignal,
+      use24Hour = state.launcherSettings.use24Hour,
       screenWidth = maxWidth,
       screenHeight = maxHeight,
       onMountedChange = { isClockMounted = it },
@@ -482,6 +504,32 @@ fun MainScreen(
       modifier = Modifier
         .align(Alignment.TopStart)
         .padding(start = 18.dp, end = 18.dp, top = otaTop),
+    )
+
+    HudSettingsTree(
+      stage = state.settingsStage,
+      selectedSection = state.selectedSettingsSection,
+      settings = state.launcherSettings,
+      telemetry = state.telemetry,
+      liveWeather = state.liveWeather,
+      isDefaultLauncher = state.isDefaultLauncher,
+      hasNotificationAccess = state.hasNotificationAccess,
+      otaState = state.otaState,
+      onSelectBranch = viewModel::selectSettingsBranch,
+      onSelectSection = viewModel::selectLauncherSetting,
+      onBackStep = { viewModel.handleBackPress() },
+      onCloseAll = viewModel::dismissSettings,
+      onAccentChange = viewModel::updateLauncherAccent,
+      onFontChange = viewModel::updateLauncherFont,
+      onFontScaleChange = viewModel::updateLauncherFontScale,
+      onUse24HourChange = viewModel::setUse24Hour,
+      onRefreshRateSelect = { hz -> viewModel.setRefreshRatePreset(hz) },
+      onRefreshWeather = { viewModel.refreshWeather(forceRefresh = true, announceResult = true) },
+      onOpenAlarms = viewModel::openClockOrAlarms,
+      onOpenHomeSettings = viewModel::openHomeSettings,
+      onOpenUsageSettings = viewModel::openUsageAccessSettings,
+      onOpenNotificationSettings = viewModel::openNotificationAccessSettings,
+      onCheckOta = { viewModel.checkForUpdates(force = true) },
     )
 
     // Tap outside the console dismisses it when open

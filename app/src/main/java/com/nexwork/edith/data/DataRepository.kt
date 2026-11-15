@@ -26,6 +26,9 @@ import android.view.WindowManager
 import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.model.AppFootprint
 import com.nexwork.edith.model.DeviceTelemetry
+import com.nexwork.edith.model.LauncherAccentPreset
+import com.nexwork.edith.model.LauncherFontStyle
+import com.nexwork.edith.model.LauncherSettingsConfig
 import java.net.URLEncoder
 import java.util.Collections
 import java.util.concurrent.TimeUnit
@@ -77,6 +80,33 @@ class LauncherRepository(private var context: Context? = null) {
     }
     prefs?.edit()?.putStringSet(KEY_PINNED_PACKAGES, current)?.apply()
     return current
+  }
+
+  fun getLauncherSettings(): LauncherSettingsConfig {
+    val p = prefs ?: return LauncherSettingsConfig()
+    val accentName = p.getString(KEY_LAUNCHER_ACCENT, null)
+    val accent = LauncherAccentPreset.entries.firstOrNull { it.name == accentName }
+      ?: LauncherAccentPreset.ICE_CYAN
+    val fontName = p.getString(KEY_LAUNCHER_FONT, null)
+    val font = LauncherFontStyle.entries.firstOrNull { it.name == fontName }
+      ?: LauncherFontStyle.DEFAULT
+    val fontScale = p.getFloat(KEY_LAUNCHER_FONT_SCALE, 1.0f).coerceIn(0.85f, 1.25f)
+    val use24Hour = p.getBoolean(KEY_USE_24_HOUR, true)
+    return LauncherSettingsConfig(
+      accentPreset = accent,
+      fontStyle = font,
+      fontScale = fontScale,
+      use24Hour = use24Hour,
+    )
+  }
+
+  fun saveLauncherSettings(config: LauncherSettingsConfig) {
+    prefs?.edit()
+      ?.putString(KEY_LAUNCHER_ACCENT, config.accentPreset.name)
+      ?.putString(KEY_LAUNCHER_FONT, config.fontStyle.name)
+      ?.putFloat(KEY_LAUNCHER_FONT_SCALE, config.fontScale.coerceIn(0.85f, 1.25f))
+      ?.putBoolean(KEY_USE_24_HOUR, config.use24Hour)
+      ?.apply()
   }
 
   fun hasUsageStatsPermission(): Boolean {
@@ -603,6 +633,10 @@ class LauncherRepository(private var context: Context? = null) {
 
   companion object {
     private const val KEY_PINNED_PACKAGES = "pinned_packages"
+    private const val KEY_LAUNCHER_ACCENT = "launcher_accent_preset"
+    private const val KEY_LAUNCHER_FONT = "launcher_font_style"
+    private const val KEY_LAUNCHER_FONT_SCALE = "launcher_font_scale"
+    private const val KEY_USE_24_HOUR = "launcher_use_24_hour"
 
     private val BARE_DOMAIN_REGEX =
       Regex("""^[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)+([/?#].*)?$""")

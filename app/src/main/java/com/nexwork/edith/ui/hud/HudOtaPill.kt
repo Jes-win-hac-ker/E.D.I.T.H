@@ -47,8 +47,7 @@ import androidx.compose.ui.unit.sp
 import com.nexwork.edith.data.OtaState
 import com.nexwork.edith.theme.Crimson
 import com.nexwork.edith.theme.CrimsonBright
-import com.nexwork.edith.theme.CrimsonDim
-import com.nexwork.edith.theme.LocalCrimsonMonetActive
+import com.nexwork.edith.theme.LocalLauncherStyle
 import com.nexwork.edith.theme.TextPureWhite
 import kotlin.math.roundToInt
 
@@ -171,7 +170,8 @@ fun HudOtaPill(
 
   val density = LocalDensity.current
   val haptic = LocalHapticFeedback.current
-  val crimsonMonetActive = rememberUpdatedState(LocalCrimsonMonetActive.current)
+  val launcherStyle = LocalLauncherStyle.current
+  val accentColor = rememberUpdatedState(launcherStyle.accent)
 
   val rawProgress = if (renderState is OtaState.Downloading) renderState.progress / 100f else 0f
   val animatedProgress by animateFloatAsState(
@@ -259,13 +259,15 @@ fun HudOtaPill(
         }
 
         // 1. Center-out traced orbital baseline + laser tips / zenith spark
+        val activeAccent = accentColor.value
+        val activeDim = activeAccent.copy(alpha = 0.42f)
         if (trace > 0.01f) {
           val leftX = cx - halfSpan * trace
           val rightX = cx + halfSpan * trace
-          val baseColor = if (copy.isError || crimsonMonetActive.value) {
+          val baseColor = if (copy.isError) {
             Crimson.copy(alpha = 0.62f * lineAlpha)
           } else {
-            OtaOrbitalSlate.copy(alpha = 0.45f * lineAlpha)
+            activeAccent.copy(alpha = 0.45f * lineAlpha)
           }
           drawLine(
             color = baseColor,
@@ -276,21 +278,21 @@ fun HudOtaPill(
           )
 
           if (trace in 0.02f..0.985f) {
-            drawCircle(CrimsonBright.copy(alpha = 0.35f * lineAlpha), 4.0f.dp.toPx(), Offset(leftX, baselineY))
+            drawCircle(activeAccent.copy(alpha = 0.35f * lineAlpha), 4.0f.dp.toPx(), Offset(leftX, baselineY))
             drawCircle(Color.White.copy(alpha = 0.92f * lineAlpha), 1.4f.dp.toPx(), Offset(leftX, baselineY))
-            drawCircle(CrimsonBright.copy(alpha = 0.35f * lineAlpha), 4.0f.dp.toPx(), Offset(rightX, baselineY))
+            drawCircle(activeAccent.copy(alpha = 0.35f * lineAlpha), 4.0f.dp.toPx(), Offset(rightX, baselineY))
             drawCircle(Color.White.copy(alpha = 0.92f * lineAlpha), 1.4f.dp.toPx(), Offset(rightX, baselineY))
           } else if (renderState is OtaState.Downloading && trace >= 0.985f) {
-            // Left-to-right crimson laser progress bar
+            // Left-to-right laser progress bar
             val fillX = (size.width * animatedProgress).coerceAtLeast(2.dp.toPx())
             drawLine(
-              color = Crimson.copy(alpha = lineAlpha),
+              color = activeAccent.copy(alpha = lineAlpha),
               start = Offset(0f, baselineY),
               end = Offset(fillX, baselineY),
               strokeWidth = strokeFill,
               cap = StrokeCap.Round,
             )
-            drawCircle(CrimsonBright.copy(alpha = 0.38f * lineAlpha), 4.2f.dp.toPx(), Offset(fillX, baselineY))
+            drawCircle(activeAccent.copy(alpha = 0.38f * lineAlpha), 4.2f.dp.toPx(), Offset(fillX, baselineY))
             drawCircle(TextPureWhite.copy(alpha = 0.95f * lineAlpha), 1.5f.dp.toPx(), Offset(fillX, baselineY))
           } else if (copy.isScanning && trace >= 0.985f) {
             // Sweeping laser pulse along the baseline during scan/apply
@@ -299,20 +301,20 @@ fun HudOtaPill(
             val pStart = (pulseCenter - pulseHalf).coerceIn(0f, size.width)
             val pEnd = (pulseCenter + pulseHalf).coerceIn(0f, size.width)
             drawLine(
-              color = Crimson.copy(alpha = 0.9f * lineAlpha),
+              color = activeAccent.copy(alpha = 0.9f * lineAlpha),
               start = Offset(pStart, baselineY),
               end = Offset(pEnd, baselineY),
               strokeWidth = strokeFill,
               cap = StrokeCap.Round,
             )
-            drawCircle(CrimsonBright.copy(alpha = 0.35f * lineAlpha), 4.0f.dp.toPx(), Offset(pulseCenter, baselineY))
+            drawCircle(activeAccent.copy(alpha = 0.35f * lineAlpha), 4.0f.dp.toPx(), Offset(pulseCenter, baselineY))
             drawCircle(TextPureWhite.copy(alpha = 0.92f * lineAlpha), 1.4f.dp.toPx(), Offset(pulseCenter, baselineY))
           } else if (trace >= 0.985f) {
             // Center zenith telemetry pip aligned with HudClock axis
             val pipAlpha = textAlpha * 0.92f
-            drawCircle(CrimsonDim.copy(alpha = 0.45f * pipAlpha), 4.0f.dp.toPx(), Offset(cx, baselineY))
+            drawCircle(activeDim.copy(alpha = 0.45f * pipAlpha), 4.0f.dp.toPx(), Offset(cx, baselineY))
             drawCircle(
-              color = CrimsonBright.copy(alpha = pipAlpha),
+              color = activeAccent.copy(alpha = pipAlpha),
               radius = 1.8f.dp.toPx(),
               center = Offset(cx, baselineY),
             )
@@ -320,7 +322,7 @@ fun HudOtaPill(
         }
 
         if (sparkAlpha > 0.01f) {
-          drawCircle(CrimsonBright.copy(alpha = 0.38f * sparkAlpha), 4.6f.dp.toPx(), Offset(cx, baselineY))
+          drawCircle(activeAccent.copy(alpha = 0.38f * sparkAlpha), 4.6f.dp.toPx(), Offset(cx, baselineY))
           drawCircle(Color.White.copy(alpha = 0.95f * sparkAlpha), 1.6f.dp.toPx(), Offset(cx, baselineY))
         }
 
@@ -381,7 +383,7 @@ fun HudOtaPill(
       if (copy.badge != null) {
         Text(
           text = copy.badge,
-          color = CrimsonBright,
+          color = if (copy.isError) CrimsonBright else launcherStyle.accent,
           fontFamily = FontFamily.Monospace,
           fontSize = 11.sp,
           fontWeight = FontWeight.Bold,

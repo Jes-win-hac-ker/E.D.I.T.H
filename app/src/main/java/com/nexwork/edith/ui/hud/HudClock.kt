@@ -30,10 +30,9 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.nexwork.edith.model.LauncherAccentPreset
 import com.nexwork.edith.theme.Crimson
-import com.nexwork.edith.theme.CrimsonBright
-import com.nexwork.edith.theme.CrimsonDim
-import com.nexwork.edith.theme.LocalCrimsonMonetActive
+import com.nexwork.edith.theme.LocalLauncherStyle
 import java.util.Calendar
 import java.util.TimeZone
 import kotlin.math.abs
@@ -62,11 +61,19 @@ private class ClockFace {
   var hour = 0
   var minute = 0
   var second = 0
+  var isPm = false
   val digits = CharArray(6)
 
-  fun tick(now: Long) {
+  fun tick(now: Long, use24Hour: Boolean = true) {
     val local = now + TimeZone.getDefault().getOffset(now)
-    hour = ((local / 3_600_000L) % 24L).toInt()
+    val hour24 = ((local / 3_600_000L) % 24L).toInt()
+    isPm = hour24 >= 12
+    hour = if (use24Hour) {
+      hour24
+    } else {
+      val mod = hour24 % 12
+      if (mod == 0) 12 else mod
+    }
     minute = ((local / 60_000L) % 60L).toInt()
     second = ((local / 1000L) % 60L).toInt()
     digits[0] = ('0' + hour / 10)
@@ -101,16 +108,18 @@ fun HudClock(
   isOpen: Boolean,
   modifier: Modifier = Modifier,
   redrawSignal: Int = 0,
+  use24Hour: Boolean = true,
   screenWidth: Dp = 360.dp,
   screenHeight: Dp = 800.dp,
   onMountedChange: (Boolean) -> Unit = {},
 ) {
   val density = LocalDensity.current
-  val crimsonMonetActive = rememberUpdatedState(LocalCrimsonMonetActive.current)
+  val launcherStyle = rememberUpdatedState(LocalLauncherStyle.current)
+  val use24HourState = rememberUpdatedState(use24Hour)
   val screenWidthState = rememberUpdatedState(screenWidth)
   val screenHeightState = rememberUpdatedState(screenHeight)
   val currentOnMountedChange = rememberUpdatedState(onMountedChange)
-  val face = remember { ClockFace().apply { tick(System.currentTimeMillis()) } }
+  val face = remember { ClockFace().apply { tick(System.currentTimeMillis(), use24Hour) } }
   val secondTick = remember { mutableIntStateOf(0) }
 
   val revealAnim = remember { Animatable(0f) }
@@ -141,15 +150,15 @@ fun HudClock(
     }
   }
 
-  LaunchedEffect(face, mounted) {
+  LaunchedEffect(face, mounted, use24Hour) {
     if (!mounted) return@LaunchedEffect
     val initNow = System.currentTimeMillis()
     face.syncStrings(initNow)
-    face.tick(initNow)
+    face.tick(initNow, use24HourState.value)
     secondTick.intValue = (initNow / 1000L).toInt()
     while (true) {
       val now = System.currentTimeMillis()
-      face.tick(now)
+      face.tick(now, use24HourState.value)
       secondTick.intValue = (now / 1000L).toInt()
       delay(1000L - now % 1000L + 4L)
     }
@@ -299,7 +308,10 @@ fun HudClock(
               wingSlideY = (1f - wingEased) * 5f.dp.toPx()
             }
 
-            val isMonet = crimsonMonetActive.value
+            val style = launcherStyle.value
+            val accentColor = style.accent
+            val accentDim = accentColor.copy(alpha = 0.40f)
+            val isCrimsonPreset = style.accentPreset == LauncherAccentPreset.STARK_CRIMSON
 
             // 1. Curved Orbital Horizon Arc + Zenith Ignition Spark
             if (trace > 0.01f) {
@@ -315,7 +327,7 @@ fun HudClock(
               }
               drawPath(
                 path = arcPath,
-                color = if (isMonet) Crimson.copy(alpha = 0.62f * arcAlpha) else OrbitalSlate.copy(alpha = 0.52f * arcAlpha),
+                color = if (isCrimsonPreset) Crimson.copy(alpha = 0.62f * arcAlpha) else accentColor.copy(alpha = 0.42f * arcAlpha),
                 style = arcStroke,
               )
 
@@ -324,15 +336,15 @@ fun HudClock(
                 val tipLx = cx - arcRadius * sin(tipTheta)
                 val tipRx = cx + arcRadius * sin(tipTheta)
                 val tipY = arcCenterY - arcRadius * cos(tipTheta)
-                drawCircle(CrimsonBright.copy(alpha = 0.35f * arcAlpha), 4.2f.dp.toPx(), Offset(tipLx, tipY))
+                drawCircle(accentColor.copy(alpha = 0.35f * arcAlpha), 4.2f.dp.toPx(), Offset(tipLx, tipY))
                 drawCircle(Color.White.copy(alpha = 0.92f * arcAlpha), 1.5f.dp.toPx(), Offset(tipLx, tipY))
-                drawCircle(CrimsonBright.copy(alpha = 0.35f * arcAlpha), 4.2f.dp.toPx(), Offset(tipRx, tipY))
+                drawCircle(accentColor.copy(alpha = 0.35f * arcAlpha), 4.2f.dp.toPx(), Offset(tipRx, tipY))
                 drawCircle(Color.White.copy(alpha = 0.92f * arcAlpha), 1.5f.dp.toPx(), Offset(tipRx, tipY))
               }
             }
             if (sparkAlpha > 0.01f) {
               val apexY = arcCenterY - arcRadius
-              drawCircle(CrimsonBright.copy(alpha = 0.38f * sparkAlpha), 5.0f.dp.toPx(), Offset(cx, apexY))
+              drawCircle(accentColor.copy(alpha = 0.38f * sparkAlpha), 5.0f.dp.toPx(), Offset(cx, apexY))
               drawCircle(Color.White.copy(alpha = 0.95f * sparkAlpha), 1.8f.dp.toPx(), Offset(cx, apexY))
             }
 
@@ -347,13 +359,13 @@ fun HudClock(
                 drawDecrypt(eyebrowText, eyebrowDecrypt, 12, eyebrowPaint, eyebrowX, eyebrowBaseline)
               }
               drawCircle(
-                color = (if (ticked % 2 == 0) CrimsonBright else CrimsonDim).copy(alpha = eyebrowP),
+                color = (if (ticked % 2 == 0) accentColor else accentDim).copy(alpha = eyebrowP),
                 radius = 2.0f.dp.toPx(),
                 center = Offset(cx, Y(18f)),
               )
             }
 
-            // 3. Giant Frameless HH:MM Numerals & Central Crimson Pulse Spine
+            // 3. Giant Frameless HH:MM Numerals & Central Accent Pulse Spine
             if (timeP > 0.005f) {
               val timeAlpha = (timeP * 1.18f).coerceIn(0f, 1f)
               timePaint.alpha = (255f * timeAlpha).roundToInt().coerceIn(0, 255)
@@ -371,7 +383,7 @@ fun HudClock(
                 strokeWidth = spineStroke,
                 cap = StrokeCap.Round,
               )
-              val colonColor = (if (ticked % 2 == 0) CrimsonBright else CrimsonDim).copy(
+              val colonColor = (if (ticked % 2 == 0) accentColor else accentDim).copy(
                 alpha = if (ticked % 2 == 0) timeAlpha else 0.45f * timeAlpha,
               )
               val pipSize = 3.2f.dp.toPx()
@@ -416,7 +428,7 @@ fun HudClock(
                   else -> 0.8f.dp.toPx()
                 }
                 val tickColor = when {
-                  isHead -> CrimsonBright.copy(alpha = localPop)
+                  isHead -> accentColor.copy(alpha = localPop)
                   isPassed -> Color.White.copy(alpha = (if (isMajor) 0.65f else 0.34f) * localPop)
                   else -> OrbitalSlate.copy(alpha = (if (isMajor) 0.24f else 0.12f) * localPop)
                 }
@@ -431,8 +443,8 @@ fun HudClock(
 
                 if (isHead) {
                   val orbCenter = Offset(bx + nx * (tickLen + 2.5f * uy), by + ny * (tickLen + 2.5f * uy))
-                  drawCircle(CrimsonBright.copy(alpha = 0.35f * localPop), 4.0f.dp.toPx(), orbCenter)
-                  drawCircle(CrimsonBright.copy(alpha = localPop), 2.1f.dp.toPx(), orbCenter)
+                  drawCircle(accentColor.copy(alpha = 0.35f * localPop), 4.0f.dp.toPx(), orbCenter)
+                  drawCircle(accentColor.copy(alpha = localPop), 2.1f.dp.toPx(), orbCenter)
                 }
               }
             }
@@ -453,14 +465,24 @@ fun HudClock(
               secChars[1] = face.digits[4]
               secChars[2] = face.digits[5]
               secReadoutPaint.color = if (ticked % 2 == 0) {
-                android.graphics.Color.argb((255 * wingAlpha).toInt().coerceIn(0, 255), 255, 77, 94)
+                android.graphics.Color.argb(
+                  (255 * wingAlpha).toInt().coerceIn(0, 255),
+                  (accentColor.red * 255f).roundToInt().coerceIn(0, 255),
+                  (accentColor.green * 255f).roundToInt().coerceIn(0, 255),
+                  (accentColor.blue * 255f).roundToInt().coerceIn(0, 255),
+                )
               } else {
                 android.graphics.Color.argb((235 * wingAlpha).toInt().coerceIn(0, 235), 248, 250, 252)
               }
               canvas.drawText(secChars, 0, 3, rightWingX, secBaseline + wingSlideY, secReadoutPaint)
 
               wingRightPaint.alpha = (165 * wingAlpha).toInt().coerceIn(0, 165)
-              canvas.drawText(face.zone, rightWingX - secWidth - 5f * ux, wingBaseline + wingSlideY, wingRightPaint)
+              val zoneText = if (use24HourState.value) {
+                face.zone
+              } else {
+                "${if (face.isPm) "PM" else "AM"} · ${face.zone}"
+              }
+              canvas.drawText(zoneText, rightWingX - secWidth - 5f * ux, wingBaseline + wingSlideY, wingRightPaint)
             }
           }
         },
