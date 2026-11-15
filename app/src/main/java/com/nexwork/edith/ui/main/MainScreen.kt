@@ -51,12 +51,14 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
 import kotlinx.coroutines.delay
+import com.nexwork.edith.LocalHomeResetSignal
 import com.nexwork.edith.model.SettingsStage
 import com.nexwork.edith.theme.EDITHTheme
 import com.nexwork.edith.ui.hud.CrimeSceneFocusOverlay
@@ -64,7 +66,8 @@ import com.nexwork.edith.ui.hud.HudCardDeck
 import com.nexwork.edith.ui.hud.HudClock
 import com.nexwork.edith.ui.hud.HudOtaPill
 import com.nexwork.edith.ui.hud.HudSearchBar
-import com.nexwork.edith.ui.hud.HudSettingsTree
+import com.nexwork.edith.ui.hud.HudSettingsOverlayLayer
+import com.nexwork.edith.ui.hud.HudSettingsRootLayer
 import com.nexwork.edith.ui.hud.GlobeController
 import com.nexwork.edith.ui.hud.InteractiveWireframeGlobe
 import com.nexwork.edith.ui.hud.groupApps
@@ -101,9 +104,13 @@ fun MainScreen(
   var isClockMounted by remember { mutableStateOf(false) }
   var isOtaMounted by remember { mutableStateOf(false) }
   val isHudMounted = isClockMounted || isOtaMounted
+  var isSettingsRootMounted by remember { mutableStateOf(false) }
+  var isSettingsOverlayMounted by remember { mutableStateOf(false) }
+  val isSettingsMounted = isSettingsRootMounted || isSettingsOverlayMounted
   var clockRedrawSignal by remember { mutableIntStateOf(0) }
   var lastHapticRedrawSignal by remember { mutableIntStateOf(0) }
   var lastHomeWakeMs by remember { mutableLongStateOf(0L) }
+  val homeResetSignal = LocalHomeResetSignal.current
 
   val triggerHomeWake: () -> Unit = {
     val now = System.currentTimeMillis()
@@ -113,11 +120,24 @@ fun MainScreen(
     viewModel.wakeFromAmbient()
     viewModel.closeSpotlightSearch()
     viewModel.closeAppBrowse()
+    viewModel.dismissSettings()
     if (now - lastHomeWakeMs > 600L) {
       lastHomeWakeMs = now
       clockRedrawSignal++
       globeController.playStartupAnimation()
     }
+  }
+
+  LaunchedEffect(homeResetSignal) {
+    if (homeResetSignal > 0) {
+      triggerHomeWake()
+    }
+  }
+
+  LaunchedEffect(state.settingsStage) {
+    val behindGlobe = state.settingsStage != SettingsStage.CLOSED &&
+      state.settingsStage != SettingsStage.ROOT_BRANCHES
+    globeController.setSettingsBackdropActive(behindGlobe)
   }
 
   LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
@@ -266,7 +286,7 @@ fun MainScreen(
   }
 
   // Back climbs one level: detail -> branch -> root settings -> home, or search/browse unwind.
-  BackHandler(enabled = consoleOpen || settingsOpen) {
+  BackHandler(enabled = consoleOpen || settingsOpen || isSettingsMounted) {
     lastScreenActivityMs = System.currentTimeMillis()
     viewModel.handleBackPress()
   }
@@ -278,6 +298,7 @@ fun MainScreen(
   BoxWithConstraints(
     modifier = modifier
       .fillMaxSize()
+      .background(Color.Black)
       .pointerInput(Unit) {
         awaitPointerEventScope {
           while (true) {
@@ -297,8 +318,8 @@ fun MainScreen(
           }
         }
       }
-      .pointerInput(consoleOpen, settingsOpen) {
-        if (!consoleOpen && !settingsOpen) {
+      .pointerInput(consoleOpen, settingsOpen, isSettingsMounted) {
+        if (!consoleOpen && !settingsOpen && !isSettingsMounted) {
           awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val downTimeMs = System.currentTimeMillis()
@@ -448,10 +469,22 @@ fun MainScreen(
       }
     }
 
+    // Root settings branch sits above the globe (zIndex 2f) when active, and sinks behind
+    // the transparent-background 3D globe (zIndex 0f < 1f) when receding into Stage 2/3.
+    HudSettingsRootLayer(
+      stage = state.settingsStage,
+      screenWidth = maxWidth,
+      screenHeight = maxHeight,
+      onSelectBranch = viewModel::selectSettingsBranch,
+      onMountedChange = { isSettingsRootMounted = it },
+      modifier = Modifier.zIndex(if (state.settingsStage == SettingsStage.ROOT_BRANCHES) 2f else 0f),
+    )
+
     // Wireframe Earth backdrop with synchronized rack-focus dolly zoom and stepped blur
     Box(
       Modifier
         .fillMaxSize()
+        .zIndex(1f)
         .graphicsLayer {
           val p = backdropProgress.value
           val zoom = 1f + 0.08f * p
@@ -464,7 +497,6 @@ fun MainScreen(
             null
           }
         }
-        .background(Color.Black)
     ) {
       InteractiveWireframeGlobe(
         controller = globeController,
@@ -475,11 +507,12 @@ fun MainScreen(
     // Crime scene intro camera lens depth overlay
     CrimeSceneFocusOverlay(
       isOpen = consoleOpen,
-      modifier = Modifier.fillMaxSize(),
+      modifier = Modifier.fillMaxSize().zIndex(1.5f),
     )
 
     // The clock crowns the globe horizon apex after startup assembly completes and the globe rests at horizon.
-    val topHudHidden = consoleOpen || settingsOpen || state.isAmbientCentered || !isGlobeAtHorizon || !isStartupComplete
+    val topHudHidden =
+      consoleOpen || settingsOpen || isSettingsMounted || state.isAmbientCentered || !isGlobeAtHorizon || !isStartupComplete
     val globeApexY = maxHeight * 0.64f
     val clockTop = (globeApexY - 82.dp).coerceAtLeast(66.dp)
     HudClock(
@@ -490,6 +523,7 @@ fun MainScreen(
       screenHeight = maxHeight,
       onMountedChange = { isClockMounted = it },
       modifier = Modifier
+        .zIndex(2f)
         .align(Alignment.TopStart)
         .padding(top = clockTop),
     )
@@ -502,11 +536,12 @@ fun MainScreen(
       hidden = topHudHidden,
       onMountedChange = { isOtaMounted = it },
       modifier = Modifier
+        .zIndex(2f)
         .align(Alignment.TopStart)
         .padding(start = 18.dp, end = 18.dp, top = otaTop),
     )
 
-    HudSettingsTree(
+    HudSettingsOverlayLayer(
       stage = state.settingsStage,
       selectedSection = state.selectedSettingsSection,
       settings = state.launcherSettings,
@@ -515,7 +550,8 @@ fun MainScreen(
       isDefaultLauncher = state.isDefaultLauncher,
       hasNotificationAccess = state.hasNotificationAccess,
       otaState = state.otaState,
-      onSelectBranch = viewModel::selectSettingsBranch,
+      screenWidth = maxWidth,
+      screenHeight = maxHeight,
       onSelectSection = viewModel::selectLauncherSetting,
       onBackStep = { viewModel.handleBackPress() },
       onCloseAll = viewModel::dismissSettings,
@@ -530,6 +566,8 @@ fun MainScreen(
       onOpenUsageSettings = viewModel::openUsageAccessSettings,
       onOpenNotificationSettings = viewModel::openNotificationAccessSettings,
       onCheckOta = { viewModel.checkForUpdates(force = true) },
+      onMountedChange = { isSettingsOverlayMounted = it },
+      modifier = Modifier.zIndex(3f),
     )
 
     // Tap outside the console dismisses it when open
@@ -537,6 +575,7 @@ fun MainScreen(
       Box(
         modifier = Modifier
           .fillMaxSize()
+          .zIndex(4f)
           .pointerInput(Unit) {
             detectTapGestures { dismissConsole() }
           }
@@ -557,7 +596,9 @@ fun MainScreen(
       commandHint = state.commandHint,
       onSubmitQuery = viewModel::submitConsoleQuery,
       onExitGroup = viewModel::closeAppGroup,
-      modifier = Modifier.align(Alignment.TopStart),
+      modifier = Modifier
+        .zIndex(4f)
+        .align(Alignment.TopStart),
     )
 
     // Results as a cascading deck; the leader is sharp, the rest defocus. Browse mode opens on
@@ -597,6 +638,7 @@ fun MainScreen(
         lastScreenActivityMs = System.currentTimeMillis()
       },
       modifier = Modifier
+        .zIndex(4f)
         .align(Alignment.TopStart)
         .padding(start = 18.dp, end = 18.dp, top = 236.dp, bottom = 28.dp)
         .graphicsLayer {

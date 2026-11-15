@@ -1666,7 +1666,7 @@ function createGraticule(radius = GLOBE_CONFIG.radius) {
     });
     const occluderMesh = new THREE.Mesh(occluderGeo, occluderMat);
     occluderMesh.name = 'inner-depth-occluder';
-    occluderMesh.renderOrder = 0;
+    occluderMesh.renderOrder = -1;
     graticuleGroup.add(occluderMesh);
 
     // 2. Latitude Circles (Parallels)
@@ -1807,8 +1807,14 @@ function createGraticule(radius = GLOBE_CONFIG.radius) {
     graticuleGroup.setOccluderActive = (active, opacity = 1.0) => {
         occluderMesh.visible = active;
         if (active) {
-            occluderMat.opacity = Math.max(0.0, Math.min(1.0, opacity));
-            occluderMat.transparent = (opacity < 0.999);
+            const clampedOpacity = Math.max(0.0, Math.min(1.0, opacity));
+            const nextTransparent = (clampedOpacity < 0.999);
+            occluderMat.opacity = clampedOpacity;
+            occluderMat.depthWrite = true;
+            if (occluderMat.transparent !== nextTransparent) {
+                occluderMat.transparent = nextTransparent;
+                occluderMat.needsUpdate = true;
+            }
         }
     };
 

@@ -37,6 +37,7 @@ class GlobeController {
   private var flushScheduled = false
   private var lastSearchActive = false
   private var lastAmbientCentered = false
+  private var lastSettingsBackdropActive = false
   private val _isGlobeAtHorizon = MutableStateFlow(true)
   val isGlobeAtHorizon: StateFlow<Boolean> = _isGlobeAtHorizon.asStateFlow()
   private val _isStartupComplete = MutableStateFlow(false)
@@ -140,6 +141,16 @@ class GlobeController {
     webViewRef?.evaluateJavascript("if(window.setAmbientCentered) window.setAmbientCentered($centered);", null)
   }
 
+  fun setSettingsBackdropActive(active: Boolean) {
+    if (lastSettingsBackdropActive == active) return
+    lastSettingsBackdropActive = active
+    flushPending()
+    webViewRef?.evaluateJavascript(
+      "if(window.setSettingsBackdropActive) window.setSettingsBackdropActive($active);",
+      null,
+    )
+  }
+
   fun markHorizonSettled() {
     _isGlobeAtHorizon.value = true
   }
@@ -147,7 +158,8 @@ class GlobeController {
   internal fun syncState(webView: WebView?) {
     webView?.evaluateJavascript(
       "if(window.setAmbientCentered) window.setAmbientCentered($lastAmbientCentered);" +
-        "if(window.setSearchActive) window.setSearchActive($lastSearchActive);",
+        "if(window.setSearchActive) window.setSearchActive($lastSearchActive);" +
+        "if(window.setSettingsBackdropActive) window.setSettingsBackdropActive($lastSettingsBackdropActive);",
       null,
     )
   }
@@ -212,7 +224,7 @@ fun InteractiveWireframeGlobe(
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.MATCH_PARENT,
       )
-      setBackgroundColor(Color.BLACK)
+      setBackgroundColor(Color.TRANSPARENT)
       isVerticalScrollBarEnabled = false
       isHorizontalScrollBarEnabled = false
       isClickable = false

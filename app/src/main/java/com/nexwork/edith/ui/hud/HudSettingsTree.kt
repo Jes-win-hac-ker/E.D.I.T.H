@@ -1,11 +1,11 @@
 package com.nexwork.edith.ui.hud
 
+import android.graphics.Paint
+import android.graphics.Typeface
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -17,13 +17,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,29 +28,29 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexwork.edith.data.OtaState
@@ -65,33 +62,133 @@ import com.nexwork.edith.model.LauncherSettingsSection
 import com.nexwork.edith.model.LiveWeather
 import com.nexwork.edith.model.SettingsStage
 import com.nexwork.edith.theme.CrimsonBright
-import com.nexwork.edith.theme.GlassSurface
-import com.nexwork.edith.theme.GlassSurfaceElevated
 import com.nexwork.edith.theme.LocalLauncherStyle
-import com.nexwork.edith.theme.ObsidianBgTop
-import com.nexwork.edith.theme.TextPureWhite
 import com.nexwork.edith.theme.TextSilver
 import com.nexwork.edith.theme.toColor
+import kotlin.math.abs
+import kotlin.math.asin
+import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.math.tan
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val TreeRailColor = Color(0xFF64748B)
-private val GlassBorderSubtle = Color(0x4D94A3B8)
+private val FocusedPlateBrush = Brush.verticalGradient(listOf(Color(0xD9050505), Color(0xD9111111)))
+private val UnfocusedPlateBrush = Brush.verticalGradient(listOf(Color(0xB8050505), Color(0xB8111111)))
+private val ContainerPlateBrush = Brush.verticalGradient(listOf(Color(0xE0050505), Color(0xE0111111)))
+
+private const val ROOT_COLLAPSED_ALPHA = 0.46f
+private const val ROOT_COLLAPSED_SCALE = 0.94f
+private const val EXIT_DURATION_MS = 240
 
 /**
- * Kinetic 3-branch settings tree spawned from a 1.0s stationary long-press on the globe.
- *
- * Stage 1 (`ROOT_BRANCHES`): bilateral horizon arcs draw inward from left and right screen edges to
- * join dead center, shoot a perpendicular laser stem straight up, and split into 3 non-overlapping
- * root branch boxes (`LAUNCHER`, `AGENT`, `SHIZUKU`).
- *
- * Stage 2 (`LAUNCHER_TREE` / Standby): selecting a branch sinks the root menu down behind the globe
- * horizon while a left-side vertical laser stem rises and makes consecutive 90-degree right turns
- * into stacked non-overlapping cards, preserving open right-hand negative space.
- *
- * Stage 3 (Active detail card): tapping any left card draws an orthogonal 90-degree connector into
- * one single detail card on the right side.
+ * Shared pixel-exact geometry derived from screen dimensions and the orbital globe horizon
+ * projection in `HudClock.kt`, ensuring Stage 1 sunken root cards and Stage 2/3 laser origins
+ * align to the pixel across both layers.
+ */
+private class SettingsTreeGeometry(
+  screenWidth: Dp,
+  screenHeight: Dp,
+  density: Density,
+) {
+  val widthDp: Dp = screenWidth
+  val fullW: Float
+  val fullH: Float
+  val cx: Float
+
+  val arcZenithY: Float
+  val arcRadius: Float
+  val arcCenterY: Float
+  val maxThetaRad: Float
+  val maxThetaDeg: Float
+
+  val sideMarginDp: Dp = 14.dp
+  val boxGapDp: Dp = 10.dp
+  val rootBoxWDp: Dp = ((screenWidth - sideMarginDp * 2 - boxGapDp * 2) / 3f).coerceAtLeast(88.dp)
+  val rootBoxHDp: Dp = 78.dp
+  val rootRowTopDp: Dp
+
+  val rootRowTopY: Float
+  val rootRowBottomY: Float
+  val rootRowCenterY: Float
+  val rootBoxW: Float
+  val rootBoxH: Float
+  val sideMarginPx: Float
+  val boxGapPx: Float
+  val rootStemSplitY: Float
+  val rootDropPx: Float
+
+  init {
+    with(density) {
+      fullW = screenWidth.toPx().coerceAtLeast(1f)
+      fullH = screenHeight.toPx().coerceAtLeast(1f)
+      cx = fullW * 0.5f
+
+      val globeApexDp = screenHeight * 0.64f
+      val clockTopDp = (globeApexDp - 82.dp).coerceAtLeast(66.dp)
+      val arcZenithDp = clockTopDp + 72.dp
+      arcZenithY = arcZenithDp.toPx()
+
+      val aspect = fullW / fullH
+      val tanHalfFov = tan(Math.toRadians(22.5)).toFloat()
+      val halfH = 280f * tanHalfFov
+      val apexWorldY = -10f - 0.30f * halfH
+      val horizonScale = (aspect * 2.18f).coerceIn(0.86f, 1.22f)
+      val globeWorldRadius = 75f * horizonScale
+      val globeWorldY = apexWorldY - globeWorldRadius
+      val dyCam = globeWorldY - 15f
+      val zCam = -dyCam * 0.08893f + 280f * 0.99604f
+      val globeScreenRadius = (globeWorldRadius / zCam) * (fullH * 0.5f / tanHalfFov)
+
+      arcRadius = globeScreenRadius + 10.dp.toPx()
+      val arcHalfSpan = cx.coerceAtMost(arcRadius * 0.985f)
+      arcCenterY = arcZenithY + arcRadius
+      maxThetaRad = asin((arcHalfSpan / arcRadius).coerceIn(-1f, 1f))
+      maxThetaDeg = Math.toDegrees(maxThetaRad.toDouble()).toFloat()
+
+      rootRowTopDp = (arcZenithDp - 196.dp).coerceAtLeast(88.dp)
+      rootRowTopY = rootRowTopDp.toPx()
+      rootBoxW = rootBoxWDp.toPx()
+      rootBoxH = rootBoxHDp.toPx()
+      sideMarginPx = sideMarginDp.toPx()
+      boxGapPx = boxGapDp.toPx()
+      rootRowBottomY = rootRowTopY + rootBoxH
+      rootRowCenterY = rootRowTopY + rootBoxH * 0.5f
+      rootStemSplitY = rootRowBottomY + 32.dp.toPx()
+      rootDropPx = 135.dp.toPx()
+    }
+  }
+
+  fun rootCardCenterX(index: Int): Float =
+    sideMarginPx + index * (rootBoxW + boxGapPx) + rootBoxW * 0.5f
+
+  fun sunkenCardTopCenter(index: Int): Offset {
+    val rawCx = rootCardCenterX(index)
+    val mappedX = cx + (rawCx - cx) * ROOT_COLLAPSED_SCALE
+    val mappedY = rootRowCenterY + rootDropPx + (rootRowTopY - rootRowCenterY) * ROOT_COLLAPSED_SCALE
+    return Offset(mappedX, mappedY)
+  }
+}
+
+@Composable
+private fun rememberSettingsGeometry(
+  screenWidth: Dp,
+  screenHeight: Dp,
+): SettingsTreeGeometry {
+  val density = LocalDensity.current
+  return remember(screenWidth, screenHeight, density) {
+    SettingsTreeGeometry(screenWidth, screenHeight, density)
+  }
+}
+
+/**
+ * Backward-compatible composite wrapper delegating to [HudSettingsRootLayer] and
+ * [HudSettingsOverlayLayer]. Prefer layering those two composables directly around the 3D globe
+ * in `MainScreen.kt` so Stage 1 sinks behind the globe sphere.
  */
 @Composable
 fun HudSettingsTree(
@@ -119,395 +216,611 @@ fun HudSettingsTree(
   onOpenNotificationSettings: () -> Unit,
   onCheckOta: () -> Unit,
   modifier: Modifier = Modifier,
+  onMountedChange: (Boolean) -> Unit = {},
 ) {
-  val style = LocalLauncherStyle.current
-  val accent = style.accent
-  val haptic = LocalHapticFeedback.current
-  val density = LocalDensity.current
+  var rootMounted by remember { mutableStateOf(false) }
+  var overlayMounted by remember { mutableStateOf(false) }
+  val currentOnMountedChange = rememberUpdatedState(onMountedChange)
+  LaunchedEffect(rootMounted, overlayMounted) {
+    currentOnMountedChange.value(rootMounted || overlayMounted)
+  }
 
-  val isOpen = stage != SettingsStage.CLOSED
-  val isRootVisibleTarget = stage == SettingsStage.ROOT_BRANCHES
-  val isRootReceding = isOpen && !isRootVisibleTarget
+  BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+    HudSettingsRootLayer(
+      stage = stage,
+      screenWidth = maxWidth,
+      screenHeight = maxHeight,
+      onSelectBranch = onSelectBranch,
+      onMountedChange = { rootMounted = it },
+      modifier = Modifier.fillMaxSize(),
+    )
+    HudSettingsOverlayLayer(
+      stage = stage,
+      selectedSection = selectedSection,
+      settings = settings,
+      telemetry = telemetry,
+      liveWeather = liveWeather,
+      isDefaultLauncher = isDefaultLauncher,
+      hasNotificationAccess = hasNotificationAccess,
+      otaState = otaState,
+      screenWidth = maxWidth,
+      screenHeight = maxHeight,
+      onSelectSection = onSelectSection,
+      onBackStep = onBackStep,
+      onCloseAll = onCloseAll,
+      onAccentChange = onAccentChange,
+      onFontChange = onFontChange,
+      onFontScaleChange = onFontScaleChange,
+      onUse24HourChange = onUse24HourChange,
+      onRefreshRateSelect = onRefreshRateSelect,
+      onRefreshWeather = onRefreshWeather,
+      onOpenAlarms = onOpenAlarms,
+      onOpenHomeSettings = onOpenHomeSettings,
+      onOpenUsageSettings = onOpenUsageSettings,
+      onOpenNotificationSettings = onOpenNotificationSettings,
+      onCheckOta = onCheckOta,
+      onMountedChange = { overlayMounted = it },
+      modifier = Modifier.fillMaxSize(),
+    )
+  }
+}
+
+/**
+ * Stage 1 settings root layer intended to sit below the transparent 3D WebGL globe (`zIndex = 0f`).
+ * Sweeps bilateral orbital horizon arcs inward from both screen edges to dead center, shoots a
+ * perpendicular stem straight up, splits orthogonally into 3 `CompactHudCard` branches, and sinks
+ * smoothly behind the globe sphere at `0.46f` alpha / `0.94f` scale when entering Stage 2.
+ */
+@Composable
+fun HudSettingsRootLayer(
+  stage: SettingsStage,
+  screenWidth: Dp,
+  screenHeight: Dp,
+  onSelectBranch: (SettingsStage) -> Unit,
+  onMountedChange: (Boolean) -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val accent = LocalLauncherStyle.current.accent
+  val haptic = LocalHapticFeedback.current
+  val geo = rememberSettingsGeometry(screenWidth, screenHeight)
+  val currentOnMountedChange = rememberUpdatedState(onMountedChange)
 
   val rootAnim = remember { Animatable(0f) }
-  val rootCollapseAnim = remember { Animatable(0f) }
-  val branchTreeAnim = remember { Animatable(0f) }
-  val detailCardAnim = remember { Animatable(0f) }
+  val collapseAnim = remember { Animatable(0f) }
+  val exitAnim = remember { Animatable(0f) }
+  var mounted by remember { mutableStateOf(stage != SettingsStage.CLOSED) }
 
-  var mounted by remember { mutableStateOf(false) }
+  LaunchedEffect(mounted) {
+    currentOnMountedChange.value(mounted)
+  }
 
   LaunchedEffect(stage) {
     if (stage == SettingsStage.CLOSED) {
-      detailCardAnim.animateTo(0f, tween(180, easing = LinearEasing))
-      branchTreeAnim.animateTo(0f, tween(220, easing = LinearEasing))
-      rootAnim.animateTo(0f, tween(260, easing = LinearEasing))
-      rootCollapseAnim.snapTo(0f)
+      if (!mounted) {
+        exitAnim.snapTo(0f)
+        rootAnim.snapTo(0f)
+        collapseAnim.snapTo(0f)
+        return@LaunchedEffect
+      }
+      val ms = (exitAnim.value.coerceIn(0f, 1f) * EXIT_DURATION_MS).roundToInt().coerceAtLeast(1)
+      exitAnim.animateTo(0f, tween(ms, easing = LinearEasing))
+      rootAnim.snapTo(0f)
+      collapseAnim.snapTo(0f)
       mounted = false
       return@LaunchedEffect
     }
 
+    val wasUnmounted = !mounted
     mounted = true
     if (stage == SettingsStage.ROOT_BRANCHES) {
-      branchTreeAnim.animateTo(0f, tween(180, easing = LinearEasing))
-      detailCardAnim.snapTo(0f)
-      rootCollapseAnim.animateTo(0f, tween(260, easing = LinearEasing))
-      // Overlap slightly while HudClock finishes its 500ms unwind
-      if (rootAnim.value < 0.05f) {
+      if (wasUnmounted) {
+        exitAnim.snapTo(1f)
+        collapseAnim.snapTo(0f)
         delay(180L)
+        val remMs = ((1f - rootAnim.value).coerceIn(0f, 1f) * 660f).roundToInt().coerceAtLeast(1)
+        rootAnim.animateTo(1f, tween(remMs, easing = LinearEasing))
+      } else {
+        coroutineScope {
+          launch {
+            val eMs = ((1f - exitAnim.value).coerceIn(0f, 1f) * 140f).roundToInt().coerceAtLeast(1)
+            exitAnim.animateTo(1f, tween(eMs, easing = LinearEasing))
+          }
+          launch {
+            val cMs = (collapseAnim.value.coerceIn(0f, 1f) * 280f).roundToInt().coerceAtLeast(1)
+            collapseAnim.animateTo(0f, tween(cMs, easing = LinearEasing))
+          }
+          launch {
+            val remMs = ((1f - rootAnim.value).coerceIn(0f, 1f) * 420f).roundToInt().coerceAtLeast(1)
+            rootAnim.animateTo(1f, tween(remMs, easing = LinearEasing))
+          }
+        }
       }
-      val remMs = ((1f - rootAnim.value).coerceIn(0f, 1f) * 680f).roundToInt().coerceAtLeast(1)
-      rootAnim.animateTo(1f, tween(remMs, easing = LinearEasing))
     } else {
-      // Collapse root menu smoothly downward behind globe while tracing deep branch
-      if (rootAnim.value < 0.99f) {
-        rootAnim.snapTo(1f)
+      coroutineScope {
+        launch {
+          val eMs = ((1f - exitAnim.value).coerceIn(0f, 1f) * 120f).roundToInt().coerceAtLeast(1)
+          exitAnim.animateTo(1f, tween(eMs, easing = LinearEasing))
+        }
+        launch {
+          if (rootAnim.value < 0.99f) rootAnim.snapTo(1f)
+        }
+        launch {
+          val cMs = ((1f - collapseAnim.value).coerceIn(0f, 1f) * 280f).roundToInt().coerceAtLeast(1)
+          collapseAnim.animateTo(1f, tween(cMs, easing = LinearEasing))
+        }
       }
-      rootCollapseAnim.animateTo(1f, tween(340, easing = LinearEasing))
-      branchTreeAnim.snapTo(0f)
-      branchTreeAnim.animateTo(1f, tween(640, easing = LinearEasing))
-    }
-  }
-
-  LaunchedEffect(stage, selectedSection) {
-    if (stage == SettingsStage.LAUNCHER_TREE && selectedSection != null) {
-      detailCardAnim.snapTo(0f)
-      detailCardAnim.animateTo(1f, tween(380, easing = LinearEasing))
-    } else {
-      detailCardAnim.animateTo(0f, tween(180, easing = LinearEasing))
     }
   }
 
   if (!mounted) return
 
-  BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-    val widthDp = maxWidth
-    val heightDp = maxHeight
-    val widthPx = with(density) { widthDp.toPx() }
-    val horizonY = (heightDp * 0.64f) - 10.dp
-    val horizonYPx = with(density) { horizonY.toPx() }
+  val isClosing = stage == SettingsStage.CLOSED
+  val collapseP = hudEaseOutCubic(collapseAnim.value)
+  val exitP = exitAnim.value.coerceIn(0f, 1f)
+  val rootScale = 1f - (1f - ROOT_COLLAPSED_SCALE) * collapseP
+  val rootDrop = geo.rootDropPx * collapseP
+  val layerAlpha = (1f - (1f - ROOT_COLLAPSED_ALPHA) * collapseP) * (exitP * 1.35f).coerceIn(0f, 1f)
+  val effectiveP = if (isClosing) (rootAnim.value * exitP) else rootAnim.value
+  val cardsMaster = hudEaseOutCubic(phase(effectiveP, 0.70f, 1.00f))
+  val canClickRoot = stage == SettingsStage.ROOT_BRANCHES && exitP > 0.85f && effectiveP > 0.74f
 
-    // ------------------------------------------------------------------
-    // STAGE 1: Bilateral Horizon Arc -> Center Perpendicular -> 3 Cards
-    // Recedes downward and clips behind the globe horizon when entering Stage 2.
-    // ------------------------------------------------------------------
-    val collapseP = hudEaseInCubic(rootCollapseAnim.value)
-    val rootAlpha = (1f - collapseP * 1.15f).coerceIn(0f, 1f)
-    val rootDropPx = collapseP * with(density) { 128.dp.toPx() }
+  Box(
+    modifier = modifier
+      .fillMaxSize()
+      .graphicsLayer {
+        alpha = layerAlpha
+        scaleX = rootScale
+        scaleY = rootScale
+        translationY = rootDrop
+        transformOrigin = TransformOrigin(0.5f, (geo.rootRowCenterY / size.height.coerceAtLeast(1f)))
+      },
+  ) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+      val p = effectiveP
+      if (p <= 0.005f) return@Canvas
 
-    val sideMarginDp = 14.dp
-    val boxGapDp = 10.dp
-    val rootBoxW = ((widthDp - sideMarginDp * 2 - boxGapDp * 2) / 3f).coerceAtLeast(88.dp)
-    val rootBoxH = 82.dp
-    val rootRowTopDp = (horizonY - 196.dp).coerceAtLeast(88.dp)
-    val rootJoinY = with(density) { (horizonY - 20.dp).toPx() }
-    val rootStemJoinTopY = with(density) { (rootRowTopDp + rootBoxH + 28.dp).toPx() }
-    val rootRowBottomY = with(density) { (rootRowTopDp + rootBoxH).toPx() }
+      // Phase 1 (0.00..0.38): bilateral orbital horizon arcs sweep inward from both screen edges
+      val arcP = hudEaseOutCubic(phase(p, 0.00f, 0.38f))
+      val arcAlpha = (1f - 0.70f * collapseP).coerceIn(0f, 1f)
+      if (arcP > 0.005f && arcAlpha > 0.01f) {
+        val arcTopLeft = Offset(geo.cx - geo.arcRadius, geo.arcCenterY - geo.arcRadius)
+        val arcDiameter = Size(geo.arcRadius * 2f, geo.arcRadius * 2f)
+        val arcStroke = Stroke(width = 1.15f.dp.toPx(), cap = StrokeCap.Round)
+        val sweepDeg = geo.maxThetaDeg * arcP
 
-    if (rootAlpha > 0.01f && (!isRootReceding || collapseP < 0.99f)) {
-      Box(
-        modifier = Modifier
-          .fillMaxSize()
-          .graphicsLayer {
-            alpha = rootAlpha
+        drawArc(
+          color = accent.copy(alpha = 0.76f * arcAlpha),
+          startAngle = -90f - geo.maxThetaDeg,
+          sweepAngle = sweepDeg,
+          useCenter = false,
+          topLeft = arcTopLeft,
+          size = arcDiameter,
+          style = arcStroke,
+        )
+        drawArc(
+          color = accent.copy(alpha = 0.76f * arcAlpha),
+          startAngle = -90f + geo.maxThetaDeg,
+          sweepAngle = -sweepDeg,
+          useCenter = false,
+          topLeft = arcTopLeft,
+          size = arcDiameter,
+          style = arcStroke,
+        )
+
+        if (arcP in 0.02f..0.97f) {
+          val theta = geo.maxThetaRad * (1f - arcP)
+          val sinT = sin(theta)
+          val cosT = cos(theta)
+          drawLaserTip(
+            Offset(geo.cx - geo.arcRadius * sinT, geo.arcCenterY - geo.arcRadius * cosT),
+            accent.copy(alpha = arcAlpha),
+          )
+          drawLaserTip(
+            Offset(geo.cx + geo.arcRadius * sinT, geo.arcCenterY - geo.arcRadius * cosT),
+            accent.copy(alpha = arcAlpha),
+          )
+        }
+      }
+
+      // Center join ignition spark at (cx, arcZenithY)
+      if (p in 0.34f..0.52f && collapseP < 0.5f) {
+        val sparkP = 1f - phase(p, 0.36f, 0.52f)
+        val join = Offset(geo.cx, geo.arcZenithY)
+        drawCircle(accent.copy(alpha = 0.44f * sparkP), 6.dp.toPx(), join)
+        drawCircle(Color.White.copy(alpha = 0.95f * sparkP), 2.1f.dp.toPx(), join)
+      }
+
+      // Phase 2 (0.36..0.58): perpendicular laser stem rises straight up from arc zenith
+      val stemP = hudEaseOutCubic(phase(p, 0.36f, 0.58f))
+      if (stemP > 0.005f) {
+        val curY = geo.arcZenithY + (geo.rootStemSplitY - geo.arcZenithY) * stemP
+        drawLine(
+          color = accent.copy(alpha = 0.85f),
+          start = Offset(geo.cx, geo.arcZenithY),
+          end = Offset(geo.cx, curY),
+          strokeWidth = 1.2f.dp.toPx(),
+          cap = StrokeCap.Round,
+        )
+        if (stemP < 0.97f) {
+          drawLaserTip(Offset(geo.cx, curY), accent)
+        }
+      }
+
+      // Phase 3 (0.54..0.80): split orthogonally into 3 branches to left / center / right cards
+      val splitP = hudEaseOutCubic(phase(p, 0.54f, 0.80f))
+      if (splitP > 0.005f) {
+        val strokeW = 1.1f.dp.toPx()
+        for (idx in 0 until 3) {
+          val tx = geo.rootCardCenterX(idx)
+          val tip = drawOrthogonalPolyline(
+            points = listOf(
+              Offset(geo.cx, geo.rootStemSplitY),
+              Offset(tx, geo.rootStemSplitY),
+              Offset(tx, geo.rootRowBottomY),
+            ),
+            progress = splitP,
+            color = if (idx == 0) accent.copy(alpha = 0.84f) else TreeRailColor.copy(alpha = 0.82f),
+            strokeWidth = strokeW,
+          )
+          if (splitP < 0.97f) {
+            drawLaserTip(tip, accent)
           }
+        }
+      }
+    }
+
+    if (cardsMaster > 0.005f) {
+      Row(
+        modifier = Modifier
+          .padding(start = geo.sideMarginDp, end = geo.sideMarginDp, top = geo.rootRowTopDp)
+          .fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(geo.boxGapDp),
       ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-          val p = rootAnim.value
-          if (p <= 0.005f) return@Canvas
+        CompactHudCard(
+          eyebrow = "01 // HUD & UI",
+          title = "LAUNCHER",
+          pipColor = accent,
+          focused = true,
+          accent = accent,
+          titleSizeSp = 11.5f,
+          reveal = { staggeredReveal(cardsMaster, 0, 3, stagger = 0.14f) },
+          enabled = canClickRoot,
+          modifier = Modifier.width(geo.rootBoxWDp).height(geo.rootBoxHDp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onSelectBranch(SettingsStage.LAUNCHER_TREE)
+          },
+        )
+        CompactHudCard(
+          eyebrow = "02 // STANDBY",
+          title = "AGENT",
+          pipColor = TreeRailColor.copy(alpha = 0.65f),
+          focused = false,
+          accent = accent,
+          titleSizeSp = 11.5f,
+          reveal = { staggeredReveal(cardsMaster, 1, 3, stagger = 0.14f) },
+          enabled = canClickRoot,
+          modifier = Modifier.width(geo.rootBoxWDp).height(geo.rootBoxHDp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onSelectBranch(SettingsStage.AGENT_PLACEHOLDER)
+          },
+        )
+        CompactHudCard(
+          eyebrow = "03 // STANDBY",
+          title = "SHIZUKU",
+          pipColor = TreeRailColor.copy(alpha = 0.65f),
+          focused = false,
+          accent = accent,
+          titleSizeSp = 11.5f,
+          reveal = { staggeredReveal(cardsMaster, 2, 3, stagger = 0.14f) },
+          enabled = canClickRoot,
+          modifier = Modifier.width(geo.rootBoxWDp).height(geo.rootBoxHDp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onSelectBranch(SettingsStage.SHIZUKU_PLACEHOLDER)
+          },
+        )
+      }
+    }
+  }
+}
 
-          clipRect(left = 0f, top = 0f, right = size.width, bottom = horizonYPx) {
-            val drop = rootDropPx
-            val cx = size.width * 0.5f
+/**
+ * Stage 2 & Stage 3 settings overlay layer intended to sit above the 3D WebGL globe (`zIndex = 2f`).
+ * Originates laser lines directly from the sunken Stage 1 card's top center, branches orthogonally
+ * into `CompactHudCard` sections on the left, expands into an orthogonal right-hand HUD container
+ * with staggered `CompactHudCard` options, and exits cleanly in one parallel 240ms unwind.
+ */
+@Composable
+fun HudSettingsOverlayLayer(
+  stage: SettingsStage,
+  selectedSection: LauncherSettingsSection?,
+  settings: LauncherSettingsConfig,
+  telemetry: DeviceTelemetry,
+  liveWeather: LiveWeather?,
+  isDefaultLauncher: Boolean,
+  hasNotificationAccess: Boolean,
+  otaState: OtaState,
+  screenWidth: Dp,
+  screenHeight: Dp,
+  onSelectSection: (LauncherSettingsSection?) -> Unit,
+  onBackStep: () -> Unit,
+  onCloseAll: () -> Unit,
+  onAccentChange: (LauncherAccentPreset) -> Unit,
+  onFontChange: (LauncherFontStyle) -> Unit,
+  onFontScaleChange: (Float) -> Unit,
+  onUse24HourChange: (Boolean) -> Unit,
+  onRefreshRateSelect: (Int?) -> Unit,
+  onRefreshWeather: () -> Unit,
+  onOpenAlarms: () -> Unit,
+  onOpenHomeSettings: () -> Unit,
+  onOpenUsageSettings: () -> Unit,
+  onOpenNotificationSettings: () -> Unit,
+  onCheckOta: () -> Unit,
+  onMountedChange: (Boolean) -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val accent = LocalLauncherStyle.current.accent
+  val haptic = LocalHapticFeedback.current
+  val density = LocalDensity.current
+  val geo = rememberSettingsGeometry(screenWidth, screenHeight)
+  val currentOnMountedChange = rememberUpdatedState(onMountedChange)
 
-            // Phase 1 (0.00..0.38): bilateral horizon arcs form from left & right edges inward to dead center
-            val arcP = hudEaseOutCubic(phase(p, 0.00f, 0.38f))
-            val edgeY = (horizonYPx + 18.dp.toPx()) + drop
-            val centerY = rootJoinY + drop
+  val masterExitAnim = remember { Animatable(0f) }
+  val branchTreeAnim = remember { Animatable(0f) }
+  val detailCardAnim = remember { Animatable(0f) }
 
-            if (arcP > 0.005f) {
-              val arcStroke = Stroke(width = 1.2f.dp.toPx(), cap = StrokeCap.Round)
-              val leftArc = Path().apply {
-                moveTo(0f, edgeY)
-                quadraticTo(cx * 0.45f, centerY - 16.dp.toPx(), cx, centerY)
+  var mounted by remember { mutableStateOf(stage != SettingsStage.CLOSED) }
+  var retainedStage by remember { mutableStateOf(stage) }
+  var retainedSection by remember { mutableStateOf(selectedSection) }
+
+  LaunchedEffect(mounted) {
+    currentOnMountedChange.value(mounted)
+  }
+
+  LaunchedEffect(stage) {
+    if (stage == SettingsStage.CLOSED) {
+      if (!mounted) {
+        masterExitAnim.snapTo(0f)
+        branchTreeAnim.snapTo(0f)
+        detailCardAnim.snapTo(0f)
+        retainedStage = SettingsStage.CLOSED
+        retainedSection = null
+        return@LaunchedEffect
+      }
+      val ms = (masterExitAnim.value.coerceIn(0f, 1f) * EXIT_DURATION_MS).roundToInt().coerceAtLeast(1)
+      masterExitAnim.animateTo(0f, tween(ms, easing = LinearEasing))
+      branchTreeAnim.snapTo(0f)
+      detailCardAnim.snapTo(0f)
+      retainedStage = SettingsStage.CLOSED
+      retainedSection = null
+      mounted = false
+      return@LaunchedEffect
+    }
+
+    val wasUnmounted = !mounted
+    mounted = true
+
+    if (stage == SettingsStage.ROOT_BRANCHES) {
+      if (wasUnmounted) {
+        retainedStage = SettingsStage.ROOT_BRANCHES
+        retainedSection = null
+        branchTreeAnim.snapTo(0f)
+        detailCardAnim.snapTo(0f)
+        masterExitAnim.animateTo(1f, tween(220, easing = LinearEasing))
+      } else {
+        coroutineScope {
+          launch {
+            val eMs = ((1f - masterExitAnim.value).coerceIn(0f, 1f) * 140f).roundToInt().coerceAtLeast(1)
+            masterExitAnim.animateTo(1f, tween(eMs, easing = LinearEasing))
+          }
+          launch {
+            coroutineScope {
+              if (detailCardAnim.value > 0f) {
+                launch {
+                  val dMs = (detailCardAnim.value.coerceIn(0f, 1f) * 160f).roundToInt().coerceAtLeast(1)
+                  detailCardAnim.animateTo(0f, tween(dMs, easing = LinearEasing))
+                }
               }
-              val rightArc = Path().apply {
-                moveTo(size.width, edgeY)
-                quadraticTo(size.width - cx * 0.45f, centerY - 16.dp.toPx(), cx, centerY)
-              }
-              val lPt = traceQuadPath(leftArc, arcP, this, accent.copy(alpha = 0.72f), arcStroke)
-              val rPt = traceQuadPath(rightArc, arcP, this, accent.copy(alpha = 0.72f), arcStroke)
-              if (arcP in 0.03f..0.97f) {
-                drawLaserTip(lPt, accent)
-                drawLaserTip(rPt, accent)
-              }
-            }
-
-            // Center join ignition spark
-            if (p in 0.35f..0.52f) {
-              val sparkP = 1f - phase(p, 0.36f, 0.52f)
-              drawCircle(accent.copy(alpha = 0.42f * sparkP), 6.dp.toPx(), Offset(cx, centerY))
-              drawCircle(Color.White.copy(alpha = 0.95f * sparkP), 2.2f.dp.toPx(), Offset(cx, centerY))
-            }
-
-            // Phase 2 (0.38..0.58): perpendicular laser line rises straight up from join point
-            val stemP = hudEaseOutCubic(phase(p, 0.38f, 0.58f))
-            val splitY = rootStemJoinTopY + drop
-            if (stemP > 0.005f) {
-              val curY = centerY + (splitY - centerY) * stemP
-              drawLine(
-                color = accent.copy(alpha = 0.85f),
-                start = Offset(cx, centerY),
-                end = Offset(cx, curY),
-                strokeWidth = 1.2f.dp.toPx(),
-                cap = StrokeCap.Round,
-              )
-              if (stemP < 0.98f) {
-                drawLaserTip(Offset(cx, curY), accent)
-              }
-            }
-
-            // Phase 3 (0.56..0.82): split into 3 orthogonal branches to left / middle / right cards
-            val splitP = hudEaseOutCubic(phase(p, 0.56f, 0.82f))
-            if (splitP > 0.005f) {
-              val cBottomY = rootRowBottomY + drop
-              val strokeW = 1.1f.dp.toPx()
-              val marginPx = sideMarginDp.toPx()
-              val gapPx = boxGapDp.toPx()
-              val boxWPx = rootBoxW.toPx()
-              val centers = listOf(
-                marginPx + boxWPx * 0.5f,
-                marginPx + boxWPx + gapPx + boxWPx * 0.5f,
-                marginPx + (boxWPx + gapPx) * 2f + boxWPx * 0.5f,
-              )
-              for (tx in centers) {
-                val tip = drawOrthogonalPolyline(
-                  points = listOf(
-                    Offset(cx, splitY),
-                    Offset(tx, splitY),
-                    Offset(tx, cBottomY),
-                  ),
-                  progress = splitP,
-                  color = TreeRailColor.copy(alpha = 0.85f),
-                  strokeWidth = strokeW,
-                )
-                if (splitP < 0.97f) {
-                  drawLaserTip(tip, accent)
+              if (branchTreeAnim.value > 0f) {
+                launch {
+                  val bMs = (branchTreeAnim.value.coerceIn(0f, 1f) * 200f).roundToInt().coerceAtLeast(1)
+                  branchTreeAnim.animateTo(0f, tween(bMs, easing = LinearEasing))
                 }
               }
             }
+            retainedSection = null
+            retainedStage = SettingsStage.ROOT_BRANCHES
+          }
+        }
+      }
+    } else {
+      val switchedBranch = retainedStage != stage
+      retainedStage = stage
+      if (stage != SettingsStage.LAUNCHER_TREE) {
+        retainedSection = null
+      }
+      masterExitAnim.snapTo(1f)
+      if (switchedBranch) {
+        branchTreeAnim.snapTo(0f)
+        detailCardAnim.snapTo(0f)
+        delay(140L)
+      }
+      val remMs = ((1f - branchTreeAnim.value).coerceIn(0f, 1f) * 620f).roundToInt().coerceAtLeast(1)
+      branchTreeAnim.animateTo(1f, tween(remMs, easing = LinearEasing))
+    }
+  }
 
-            // Phase 4 (0.74..1.00): trace each root card outline clockwise
-            val boxFrameP = hudEaseOutCubic(phase(p, 0.74f, 1.00f))
-            if (boxFrameP > 0.005f) {
-              val marginPx = sideMarginDp.toPx()
-              val gapPx = boxGapDp.toPx()
-              val boxWPx = rootBoxW.toPx()
-              val boxHPx = rootBoxH.toPx()
-              val topPx = rootRowTopDp.toPx() + drop
-              for (idx in 0 until 3) {
-                val left = marginPx + idx * (boxWPx + gapPx)
-                drawRectLaserOutline(
-                  rect = Rect(left, topPx, left + boxWPx, topPx + boxHPx),
-                  progress = boxFrameP,
-                  borderColor = accent.copy(alpha = if (idx == 0) 0.78f else 0.42f),
-                  tipColor = accent,
-                  cornerRadiusPx = 6.dp.toPx(),
-                )
-              }
+  LaunchedEffect(stage, selectedSection) {
+    if (stage == SettingsStage.CLOSED) return@LaunchedEffect
+    if (stage == SettingsStage.LAUNCHER_TREE && selectedSection != null) {
+      retainedSection = selectedSection
+      if (branchTreeAnim.value < 0.35f) {
+        delay(160L)
+      }
+      detailCardAnim.snapTo(0f)
+      detailCardAnim.animateTo(1f, tween(460, easing = LinearEasing))
+    } else if (detailCardAnim.value > 0f) {
+      val ms = (detailCardAnim.value.coerceIn(0f, 1f) * 180f).roundToInt().coerceAtLeast(1)
+      detailCardAnim.animateTo(0f, tween(ms, easing = LinearEasing))
+      if (selectedSection == null) {
+        retainedSection = null
+      }
+    } else if (selectedSection == null) {
+      retainedSection = null
+    }
+  }
+
+  if (!mounted) return
+
+  val exitP = masterExitAnim.value.coerceIn(0f, 1f)
+  val isInteractive = stage != SettingsStage.CLOSED && exitP > 0.55f
+  val activeStage = retainedStage
+  val activeSection = if (activeStage == SettingsStage.LAUNCHER_TREE) retainedSection else null
+  val effectiveTreeP = branchTreeAnim.value * exitP
+  val effectiveDetailP = detailCardAnim.value * exitP
+
+  Box(
+    modifier = modifier
+      .fillMaxSize()
+      .graphicsLayer {
+        alpha = (exitP * 1.35f).coerceIn(0f, 1f)
+      },
+  ) {
+    // Top Header Bar (Breadcrumb + Close) — never shows empty "< " when closing
+    if (activeStage != SettingsStage.CLOSED) {
+      val headerTitle = when (activeStage) {
+        SettingsStage.CLOSED -> ""
+        SettingsStage.ROOT_BRANCHES -> "E.D.I.T.H // ROOT"
+        SettingsStage.LAUNCHER_TREE -> "< SYS.01 // LAUNCHER"
+        SettingsStage.AGENT_PLACEHOLDER -> "< SYS.02 // AI AGENT"
+        SettingsStage.SHIZUKU_PLACEHOLDER -> "< SYS.03 // SHIZUKU OS"
+      }
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .statusBarsPadding()
+          .padding(horizontal = 14.dp, vertical = 10.dp)
+          .graphicsLayer {
+            alpha = exitP
+            translationY = -(1f - exitP) * with(density) { 8.dp.toPx() }
+          },
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        CompactHudCard(
+          title = headerTitle,
+          reveal = { exitP },
+          accent = accent,
+          focused = activeStage != SettingsStage.ROOT_BRANCHES,
+          titleSizeSp = 10f,
+          centerText = true,
+          enabled = isInteractive,
+          modifier = Modifier.height(30.dp).width(if (activeStage == SettingsStage.ROOT_BRANCHES) 172.dp else 196.dp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            if (activeStage == SettingsStage.ROOT_BRANCHES) onCloseAll() else onBackStep()
+          },
+        )
+        CompactHudCard(
+          title = "CLOSE",
+          reveal = { exitP },
+          accent = accent,
+          focused = false,
+          titleSizeSp = 10f,
+          centerText = true,
+          enabled = isInteractive,
+          modifier = Modifier.height(30.dp).width(68.dp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onCloseAll()
+          },
+        )
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // STAGE 2 & 3: LAUNCHER Deep Tree (Sunken Card 01 Origin -> Left Tree -> Right Detail HUD)
+    // ------------------------------------------------------------------
+    if (activeStage == SettingsStage.LAUNCHER_TREE) {
+      val sections = LauncherSettingsSection.entries
+      val trunkXDp = 16.dp
+      val leftCardXDp = 28.dp
+      val leftCardWDp = 116.dp
+      val cardHeightDp = 52.dp
+      val cardGapDp = 10.dp
+      val topRowDp = 92.dp
+      val rightElbowXDp = leftCardXDp + leftCardWDp + 10.dp
+      val rightCardLeftDp = rightElbowXDp + 10.dp
+      val rightCardWDp = (geo.widthDp - rightCardLeftDp - 14.dp).coerceAtLeast(150.dp)
+      val rightCardHDp = cardHeightDp * 5 + cardGapDp * 4
+
+      val trunkXPx = with(density) { trunkXDp.toPx() }
+      val leftCardXPx = with(density) { leftCardXDp.toPx() }
+      val leftCardRightPx = with(density) { (leftCardXDp + leftCardWDp).toPx() }
+      val cardHeightPx = with(density) { cardHeightDp.toPx() }
+      val cardGapPx = with(density) { cardGapDp.toPx() }
+      val topRowPx = with(density) { topRowDp.toPx() }
+      val elbowXPx = with(density) { rightElbowXDp.toPx() }
+      val rightCardLeftPx = with(density) { rightCardLeftDp.toPx() }
+      val rightCardWPx = with(density) { rightCardWDp.toPx() }
+      val rightCardHPx = with(density) { rightCardHDp.toPx() }
+
+      val origin = geo.sunkenCardTopCenter(0)
+      val rowMidY: (Int) -> Float = { idx -> topRowPx + idx * (cardHeightPx + cardGapPx) + cardHeightPx * 0.5f }
+      val row4BottomPx = topRowPx + 5f * cardHeightPx + 4f * cardGapPx
+      val elbowTurnY = ((row4BottomPx + origin.y) * 0.5f)
+        .coerceAtMost(origin.y - with(density) { 10.dp.toPx() })
+        .coerceAtLeast(rowMidY(4) + with(density) { 8.dp.toPx() })
+
+      Canvas(modifier = Modifier.fillMaxSize()) {
+        if (effectiveTreeP > 0.005f) {
+          // 1. Laser rises directly from sunken 01 LAUNCHER top center, turns 90 deg to trunkX, climbs to row 0
+          val stemP = hudEaseOutCubic(phase(effectiveTreeP, 0.00f, 0.34f))
+          if (stemP > 0.005f) {
+            val tip = drawOrthogonalPolyline(
+              points = listOf(
+                origin,
+                Offset(origin.x, elbowTurnY),
+                Offset(trunkXPx, elbowTurnY),
+                Offset(trunkXPx, rowMidY(0)),
+              ),
+              progress = stemP,
+              color = accent.copy(alpha = 0.88f),
+              strokeWidth = 1.2f.dp.toPx(),
+            )
+            if (stemP < 0.97f) drawLaserTip(tip, accent)
+          }
+
+          // 2. Sharp 90 deg right turns into each of the 5 left CompactHudCards
+          sections.forEachIndexed { idx, section ->
+            val branchStart = 0.20f + idx * 0.11f
+            val branchP = hudEaseOutCubic(phase(effectiveTreeP, branchStart, (branchStart + 0.22f).coerceAtMost(1f)))
+            val midY = rowMidY(idx)
+            val isSelected = section == activeSection
+            if (branchP > 0.005f) {
+              val tip = drawOrthogonalPolyline(
+                points = listOf(
+                  Offset(trunkXPx, midY),
+                  Offset(leftCardXPx, midY),
+                ),
+                progress = branchP,
+                color = if (isSelected) accent else TreeRailColor.copy(alpha = 0.84f),
+                strokeWidth = 1.15f.dp.toPx(),
+              )
+              if (branchP < 0.96f) drawLaserTip(tip, accent)
             }
           }
         }
 
-        // Interactive Stage 1 Cards (clipped above horizon during Stage 2 collapse)
-        val cardsReveal = hudEaseOutCubic(phase(rootAnim.value, 0.80f, 1.00f))
-        if (cardsReveal > 0.02f) {
-          Row(
-            modifier = Modifier
-              .offset { IntOffset(0, rootDropPx.roundToInt()) }
-              .padding(start = sideMarginDp, end = sideMarginDp, top = rootRowTopDp)
-              .fillMaxWidth()
-              .graphicsLayer { alpha = cardsReveal },
-            horizontalArrangement = Arrangement.spacedBy(boxGapDp),
-          ) {
-            RootBranchCard(
-              indexTag = "01",
-              title = "LAUNCHER",
-              subtitle = "HUD & UI",
-              isActiveBranch = true,
-              accent = accent,
-              modifier = Modifier.width(rootBoxW).height(rootBoxH),
-              onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onSelectBranch(SettingsStage.LAUNCHER_TREE)
-              },
-            )
-            RootBranchCard(
-              indexTag = "02",
-              title = "AGENT",
-              subtitle = "AI STANDBY",
-              isActiveBranch = false,
-              accent = accent,
-              modifier = Modifier.width(rootBoxW).height(rootBoxH),
-              onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onSelectBranch(SettingsStage.AGENT_PLACEHOLDER)
-              },
-            )
-            RootBranchCard(
-              indexTag = "03",
-              title = "SHIZUKU",
-              subtitle = "OS STANDBY",
-              isActiveBranch = false,
-              accent = accent,
-              modifier = Modifier.width(rootBoxW).height(rootBoxH),
-              onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onSelectBranch(SettingsStage.SHIZUKU_PLACEHOLDER)
-              },
-            )
-          }
-        }
-      }
-    }
-
-    // ------------------------------------------------------------------
-    // Top Header Bar (Breadcrumb + Back / Close) when settings is open
-    // ------------------------------------------------------------------
-    Row(
-      modifier = Modifier
-        .fillMaxWidth()
-        .statusBarsPadding()
-        .padding(horizontal = 16.dp, vertical = 10.dp),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      val headerTitle = when (stage) {
-        SettingsStage.CLOSED -> ""
-        SettingsStage.ROOT_BRANCHES -> "E.D.I.T.H // ROOT MATRIX"
-        SettingsStage.LAUNCHER_TREE -> "SYS.01 // LAUNCHER"
-        SettingsStage.AGENT_PLACEHOLDER -> "SYS.02 // AI AGENT"
-        SettingsStage.SHIZUKU_PLACEHOLDER -> "SYS.03 // SHIZUKU OS"
-      }
-      HeaderChip(
-        text = if (stage == SettingsStage.ROOT_BRANCHES) headerTitle else "<  $headerTitle",
-        accent = accent,
-        highlighted = stage != SettingsStage.ROOT_BRANCHES,
-        onClick = {
-          haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-          if (stage == SettingsStage.ROOT_BRANCHES) onCloseAll() else onBackStep()
-        },
-      )
-      HeaderChip(
-        text = "CLOSE",
-        accent = accent,
-        highlighted = false,
-        onClick = {
-          haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-          onCloseAll()
-        },
-      )
-    }
-
-    // ------------------------------------------------------------------
-    // STAGE 2 & 3: LAUNCHER Deep Tree (Left 90-deg List + Right Detail Card)
-    // ------------------------------------------------------------------
-    if (stage == SettingsStage.LAUNCHER_TREE) {
-      val treeP = branchTreeAnim.value
-      val detailP = detailCardAnim.value
-      val sections = LauncherSettingsSection.entries
-
-      val trunkX = 18.dp
-      val leftCardX = 32.dp
-      val leftCardW = 118.dp
-      val cardHeightDp = 52.dp
-      val cardGapDp = 10.dp
-      val topRowY = 90.dp
-      val rightConnectorElbowX = (leftCardX + leftCardW + 10.dp)
-      val rightCardLeftDp = rightConnectorElbowX + 10.dp
-      val rightCardWidthDp = (widthDp - rightCardLeftDp - 14.dp).coerceAtLeast(150.dp)
-      val rightCardTopDp = topRowY
-      val rightCardHeightDp = (cardHeightDp * 5 + cardGapDp * 4).coerceAtLeast(280.dp)
-
-      val trunkXPx = with(density) { trunkX.toPx() }
-      val leftCardXPx = with(density) { leftCardX.toPx() }
-      val leftCardRightPx = with(density) { (leftCardX + leftCardW).toPx() }
-      val cardHeightPx = with(density) { cardHeightDp.toPx() }
-      val cardGapPx = with(density) { cardGapDp.toPx() }
-      val topRowYPx = with(density) { topRowY.toPx() }
-      val elbowXPx = with(density) { rightConnectorElbowX.toPx() }
-      val rightCardLeftPx = with(density) { rightCardLeftDp.toPx() }
-      val rightCardTopPx = with(density) { rightCardTopDp.toPx() }
-      val rightCardWPx = with(density) { rightCardWidthDp.toPx() }
-      val rightCardHPx = with(density) { rightCardHeightDp.toPx() }
-
-      val rowMidY: (Int) -> Float = { idx ->
-        topRowYPx + idx * (cardHeightPx + cardGapPx) + cardHeightPx * 0.5f
-      }
-      val rowTopY: (Int) -> Float = { idx ->
-        topRowYPx + idx * (cardHeightPx + cardGapPx)
-      }
-
-      Canvas(modifier = Modifier.fillMaxSize()) {
-        if (treeP <= 0.005f) return@Canvas
-
-        // 1. Vertical stem rises from horizon up to row 0 midpoint (0.00..0.34)
-        val riseP = hudEaseOutCubic(phase(treeP, 0.00f, 0.34f))
-        val topMidY = rowMidY(0)
-        if (riseP > 0.005f) {
-          val yCur = horizonYPx + (topMidY - horizonYPx) * riseP
-          drawLine(
-            color = accent.copy(alpha = 0.85f),
-            start = Offset(trunkXPx, horizonYPx),
-            end = Offset(trunkXPx, yCur),
-            strokeWidth = 1.2f.dp.toPx(),
-            cap = StrokeCap.Round,
-          )
-          if (riseP < 0.97f) drawLaserTip(Offset(trunkXPx, yCur), accent)
-        }
-
-        // 2. Sequential downward steps + 90-degree right turns + left card outlines
-        sections.forEachIndexed { idx, section ->
-          val startT = 0.24f + idx * 0.11f
-          val branchP = hudEaseOutCubic(phase(treeP, startT, startT + 0.24f))
-          val frameP = hudEaseOutCubic(phase(treeP, startT + 0.08f, (startT + 0.36f).coerceAtMost(1f)))
-          val midY = rowMidY(idx)
-          val selected = section == selectedSection
-
-          if (branchP > 0.005f) {
-            val prevY = if (idx == 0) topMidY else rowMidY(idx - 1)
-            val points = listOf(
-              Offset(trunkXPx, prevY),
-              Offset(trunkXPx, midY),
-              Offset(leftCardXPx, midY),
-            )
-            val tip = drawOrthogonalPolyline(
-              points = points,
-              progress = branchP,
-              color = if (selected) accent else TreeRailColor.copy(alpha = 0.8f),
-              strokeWidth = 1.1f.dp.toPx(),
-            )
-            if (branchP < 0.96f) drawLaserTip(tip, accent)
-          }
-
-          if (frameP > 0.005f) {
-            val top = rowTopY(idx)
-            drawRectLaserOutline(
-              rect = Rect(leftCardXPx, top, leftCardRightPx, top + cardHeightPx),
-              progress = frameP,
-              borderColor = if (selected) accent else GlassBorderSubtle,
-              tipColor = accent,
-              cornerRadiusPx = 6.dp.toPx(),
-            )
-          }
-        }
-
-        // 3. Stage 3 orthogonal 90-degree connector -> Single large right detail card
-        val activeIdx = selectedSection?.let { sections.indexOf(it) } ?: -1
-        if (activeIdx >= 0 && detailP > 0.005f) {
-          val linkP = hudEaseOutCubic(phase(detailP, 0.00f, 0.44f))
-          val boxP = hudEaseOutCubic(phase(detailP, 0.34f, 1.00f))
+        // 3. Stage 3 orthogonal 90 deg elbow connector from pressed left card's right edge -> right HUD container
+        val activeIdx = activeSection?.let { sections.indexOf(it) } ?: -1
+        if (activeIdx >= 0 && effectiveDetailP > 0.005f) {
+          val linkP = hudEaseOutCubic(phase(effectiveDetailP, 0.00f, 0.34f))
+          val boxP = hudEaseOutCubic(phase(effectiveDetailP, 0.24f, 0.64f))
           val sourceY = rowMidY(activeIdx)
-          val targetY = rightCardTopPx + 42.dp.toPx()
+          val targetY = topRowPx + 32.dp.toPx()
 
           if (linkP > 0.005f) {
             val tip = drawOrthogonalPolyline(
@@ -525,90 +838,60 @@ fun HudSettingsTree(
           }
 
           if (boxP > 0.005f) {
-            drawRectLaserOutline(
-              rect = Rect(
-                rightCardLeftPx,
-                rightCardTopPx,
-                rightCardLeftPx + rightCardWPx,
-                rightCardTopPx + rightCardHPx,
-              ),
+            drawHudContainerFrame(
+              left = rightCardLeftPx,
+              top = topRowPx,
+              width = rightCardWPx,
+              height = rightCardHPx,
               progress = boxP,
-              borderColor = accent.copy(alpha = 0.82f),
-              tipColor = accent,
-              cornerRadiusPx = 8.dp.toPx(),
+              accent = accent,
             )
           }
         }
       }
 
-      // Left column clickable boxes
+      // Left column 5 CompactHudCards
       Column(
         modifier = Modifier
-          .padding(start = leftCardX, top = topRowY)
-          .width(leftCardW),
+          .padding(start = leftCardXDp, top = topRowDp)
+          .width(leftCardWDp),
         verticalArrangement = Arrangement.spacedBy(cardGapDp),
       ) {
         sections.forEachIndexed { idx, section ->
-          val itemAlpha = hudEaseOutCubic(phase(treeP, 0.34f + idx * 0.11f, (0.56f + idx * 0.11f).coerceAtMost(1f)))
-          val isSelected = section == selectedSection
-          Box(
-            modifier = Modifier
-              .fillMaxWidth()
-              .height(cardHeightDp)
-              .graphicsLayer { alpha = itemAlpha }
-              .clip(RoundedCornerShape(6.dp))
-              .background(if (isSelected) GlassSurfaceElevated else GlassSurface.copy(alpha = 0.88f))
-              .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                enabled = itemAlpha > 0.3f,
-              ) {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onSelectSection(if (isSelected) null else section)
-              }
-              .padding(horizontal = 10.dp, vertical = 7.dp),
-          ) {
-            Column(
-              modifier = Modifier.fillMaxSize(),
-              verticalArrangement = Arrangement.SpaceBetween,
-            ) {
-              Text(
-                text = section.tag,
-                color = if (isSelected) accent else TextSilver.copy(alpha = 0.68f),
-                fontSize = 8.5.sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp,
-              )
-              Text(
-                text = section.title,
-                color = TextPureWhite,
-                fontSize = 11.sp,
-                fontFamily = style.fontFamily,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-              )
-            }
-          }
+          val cardReveal = hudEaseOutCubic(phase(effectiveTreeP, 0.28f + idx * 0.11f, (0.64f + idx * 0.09f).coerceAtMost(1f)))
+          val isSelected = section == activeSection
+          CompactHudCard(
+            eyebrow = section.tag,
+            title = section.title,
+            pipColor = if (isSelected) accent else TreeRailColor.copy(alpha = 0.55f),
+            focused = isSelected,
+            accent = accent,
+            titleSizeSp = 10.6f,
+            reveal = { cardReveal },
+            enabled = isInteractive && cardReveal > 0.35f,
+            modifier = Modifier.fillMaxWidth().height(cardHeightDp),
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              onSelectSection(if (isSelected) null else section)
+            },
+          )
         }
       }
 
-      // Single right-hand Detail Card inside the open negative space
-      if (selectedSection != null && detailP > 0.18f) {
-        val contentAlpha = hudEaseOutCubic(phase(detailP, 0.42f, 1.00f))
+      // Right-hand Stage 3 Detail HUD Container + Staggered Option CompactHudCards
+      if (activeSection != null && effectiveDetailP > 0.24f) {
+        val innerReveal = hudEaseOutCubic(phase(effectiveDetailP, 0.36f, 1.00f))
         Box(
           modifier = Modifier
-            .padding(start = rightCardLeftDp, top = rightCardTopDp)
-            .width(rightCardWidthDp)
-            .height(rightCardHeightDp)
-            .graphicsLayer { alpha = contentAlpha }
-            .clip(RoundedCornerShape(8.dp))
-            .background(GlassSurface.copy(alpha = 0.94f))
-            .padding(12.dp),
+            .padding(start = rightCardLeftDp, top = topRowDp)
+            .width(rightCardWDp)
+            .height(rightCardHDp)
+            .padding(10.dp),
         ) {
           LauncherDetailCardContent(
-            section = selectedSection,
+            section = activeSection,
+            reveal = { innerReveal },
+            enabled = isInteractive && innerReveal > 0.35f,
             settings = settings,
             telemetry = telemetry,
             liveWeather = liveWeather,
@@ -616,226 +899,166 @@ fun HudSettingsTree(
             hasNotificationAccess = hasNotificationAccess,
             otaState = otaState,
             accent = accent,
-            onAccentChange = onAccentChange,
-            onFontChange = onFontChange,
-            onFontScaleChange = onFontScaleChange,
-            onUse24HourChange = onUse24HourChange,
-            onRefreshRateSelect = onRefreshRateSelect,
-            onRefreshWeather = onRefreshWeather,
-            onOpenAlarms = onOpenAlarms,
-            onOpenHomeSettings = onOpenHomeSettings,
-            onOpenUsageSettings = onOpenUsageSettings,
-            onOpenNotificationSettings = onOpenNotificationSettings,
-            onCheckOta = onCheckOta,
-          )
-        }
-      }
-    } else if (stage == SettingsStage.AGENT_PLACEHOLDER || stage == SettingsStage.SHIZUKU_PLACEHOLDER) {
-      // Blank Standby Branch (as instructed for Agent & Shizuku)
-      val treeP = branchTreeAnim.value
-      val isAgent = stage == SettingsStage.AGENT_PLACEHOLDER
-      val cardW = (widthDp - 64.dp).coerceAtLeast(220.dp)
-      val cardH = 148.dp
-      val cardLeftDp = (widthDp - cardW) * 0.5f
-      val cardTopDp = 156.dp
-
-      val trunkX = widthPx * 0.5f
-      val cardLeftPx = with(density) { cardLeftDp.toPx() }
-      val cardTopPx = with(density) { cardTopDp.toPx() }
-      val cardWPx = with(density) { cardW.toPx() }
-      val cardHPx = with(density) { cardH.toPx() }
-      val elbowTurnY = cardTopPx + cardHPx + with(density) { 28.dp.toPx() }
-
-      Canvas(modifier = Modifier.fillMaxSize()) {
-        if (treeP <= 0.005f) return@Canvas
-        val stemP = hudEaseOutCubic(phase(treeP, 0.00f, 0.55f))
-        val boxP = hudEaseOutCubic(phase(treeP, 0.45f, 1.00f))
-        if (stemP > 0.005f) {
-          val tip = drawOrthogonalPolyline(
-            points = listOf(
-              Offset(trunkX, horizonYPx),
-              Offset(trunkX, cardTopPx + cardHPx),
-            ),
-            progress = stemP,
-            color = accent.copy(alpha = 0.72f),
-            strokeWidth = 1.2f.dp.toPx(),
-          )
-          if (stemP < 0.97f) drawLaserTip(tip, accent)
-          // Crossbar subtle tick
-          if (stemP > 0.6f) {
-            drawCircle(accent.copy(alpha = 0.7f), 2.5f.dp.toPx(), Offset(trunkX, elbowTurnY.coerceAtMost(horizonYPx - 10f)))
-          }
-        }
-        if (boxP > 0.005f) {
-          drawRectLaserOutline(
-            rect = Rect(cardLeftPx, cardTopPx, cardLeftPx + cardWPx, cardTopPx + cardHPx),
-            progress = boxP,
-            borderColor = accent.copy(alpha = 0.56f),
-            tipColor = accent,
-            cornerRadiusPx = 8.dp.toPx(),
-          )
-        }
-      }
-
-      val bodyAlpha = hudEaseOutCubic(phase(treeP, 0.65f, 1.00f))
-      Box(
-        modifier = Modifier
-          .padding(start = cardLeftDp, top = cardTopDp)
-          .width(cardW)
-          .height(cardH)
-          .graphicsLayer { alpha = bodyAlpha }
-          .clip(RoundedCornerShape(8.dp))
-          .background(GlassSurface.copy(alpha = 0.90f))
-          .padding(16.dp),
-      ) {
-        Column(
-          modifier = Modifier.fillMaxSize(),
-          verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-          Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-              text = if (isAgent) "SYS.02 // AI AGENT MODULE" else "SYS.03 // SHIZUKU OS BRIDGE",
-              color = accent,
-              fontFamily = FontFamily.Monospace,
-              fontSize = 10.sp,
-              fontWeight = FontWeight.Bold,
-              letterSpacing = 1.sp,
-            )
-            Text(
-              text = if (isAgent) "STANDBY // SLOT RESERVED" else "STANDBY // OS MONET & VOICE",
-              color = TextPureWhite,
-              fontSize = 14.sp,
-              fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-              text = if (isAgent) {
-                "Personalized agent controls will mount in this branch."
-              } else {
-                "Reserved for OS-wide Monet palette & voice styling (separate from Launcher theme)."
-              },
-              color = TextSilver,
-              fontSize = 12.sp,
-              lineHeight = 16.sp,
-            )
-          }
-          HeaderChip(
-            text = "< BACK TO BRANCHES",
-            accent = accent,
-            highlighted = true,
-            onClick = {
+            onAccentChange = {
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              onBackStep()
+              onAccentChange(it)
+            },
+            onFontChange = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              onFontChange(it)
+            },
+            onFontScaleChange = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              onFontScaleChange(it)
+            },
+            onUse24HourChange = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              onUse24HourChange(it)
+            },
+            onRefreshRateSelect = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              onRefreshRateSelect(it)
+            },
+            onRefreshWeather = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              onRefreshWeather()
+            },
+            onOpenAlarms = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              onOpenAlarms()
+            },
+            onOpenHomeSettings = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              onOpenHomeSettings()
+            },
+            onOpenUsageSettings = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              onOpenUsageSettings()
+            },
+            onOpenNotificationSettings = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              onOpenNotificationSettings()
+            },
+            onCheckOta = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              onCheckOta()
             },
           )
         }
       }
-    }
-  }
-}
+    } else if (activeStage == SettingsStage.AGENT_PLACEHOLDER || activeStage == SettingsStage.SHIZUKU_PLACEHOLDER) {
+      // Standby Branch (02 AGENT or 03 SHIZUKU): laser starts from exact sunken card top center
+      val isAgent = activeStage == SettingsStage.AGENT_PLACEHOLDER
+      val originIdx = if (isAgent) 1 else 2
+      val origin = geo.sunkenCardTopCenter(originIdx)
 
-@Composable
-private fun RootBranchCard(
-  indexTag: String,
-  title: String,
-  subtitle: String,
-  isActiveBranch: Boolean,
-  accent: Color,
-  modifier: Modifier = Modifier,
-  onClick: () -> Unit,
-) {
-  Box(
-    modifier = modifier
-      .clip(RoundedCornerShape(6.dp))
-      .background(GlassSurface.copy(alpha = 0.88f))
-      .clickable(
-        interactionSource = remember { MutableInteractionSource() },
-        indication = null,
-        onClick = onClick,
-      )
-      .padding(horizontal = 9.dp, vertical = 10.dp),
-  ) {
-    Column(
-      modifier = Modifier.fillMaxSize(),
-      verticalArrangement = Arrangement.SpaceBetween,
-    ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Text(
-          text = indexTag,
-          color = if (isActiveBranch) accent else TextSilver.copy(alpha = 0.7f),
-          fontFamily = FontFamily.Monospace,
-          fontSize = 9.sp,
-          fontWeight = FontWeight.Bold,
-        )
+      val cardWDp = (geo.widthDp - 56.dp).coerceIn(220.dp, 312.dp)
+      val cardHDp = 152.dp
+      val cardLeftDp = (geo.widthDp - cardWDp) * 0.5f
+      val cardTopDp = 154.dp
+
+      val cardLeftPx = with(density) { cardLeftDp.toPx() }
+      val cardTopPx = with(density) { cardTopDp.toPx() }
+      val cardWPx = with(density) { cardWDp.toPx() }
+      val cardHPx = with(density) { cardHDp.toPx() }
+      val cardBottomPx = cardTopPx + cardHPx
+      val cardCenterX = geo.cx
+      val elbowY = (origin.y + cardBottomPx) * 0.5f
+
+      Canvas(modifier = Modifier.fillMaxSize()) {
+        if (effectiveTreeP <= 0.005f) return@Canvas
+        val stemP = hudEaseOutCubic(phase(effectiveTreeP, 0.00f, 0.52f))
+        val boxP = hudEaseOutCubic(phase(effectiveTreeP, 0.42f, 0.84f))
+
+        if (stemP > 0.005f) {
+          val pts = if (abs(origin.x - cardCenterX) < 2f) {
+            listOf(origin, Offset(cardCenterX, cardBottomPx))
+          } else {
+            listOf(
+              origin,
+              Offset(origin.x, elbowY),
+              Offset(cardCenterX, elbowY),
+              Offset(cardCenterX, cardBottomPx),
+            )
+          }
+          val tip = drawOrthogonalPolyline(
+            points = pts,
+            progress = stemP,
+            color = accent.copy(alpha = 0.82f),
+            strokeWidth = 1.2f.dp.toPx(),
+          )
+          if (stemP < 0.97f) drawLaserTip(tip, accent)
+        }
+
+        if (boxP > 0.005f) {
+          drawHudContainerFrame(
+            left = cardLeftPx,
+            top = cardTopPx,
+            width = cardWPx,
+            height = cardHPx,
+            progress = boxP,
+            accent = accent,
+          )
+        }
+      }
+
+      val bodyReveal = hudEaseOutCubic(phase(effectiveTreeP, 0.58f, 1.00f))
+      if (bodyReveal > 0.01f) {
         Box(
           modifier = Modifier
-            .size(6.dp)
-            .clip(RoundedCornerShape(1.dp))
-            .background(if (isActiveBranch) accent else TreeRailColor.copy(alpha = 0.5f))
-        )
-      }
-      Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(
-          text = title,
-          color = TextPureWhite,
-          fontSize = 12.sp,
-          fontWeight = FontWeight.Bold,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-          text = subtitle,
-          color = if (isActiveBranch) accent.copy(alpha = 0.9f) else TextSilver.copy(alpha = 0.72f),
-          fontFamily = FontFamily.Monospace,
-          fontSize = 8.5.sp,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-        )
+            .padding(start = cardLeftDp, top = cardTopDp)
+            .width(cardWDp)
+            .height(cardHDp)
+            .padding(14.dp),
+        ) {
+          Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween,
+          ) {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+              HudHeaderDecryptBlock(
+                eyebrow = if (isAgent) "SYS.02 // AI AGENT" else "SYS.03 // SHIZUKU BRIDGE",
+                title = if (isAgent) "STANDBY // RESERVED" else "STANDBY // OS MONET",
+                reveal = { phase(bodyReveal, 0f, 0.72f) },
+                accent = accent,
+              )
+              Text(
+                text = if (isAgent) {
+                  "Personalized agent controls will mount in this branch."
+                } else {
+                  "Reserved for OS-wide Monet palette & voice styling."
+                },
+                color = TextSilver.copy(alpha = phase(bodyReveal, 0.35f, 1.0f)),
+                fontSize = 11.5.sp,
+                lineHeight = 15.sp,
+              )
+            }
+            CompactHudCard(
+              title = "< BACK TO BRANCHES",
+              reveal = { phase(bodyReveal, 0.28f, 1.0f) },
+              accent = accent,
+              focused = true,
+              titleSizeSp = 10f,
+              centerText = true,
+              enabled = isInteractive && bodyReveal > 0.5f,
+              modifier = Modifier.fillMaxWidth().height(34.dp),
+              onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onBackStep()
+              },
+            )
+          }
+        }
       }
     }
-  }
-}
-
-@Composable
-private fun HeaderChip(
-  text: String,
-  accent: Color,
-  highlighted: Boolean,
-  onClick: () -> Unit,
-) {
-  Box(
-    modifier = Modifier
-      .clip(RoundedCornerShape(4.dp))
-      .background(ObsidianBgTop.copy(alpha = 0.82f))
-      .border(
-        width = 0.8.dp,
-        color = if (highlighted) accent.copy(alpha = 0.7f) else GlassBorderSubtle,
-        shape = RoundedCornerShape(4.dp),
-      )
-      .clickable(
-        interactionSource = remember { MutableInteractionSource() },
-        indication = null,
-        onClick = onClick,
-      )
-      .padding(horizontal = 10.dp, vertical = 7.dp),
-  ) {
-    Text(
-      text = text,
-      color = if (highlighted) accent else TextSilver,
-      fontFamily = FontFamily.Monospace,
-      fontSize = 10.sp,
-      fontWeight = FontWeight.Bold,
-      letterSpacing = 0.8.sp,
-    )
   }
 }
 
 @Composable
 private fun LauncherDetailCardContent(
   section: LauncherSettingsSection,
+  reveal: () -> Float,
+  enabled: Boolean,
   settings: LauncherSettingsConfig,
   telemetry: DeviceTelemetry,
   liveWeather: LiveWeather?,
@@ -860,85 +1083,75 @@ private fun LauncherDetailCardContent(
     modifier = Modifier
       .fillMaxSize()
       .verticalScroll(scrollState),
-    verticalArrangement = Arrangement.spacedBy(10.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-      Text(
-        text = "NODE // ${section.tag}",
-        color = accent,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 9.5.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 1.sp,
-      )
-      Text(
-        text = section.title,
-        color = TextPureWhite,
-        fontSize = 15.sp,
-        fontWeight = FontWeight.Bold,
-      )
-    }
+    HudHeaderDecryptBlock(
+      eyebrow = "NODE // ${section.tag}",
+      title = section.title,
+      reveal = { staggeredReveal(reveal(), 0, 5, stagger = 0.14f) },
+      accent = accent,
+    )
 
     when (section) {
       LauncherSettingsSection.THEME_COLOR -> {
-        Text(
-          text = "Launcher UI accent only (independent from OS Shizuku Monet).",
-          color = TextSilver,
-          fontSize = 11.5.sp,
-          lineHeight = 15.sp,
-        )
-        LauncherAccentPreset.entries.forEach { preset ->
+        val presets = LauncherAccentPreset.entries
+        val totalSteps = presets.size + 1
+        presets.forEachIndexed { idx, preset ->
           val presetColor = preset.toColor()
           val selected = settings.accentPreset == preset
-          DetailOptionButton(
-            label = preset.label,
+          CompactHudCard(
+            title = preset.label.uppercase(),
             badge = if (selected) "ACTIVE" else preset.code,
+            swatchColor = presetColor,
+            focused = selected,
             accent = presetColor,
-            selected = selected,
-            leadingSwatch = presetColor,
+            titleSizeSp = 10.8f,
+            reveal = { staggeredReveal(reveal(), idx + 1, totalSteps, stagger = 0.16f) },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth().height(46.dp),
             onClick = { onAccentChange(preset) },
           )
         }
       }
 
       LauncherSettingsSection.FONT_SCALE -> {
-        Text(
-          text = "TYPEFACE",
-          color = TextSilver,
-          fontFamily = FontFamily.Monospace,
-          fontSize = 9.5.sp,
-          letterSpacing = 0.8.sp,
-        )
-        LauncherFontStyle.entries.forEach { styleItem ->
+        val styles = LauncherFontStyle.entries
+        val scaleOptions = listOf(0.90f to "0.9X", 1.00f to "1.0X", 1.12f to "1.12X")
+        val totalSteps = styles.size + 2
+        styles.forEachIndexed { idx, styleItem ->
           val selected = settings.fontStyle == styleItem
-          DetailOptionButton(
-            label = styleItem.label,
+          CompactHudCard(
+            title = styleItem.label.uppercase(),
             badge = if (selected) "ACTIVE" else styleItem.code,
+            focused = selected,
             accent = accent,
-            selected = selected,
+            titleSizeSp = 10.5f,
+            reveal = { staggeredReveal(reveal(), idx + 1, totalSteps, stagger = 0.14f) },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth().height(40.dp),
             onClick = { onFontChange(styleItem) },
           )
         }
-        Spacer(Modifier.height(2.dp))
-        Text(
+        Spacer(Modifier.height(1.dp))
+        HudMicroLabel(
           text = "TEXT SCALE",
-          color = TextSilver,
-          fontFamily = FontFamily.Monospace,
-          fontSize = 9.5.sp,
-          letterSpacing = 0.8.sp,
+          reveal = { staggeredReveal(reveal(), styles.size + 1, totalSteps, stagger = 0.14f) },
         )
-        val scaleOptions = listOf(0.90f to "0.9x", 1.00f to "1.0x", 1.12f to "1.12x")
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-          scaleOptions.forEach { (scaleVal, tag) ->
-            val selected = kotlin.math.abs(settings.fontScale - scaleVal) < 0.03f
-            CompactChoiceButton(
-              text = tag,
+          scaleOptions.forEachIndexed { sIdx, (scaleVal, tag) ->
+            val selected = abs(settings.fontScale - scaleVal) < 0.03f
+            CompactHudCard(
+              title = tag,
+              focused = selected,
               accent = accent,
-              selected = selected,
-              modifier = Modifier.weight(1f),
+              titleSizeSp = 10f,
+              centerText = true,
+              reveal = { staggeredReveal(reveal(), styles.size + 1, totalSteps, stagger = 0.14f) },
+              enabled = enabled,
+              modifier = Modifier.weight(1f).height(34.dp),
               onClick = { onFontScaleChange(scaleVal) },
             )
           }
@@ -946,116 +1159,148 @@ private fun LauncherDetailCardContent(
       }
 
       LauncherSettingsSection.CLOCK_DATE -> {
-        Text(
-          text = "TIME FORMAT",
-          color = TextSilver,
-          fontFamily = FontFamily.Monospace,
-          fontSize = 9.5.sp,
-          letterSpacing = 0.8.sp,
-        )
-        DetailOptionButton(
-          label = "24-Hour Military",
+        val totalSteps = 4
+        CompactHudCard(
+          title = "24H MILITARY",
           badge = if (settings.use24Hour) "ON" else "24H",
+          focused = settings.use24Hour,
           accent = accent,
-          selected = settings.use24Hour,
+          titleSizeSp = 10.8f,
+          reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.16f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(46.dp),
           onClick = { onUse24HourChange(true) },
         )
-        DetailOptionButton(
-          label = "12-Hour (AM / PM)",
+        CompactHudCard(
+          title = "12H AM / PM",
           badge = if (!settings.use24Hour) "ON" else "12H",
+          focused = !settings.use24Hour,
           accent = accent,
-          selected = !settings.use24Hour,
+          titleSizeSp = 10.8f,
+          reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.16f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(46.dp),
           onClick = { onUse24HourChange(false) },
         )
-        DetailActionButton(
-          label = "Open Clock & Alarms",
-          badge = "SYSTEM",
+        CompactHudCard(
+          eyebrow = "SYSTEM",
+          title = "CLOCK & ALARMS",
+          badge = "OPEN",
+          focused = false,
           accent = accent,
+          titleSizeSp = 10.5f,
+          reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.16f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(48.dp),
           onClick = onOpenAlarms,
         )
       }
 
       LauncherSettingsSection.DISPLAY_WEATHER -> {
-        Text(
-          text = "MOTO G45 REFRESH (${telemetry.refreshRateHz}Hz)",
-          color = TextSilver,
-          fontFamily = FontFamily.Monospace,
-          fontSize = 9.5.sp,
-          letterSpacing = 0.8.sp,
+        val hzChoices = listOf<Pair<Int?, String>>(null to "AUTO", 60 to "60HZ", 90 to "90HZ", 120 to "120HZ")
+        val totalSteps = 4
+        HudMicroLabel(
+          text = "MOTO G45 // ${telemetry.refreshRateHz}HZ",
+          reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.14f) },
         )
-        val hzChoices = listOf<Pair<Int?, String>>(null to "AUTO", 60 to "60", 90 to "90", 120 to "120")
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-          hzChoices.forEach { (hzVal, title) ->
-            val selected = hzVal != null && telemetry.refreshRateHz == hzVal
-            CompactChoiceButton(
-              text = title,
-              accent = accent,
-              selected = selected,
-              modifier = Modifier.weight(1f),
-              onClick = { onRefreshRateSelect(hzVal) },
-            )
+        for (rowIdx in 0 until 2) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            for (colIdx in 0 until 2) {
+              val choiceIdx = rowIdx * 2 + colIdx
+              val (hzVal, title) = hzChoices[choiceIdx]
+              val selected = hzVal != null && telemetry.refreshRateHz == hzVal
+              CompactHudCard(
+                title = title,
+                focused = selected,
+                accent = accent,
+                titleSizeSp = 10.2f,
+                centerText = true,
+                reveal = { staggeredReveal(reveal(), 1 + rowIdx, totalSteps, stagger = 0.14f) },
+                enabled = enabled,
+                modifier = Modifier.weight(1f).height(34.dp),
+                onClick = { onRefreshRateSelect(hzVal) },
+              )
+            }
           }
         }
-        Spacer(Modifier.height(2.dp))
-        Text(
-          text = if (liveWeather != null) {
-            "WX: ${liveWeather.tempCelsius}°C · ${liveWeather.label} ${liveWeather.city}"
-          } else {
-            "WX: Pending IP telemetry"
-          },
-          color = TextSilver,
-          fontSize = 11.5.sp,
-        )
-        DetailActionButton(
-          label = "Refresh Live Weather",
+        val wxSubtitle = if (liveWeather != null) {
+          "${liveWeather.tempCelsius}C · ${liveWeather.label.uppercase()}"
+        } else {
+          "PENDING TELEMETRY"
+        }
+        CompactHudCard(
+          eyebrow = "WX // ${liveWeather?.city?.uppercase() ?: "LOCAL"}",
+          title = wxSubtitle,
           badge = "SYNC",
+          focused = liveWeather != null,
           accent = accent,
+          titleSizeSp = 10.2f,
+          reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.14f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(50.dp),
           onClick = onRefreshWeather,
         )
       }
 
       LauncherSettingsSection.PERMS_OTA -> {
-        DetailOptionButton(
-          label = "Default Launcher",
+        val totalSteps = 5
+        CompactHudCard(
+          title = "DEFAULT HOME",
           badge = if (isDefaultLauncher) "ACTIVE" else "GRANT",
+          focused = isDefaultLauncher,
           accent = accent,
-          selected = isDefaultLauncher,
+          titleSizeSp = 10.4f,
+          reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.14f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(40.dp),
           onClick = onOpenHomeSettings,
         )
-        DetailOptionButton(
-          label = "14d Usage Access",
+        CompactHudCard(
+          title = "14D USAGE",
           badge = if (telemetry.hasUsageAccess) "OK" else "GRANT",
+          focused = telemetry.hasUsageAccess,
           accent = accent,
-          selected = telemetry.hasUsageAccess,
+          titleSizeSp = 10.4f,
+          reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.14f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(40.dp),
           onClick = onOpenUsageSettings,
         )
-        DetailOptionButton(
-          label = "Notification Access",
+        CompactHudCard(
+          title = "NOTIFICATIONS",
           badge = if (hasNotificationAccess) "OK" else "GRANT",
+          focused = hasNotificationAccess,
           accent = accent,
-          selected = hasNotificationAccess,
+          titleSizeSp = 10.4f,
+          reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.14f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(40.dp),
           onClick = onOpenNotificationSettings,
         )
-        Spacer(Modifier.height(2.dp))
         val (otaLabel, otaBadge, otaHighlight) = when (otaState) {
-          OtaState.Idle -> Triple("Check & Install OTA", "UPDATE", true)
-          OtaState.Checking -> Triple("Scanning Release...", "WAIT", true)
-          is OtaState.Available -> Triple("Download v${otaState.release.versionName}", "GET", true)
-          is OtaState.Downloading -> Triple("Downloading Package...", "${otaState.progress}%", true)
-          is OtaState.ReadyToInstall -> Triple("Install v${otaState.release.versionName}", "INSTALL", true)
-          is OtaState.Installing -> Triple("Installing Update...", "WAIT", true)
-          is OtaState.Installed -> Triple("Update Applied", "DONE", true)
-          OtaState.UpToDate -> Triple("Already Up To Date", "LATEST", false)
-          is OtaState.Error -> Triple("Retry OTA (${otaState.message.take(14)})", "RETRY", true)
+          OtaState.Idle -> Triple("CHECK & INSTALL", "OTA", true)
+          OtaState.Checking -> Triple("SCANNING...", "WAIT", true)
+          is OtaState.Available -> Triple("GET v${otaState.release.versionName}", "GET", true)
+          is OtaState.Downloading -> Triple("DOWNLOADING...", "${otaState.progress}%", true)
+          is OtaState.ReadyToInstall -> Triple("INSTALL v${otaState.release.versionName}", "RUN", true)
+          is OtaState.Installing -> Triple("INSTALLING...", "WAIT", true)
+          is OtaState.Installed -> Triple("UPDATE APPLIED", "DONE", true)
+          OtaState.UpToDate -> Triple("UP TO DATE", "LATEST", false)
+          is OtaState.Error -> Triple("RETRY (${otaState.message.take(10).uppercase()})", "ERR", true)
         }
-        DetailActionButton(
-          label = otaLabel,
+        CompactHudCard(
+          eyebrow = "OTA // FIRMWARE",
+          title = otaLabel,
           badge = otaBadge,
+          focused = otaHighlight,
           accent = if (otaState is OtaState.Error) CrimsonBright else accent,
-          emphasized = otaHighlight,
+          titleSizeSp = 10.2f,
+          reveal = { staggeredReveal(reveal(), 4, totalSteps, stagger = 0.14f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(50.dp),
           onClick = onCheckOta,
         )
       }
@@ -1063,174 +1308,423 @@ private fun LauncherDetailCardContent(
   }
 }
 
+/**
+ * Compact HUD card primitive inheriting `HudAppCard`'s visual and kinetic DNA:
+ * flat sharp dark-glass gradient fill wiped behind the trace, clockwise `drawTracedRect` perimeter
+ * with laser head, scaled asymmetric `drawHudCornerBrackets` snapping onto the 4 corners via
+ * `cornerAt`, and `monoPaint` + `drawDecrypt` cipher noise text reveal.
+ */
 @Composable
-private fun DetailOptionButton(
-  label: String,
-  badge: String,
+private fun CompactHudCard(
+  title: String,
+  reveal: () -> Float,
   accent: Color,
-  selected: Boolean,
-  leadingSwatch: Color? = null,
-  onClick: () -> Unit,
-) {
-  Row(
-    modifier = Modifier
-      .fillMaxWidth()
-      .clip(RoundedCornerShape(6.dp))
-      .background(if (selected) GlassSurfaceElevated else ObsidianBgTop.copy(alpha = 0.65f))
-      .border(
-        width = if (selected) 1.dp else 0.7.dp,
-        color = if (selected) accent else GlassBorderSubtle,
-        shape = RoundedCornerShape(6.dp),
-      )
-      .clickable(
-        interactionSource = remember { MutableInteractionSource() },
-        indication = null,
-        onClick = onClick,
-      )
-      .padding(horizontal = 10.dp, vertical = 10.dp),
-    horizontalArrangement = Arrangement.SpaceBetween,
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-      modifier = Modifier.weight(1f),
-    ) {
-      if (leadingSwatch != null) {
-        Box(
-          modifier = Modifier
-            .size(10.dp)
-            .clip(RoundedCornerShape(2.dp))
-            .background(leadingSwatch)
-        )
-      }
-      Text(
-        text = label,
-        color = TextPureWhite,
-        fontSize = 12.sp,
-        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-      )
-    }
-    Spacer(Modifier.width(6.dp))
-    Text(
-      text = badge,
-      color = if (selected) accent else TextSilver.copy(alpha = 0.75f),
-      fontFamily = FontFamily.Monospace,
-      fontSize = 9.5.sp,
-      fontWeight = FontWeight.Bold,
-    )
-  }
-}
-
-@Composable
-private fun CompactChoiceButton(
-  text: String,
-  accent: Color,
-  selected: Boolean,
   modifier: Modifier = Modifier,
-  onClick: () -> Unit,
+  eyebrow: String? = null,
+  badge: String? = null,
+  swatchColor: Color? = null,
+  pipColor: Color? = null,
+  focused: Boolean = false,
+  centerText: Boolean = false,
+  titleSizeSp: Float = 11.2f,
+  enabled: Boolean = true,
+  onClick: (() -> Unit)? = null,
 ) {
+  val density = LocalDensity.current
+  val curAccent = rememberUpdatedState(accent)
+  val curFocused = rememberUpdatedState(focused)
+  val curSwatch = rememberUpdatedState(swatchColor)
+  val curPip = rememberUpdatedState(pipColor)
+  val curTitle = rememberUpdatedState(title)
+  val curEyebrow = rememberUpdatedState(eyebrow)
+  val curBadge = rememberUpdatedState(badge)
+  val curCenter = rememberUpdatedState(centerText)
+
+  val eyebrowPaint = remember(density) { monoPaint(density, 7.8f, 0.9f, Paint.Align.LEFT, 165) }
+  val titlePaint = remember(density, titleSizeSp) {
+    monoPaint(density, titleSizeSp, 0.9f, Paint.Align.LEFT, 255).apply {
+      typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+    }
+  }
+  val badgePaint = remember(density) {
+    monoPaint(density, 8.2f, 0.8f, Paint.Align.LEFT, 220).apply {
+      typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+    }
+  }
+
+  val clickMod = if (onClick != null) {
+    Modifier.clickable(
+      interactionSource = remember { MutableInteractionSource() },
+      indication = null,
+      enabled = enabled,
+      onClick = onClick,
+    )
+  } else {
+    Modifier
+  }
+
   Box(
     modifier = modifier
-      .clip(RoundedCornerShape(5.dp))
-      .background(if (selected) GlassSurfaceElevated else ObsidianBgTop.copy(alpha = 0.65f))
-      .border(
-        width = if (selected) 1.dp else 0.7.dp,
-        color = if (selected) accent else GlassBorderSubtle,
-        shape = RoundedCornerShape(5.dp),
-      )
-      .clickable(
-        interactionSource = remember { MutableInteractionSource() },
-        indication = null,
-        onClick = onClick,
-      )
-      .padding(vertical = 9.dp),
-    contentAlignment = Alignment.Center,
-  ) {
-    Text(
-      text = text,
-      color = if (selected) accent else TextPureWhite,
-      fontFamily = FontFamily.Monospace,
-      fontSize = 10.5.sp,
-      fontWeight = FontWeight.Bold,
-    )
-  }
+      .then(clickMod)
+      .drawWithCache {
+        val tText = curTitle.value
+        val eText = curEyebrow.value
+        val bText = curBadge.value
+        val centered = curCenter.value
+        val hasSwatch = curSwatch.value != null
+        val hasPip = curPip.value != null
+
+        val stroke = 1.dp.toPx()
+        val bar = 1.15f.dp.toPx()
+        val keylineW = (size.width - stroke).coerceAtLeast(1f)
+        val keylineH = (size.height - stroke).coerceAtLeast(1f)
+        val perimeter = (2f * (size.width + size.height)).coerceAtLeast(1f)
+        val cornerAt = floatArrayOf(
+          0f,
+          size.width / perimeter,
+          (size.width + size.height) / perimeter,
+          (2f * size.width + size.height) / perimeter,
+        )
+        val bracketScale = minOf(
+          size.width / 150f.dp.toPx(),
+          size.height / 72f.dp.toPx(),
+        ).coerceIn(0.30f, 0.86f)
+
+        val padX = if (size.width < 88.dp.toPx()) 6.dp.toPx() else 9.dp.toPx()
+        val swatchSize = 7.dp.toPx()
+        val pipSize = 5.dp.toPx()
+
+        val textLeft = if (hasSwatch) padX + swatchSize + 6.dp.toPx() else padX
+        val badgeWidth = if (bText != null) badgePaint.measureText(bText) else 0f
+        val badgeX = size.width - padX - badgeWidth
+
+        val titleRight = when {
+          bText != null && eText == null -> (badgeX - 5.dp.toPx()).coerceAtLeast(textLeft + 8f)
+          else -> (size.width - padX).coerceAtLeast(textLeft + 8f)
+        }
+        val eyebrowRight = when {
+          bText != null && eText != null -> (badgeX - 5.dp.toPx()).coerceAtLeast(textLeft + 8f)
+          hasPip && eText != null -> (size.width - padX - pipSize - 4.dp.toPx()).coerceAtLeast(textLeft + 8f)
+          else -> (size.width - padX).coerceAtLeast(textLeft + 8f)
+        }
+
+        val titleAdvance = (titlePaint.measureText("MM") - titlePaint.measureText("M")).coerceAtLeast(1f)
+        val maxTitleChars = ((titleRight - textLeft) / titleAdvance).toInt().coerceAtLeast(1)
+        val shownTitle = if (tText.length <= maxTitleChars) tText else {
+          if (maxTitleChars <= 1) "…" else tText.take(maxTitleChars - 1) + "…"
+        }
+
+        val shownEyebrow = eText?.let { raw ->
+          val eAdvance = (eyebrowPaint.measureText("MM") - eyebrowPaint.measureText("M")).coerceAtLeast(1f)
+          val maxE = ((eyebrowRight - textLeft) / eAdvance).toInt().coerceAtLeast(1)
+          if (raw.length <= maxE) raw else if (maxE <= 1) "…" else raw.take(maxE - 1) + "…"
+        }
+
+        val titleX = if (centered) {
+          ((size.width - titlePaint.measureText(shownTitle)) * 0.5f).coerceAtLeast(padX)
+        } else {
+          textLeft
+        }
+        val eyebrowBaseline = centerBaseline(eyebrowPaint, size.height * 0.30f)
+        val titleBaseline = centerBaseline(
+          titlePaint,
+          if (shownEyebrow != null) size.height * 0.67f else size.height * 0.52f,
+        )
+        val badgeBaseline = centerBaseline(
+          badgePaint,
+          if (shownEyebrow != null) size.height * 0.30f else size.height * 0.52f,
+        )
+        val swatchTop = (size.height - swatchSize) * 0.5f
+        val pipTop = if (shownEyebrow != null) 8.dp.toPx() else (size.height - pipSize) * 0.5f
+        val seed = (tText.hashCode() * 31) + (eText?.hashCode() ?: 0)
+
+        onDrawBehind {
+          val p = reveal().coerceIn(0f, 1f)
+          if (p <= 0.001f) return@onDrawBehind
+
+          val isFocused = curFocused.value
+          val activeAccent = curAccent.value
+          val trace = phase(p, 0f, 0.58f)
+          val plateClip = phase(trace, 0f, cornerAt[1].coerceAtLeast(0.06f))
+          val eyebrowP = phase(p, 0.24f, 0.68f)
+          val titleP = phase(p, 0.34f, 0.86f)
+          val badgeP = phase(p, 0.46f, 0.96f)
+          val pipP = phase(p, 0.26f, 0.62f)
+
+          val plateBrush = if (isFocused) FocusedPlateBrush else UnfocusedPlateBrush
+          if (plateClip < 0.999f) {
+            clipRect(right = size.width * plateClip) {
+              drawRect(brush = plateBrush)
+            }
+          } else {
+            drawRect(brush = plateBrush)
+          }
+
+          curSwatch.value?.let { sw ->
+            if (pipP > 0f) {
+              drawRect(
+                color = sw.copy(alpha = (if (isFocused) 1f else 0.78f) * pipP),
+                topLeft = Offset(padX, swatchTop),
+                size = Size(swatchSize, swatchSize),
+              )
+            }
+          }
+
+          curPip.value?.let { pip ->
+            if (pipP > 0f) {
+              drawRect(
+                color = pip.copy(alpha = pip.alpha * pipP),
+                topLeft = Offset(size.width - padX - pipSize, pipTop),
+                size = Size(pipSize, pipSize),
+              )
+            }
+          }
+
+          if (shownEyebrow != null && eyebrowP > 0f) {
+            val eColor = if (isFocused) activeAccent else TextSilver.copy(alpha = 0.68f)
+            eyebrowPaint.color = android.graphics.Color.argb(
+              (255 * eColor.alpha).roundToInt(),
+              (eColor.red * 255).roundToInt(),
+              (eColor.green * 255).roundToInt(),
+              (eColor.blue * 255).roundToInt(),
+            )
+            drawDecrypt(shownEyebrow, eyebrowP, seed + 17, eyebrowPaint, textLeft, eyebrowBaseline)
+          }
+
+          if (titleP > 0f) {
+            titlePaint.color = if (centered && isFocused) {
+              android.graphics.Color.argb(
+                255,
+                (activeAccent.red * 255).roundToInt(),
+                (activeAccent.green * 255).roundToInt(),
+                (activeAccent.blue * 255).roundToInt(),
+              )
+            } else {
+              android.graphics.Color.argb(if (isFocused) 255 else 235, 248, 250, 252)
+            }
+            drawDecrypt(
+              text = shownTitle,
+              progress = titleP,
+              seed = seed,
+              paint = titlePaint,
+              x = titleX,
+              baseline = titleBaseline,
+              jitter = titlePaint.textSize * 0.05f,
+            )
+          }
+
+          if (bText != null && badgeP > 0f) {
+            val bColor = if (isFocused) activeAccent else TextSilver.copy(alpha = 0.72f)
+            badgePaint.color = android.graphics.Color.argb(
+              (255 * bColor.alpha).roundToInt(),
+              (bColor.red * 255).roundToInt(),
+              (bColor.green * 255).roundToInt(),
+              (bColor.blue * 255).roundToInt(),
+            )
+            drawDecrypt(bText, badgeP, seed + 43, badgePaint, badgeX, badgeBaseline)
+          }
+
+          val bracketTint = Color.White.copy(alpha = if (isFocused) 0.96f else 0.44f)
+          drawCompactHudBrackets(
+            trace = trace,
+            cornerAt = cornerAt,
+            barPx = bar,
+            scale = bracketScale,
+            tint = bracketTint,
+            trTint = if (isFocused) activeAccent.copy(alpha = 0.90f) else bracketTint,
+            blTint = if (isFocused) activeAccent.copy(alpha = 0.48f) else bracketTint,
+          )
+
+          drawTracedRect(
+            width = keylineW,
+            height = keylineH,
+            progress = trace,
+            strokeWidth = stroke,
+            color = if (isFocused) activeAccent.copy(alpha = 0.88f) else Color.White.copy(alpha = 0.30f),
+            head = if (trace in 0.02f..0.98f) 1f else 0f,
+          )
+        }
+      },
+  )
 }
 
 @Composable
-private fun DetailActionButton(
-  label: String,
-  badge: String,
+private fun HudHeaderDecryptBlock(
+  eyebrow: String,
+  title: String,
+  reveal: () -> Float,
   accent: Color,
-  emphasized: Boolean = false,
-  onClick: () -> Unit,
 ) {
-  Row(
+  val density = LocalDensity.current
+  val curAccent = rememberUpdatedState(accent)
+  val curEyebrow = rememberUpdatedState(eyebrow)
+  val curTitle = rememberUpdatedState(title)
+  val eyebrowPaint = remember(density) {
+    monoPaint(density, 8.5f, 1.0f, Paint.Align.LEFT, 255).apply {
+      typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+    }
+  }
+  val titlePaint = remember(density) {
+    monoPaint(density, 13.5f, 1.1f, Paint.Align.LEFT, 255).apply {
+      typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+    }
+  }
+
+  Box(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(6.dp))
-      .background(if (emphasized) GlassSurfaceElevated else ObsidianBgTop.copy(alpha = 0.72f))
-      .border(
-        width = if (emphasized) 1.dp else 0.8.dp,
-        color = if (emphasized) accent else GlassBorderSubtle,
-        shape = RoundedCornerShape(6.dp),
-      )
-      .clickable(
-        interactionSource = remember { MutableInteractionSource() },
-        indication = null,
-        onClick = onClick,
-      )
-      .padding(horizontal = 10.dp, vertical = 10.dp),
-    horizontalArrangement = Arrangement.SpaceBetween,
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    Text(
-      text = label,
-      color = TextPureWhite,
-      fontSize = 12.sp,
-      fontWeight = FontWeight.SemiBold,
-      maxLines = 1,
-      overflow = TextOverflow.Ellipsis,
-      modifier = Modifier.weight(1f),
+      .height(34.dp)
+      .drawWithCache {
+        val eText = curEyebrow.value
+        val tText = curTitle.value
+        val eBase = centerBaseline(eyebrowPaint, size.height * 0.28f)
+        val tBase = centerBaseline(titlePaint, size.height * 0.74f)
+        val advance = (titlePaint.measureText("MM") - titlePaint.measureText("M")).coerceAtLeast(1f)
+        val maxChars = (size.width / advance).toInt().coerceAtLeast(1)
+        val shownTitle = if (tText.length <= maxChars) tText else tText.take((maxChars - 1).coerceAtLeast(1)) + "…"
+        val seed = eText.hashCode() + tText.hashCode()
+
+        onDrawBehind {
+          val p = reveal().coerceIn(0f, 1f)
+          if (p <= 0.001f) return@onDrawBehind
+          val ac = curAccent.value
+          eyebrowPaint.color = android.graphics.Color.argb(
+            255,
+            (ac.red * 255).roundToInt(),
+            (ac.green * 255).roundToInt(),
+            (ac.blue * 255).roundToInt(),
+          )
+          val eP = phase(p, 0f, 0.70f)
+          val tP = phase(p, 0.18f, 1.0f)
+          if (eP > 0f) drawDecrypt(eText, eP, seed, eyebrowPaint, 0f, eBase)
+          if (tP > 0f) drawDecrypt(shownTitle, tP, seed + 13, titlePaint, 0f, tBase, jitter = titlePaint.textSize * 0.04f)
+        }
+      },
+  )
+}
+
+@Composable
+private fun HudMicroLabel(
+  text: String,
+  reveal: () -> Float,
+) {
+  val density = LocalDensity.current
+  val curText = rememberUpdatedState(text)
+  val paint = remember(density) { monoPaint(density, 8.2f, 0.9f, Paint.Align.LEFT, 168) }
+  Box(
+    modifier = Modifier
+      .fillMaxWidth()
+      .height(14.dp)
+      .drawWithCache {
+        val label = curText.value
+        val base = centerBaseline(paint, size.height * 0.5f)
+        val seed = label.hashCode()
+        onDrawBehind {
+          val p = reveal().coerceIn(0f, 1f)
+          if (p > 0.01f) drawDecrypt(label, p, seed, paint, 0f, base)
+        }
+      },
+  )
+}
+
+// ------------------------------------------------------------------
+// Canvas Kinetic Laser-Trace & Bracket Helpers
+// ------------------------------------------------------------------
+
+private fun DrawScope.drawHudContainerFrame(
+  left: Float,
+  top: Float,
+  width: Float,
+  height: Float,
+  progress: Float,
+  accent: Color,
+) {
+  if (width <= 2f || height <= 2f || progress <= 0.005f) return
+  val stroke = 1.dp.toPx()
+  val bar = 1.2f.dp.toPx()
+  val perimeter = (2f * (width + height)).coerceAtLeast(1f)
+  val cornerAt = floatArrayOf(
+    0f,
+    width / perimeter,
+    (width + height) / perimeter,
+    (2f * width + height) / perimeter,
+  )
+  val plateClip = phase(progress, 0f, cornerAt[1].coerceAtLeast(0.06f))
+
+  withTransform({ translate(left, top) }) {
+    if (plateClip < 0.999f) {
+      clipRect(right = width * plateClip) {
+        drawRect(brush = ContainerPlateBrush, size = Size(width, height))
+      }
+    } else {
+      drawRect(brush = ContainerPlateBrush, size = Size(width, height))
+    }
+    drawCompactHudBrackets(
+      trace = progress,
+      cornerAt = cornerAt,
+      barPx = bar,
+      scale = 0.85f,
+      tint = Color.White.copy(alpha = 0.92f),
+      trTint = accent.copy(alpha = 0.88f),
+      blTint = accent.copy(alpha = 0.45f),
+      wOverride = width,
+      hOverride = height,
     )
-    Spacer(Modifier.width(6.dp))
-    Text(
-      text = badge,
-      color = accent,
-      fontFamily = FontFamily.Monospace,
-      fontSize = 9.5.sp,
-      fontWeight = FontWeight.Bold,
+    drawTracedRect(
+      width = (width - stroke).coerceAtLeast(1f),
+      height = (height - stroke).coerceAtLeast(1f),
+      progress = progress,
+      strokeWidth = stroke,
+      color = accent.copy(alpha = 0.82f),
+      head = if (progress in 0.02f..0.98f) 1f else 0f,
     )
   }
 }
 
-// ------------------------------------------------------------------
-// Canvas Kinetic Laser-Trace Helpers (Shared, Zero Allocations / Frame)
-// ------------------------------------------------------------------
+private fun DrawScope.drawCompactHudBrackets(
+  trace: Float,
+  cornerAt: FloatArray,
+  barPx: Float,
+  scale: Float,
+  tint: Color,
+  trTint: Color,
+  blTint: Color,
+  wOverride: Float = size.width,
+  hOverride: Float = size.height,
+) {
+  val w = wOverride
+  val h = hOverride
+  val maxV = h * 0.42f
+  val maxL = w * 0.36f
+  if (trace >= cornerAt[0]) {
+    val v = (17.5f.dp.toPx() * scale).coerceAtMost(maxV)
+    val l = (18f.dp.toPx() * scale).coerceAtMost(maxL)
+    drawRect(tint, Offset.Zero, Size(barPx, v))
+    drawRect(tint, Offset.Zero, Size(l, barPx))
+  }
+  if (trace >= cornerAt[1]) {
+    val v = (17.5f.dp.toPx() * scale).coerceAtMost(maxV)
+    val l = (32.5f.dp.toPx() * scale).coerceAtMost(maxL)
+    drawRect(trTint, Offset(w - barPx, 0f), Size(barPx, v))
+    drawRect(trTint, Offset(w - l, 0f), Size(l, barPx))
+  }
+  if (trace >= cornerAt[2]) {
+    val v = (6f.dp.toPx() * scale).coerceAtMost(maxV)
+    val l = (39f.dp.toPx() * scale).coerceAtMost(maxL)
+    drawRect(tint, Offset(w - barPx, h - v), Size(barPx, v))
+    drawRect(tint, Offset(w - l, h - barPx), Size(l, barPx))
+  }
+  if (trace >= cornerAt[3]) {
+    val v = (11.5f.dp.toPx() * scale).coerceAtMost(maxV)
+    val l = (44.5f.dp.toPx() * scale).coerceAtMost(maxL)
+    drawRect(blTint, Offset(0f, h - v), Size(barPx, v))
+    drawRect(blTint, Offset(0f, h - barPx), Size(l, barPx))
+  }
+}
 
 private fun DrawScope.drawLaserTip(pos: Offset, accent: Color) {
   drawCircle(accent.copy(alpha = 0.36f), 4.2f.dp.toPx(), pos)
   drawCircle(Color.White.copy(alpha = 0.95f), 1.5f.dp.toPx(), pos)
-}
-
-private fun traceQuadPath(
-  path: Path,
-  progress: Float,
-  scope: DrawScope,
-  color: Color,
-  stroke: Stroke,
-): Offset {
-  val composePm = androidx.compose.ui.graphics.PathMeasure().apply { setPath(path, false) }
-  val total = composePm.length
-  val dst = Path()
-  composePm.getSegment(0f, (total * progress).coerceIn(0f, total), dst, true)
-  with(scope) {
-    drawPath(dst, color = color, style = stroke)
-  }
-  val tanPos = composePm.getPosition((total * progress).coerceIn(0f, total))
-  return if (tanPos == Offset.Unspecified) Offset.Zero else tanPos
 }
 
 private fun DrawScope.drawOrthogonalPolyline(
@@ -1261,7 +1755,7 @@ private fun DrawScope.drawOrthogonalPolyline(
       tip = p2
       remaining -= len
     } else {
-      val f = (remaining / len).coerceIn(0f, 1f)
+      val f = if (len > 0f) (remaining / len).coerceIn(0f, 1f) else 0f
       tip = Offset(p1.x + (p2.x - p1.x) * f, p1.y + (p2.y - p1.y) * f)
       drawPath.lineTo(tip.x, tip.y)
       break
@@ -1273,34 +1767,4 @@ private fun DrawScope.drawOrthogonalPolyline(
     style = Stroke(width = strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round),
   )
   return tip
-}
-
-private fun DrawScope.drawRectLaserOutline(
-  rect: Rect,
-  progress: Float,
-  borderColor: Color,
-  tipColor: Color,
-  cornerRadiusPx: Float,
-) {
-  val p = progress.coerceIn(0f, 1f)
-  if (p <= 0.005f) return
-  if (p >= 0.995f) {
-    drawRoundRect(
-      color = borderColor,
-      topLeft = rect.topLeft,
-      size = rect.size,
-      cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerRadiusPx, cornerRadiusPx),
-      style = Stroke(width = 1.dp.toPx()),
-    )
-    return
-  }
-  val pts = listOf(
-    Offset(rect.left, rect.top),
-    Offset(rect.right, rect.top),
-    Offset(rect.right, rect.bottom),
-    Offset(rect.left, rect.bottom),
-    Offset(rect.left, rect.top),
-  )
-  val tip = drawOrthogonalPolyline(pts, p, borderColor, 1.dp.toPx())
-  drawLaserTip(tip, tipColor)
 }

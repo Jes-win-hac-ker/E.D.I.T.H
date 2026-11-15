@@ -19,7 +19,7 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #000000;
+            background-color: transparent;
         }
 
         #webgl-canvas {
@@ -51,10 +51,11 @@
             const renderer = new THREE.WebGLRenderer({
                 antialias: true,
                 powerPreference: 'high-performance',
-                alpha: false
+                alpha: true
             });
             renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1.5, 1.75));
             renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x000000, 0);
             renderer.outputColorSpace = THREE.SRGBColorSpace;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
             // Balanced exposure for dark holographic HUD readability (+50% boost)
@@ -203,6 +204,9 @@
             let userZoom = 1.0;
             let searchModeActive = false;
             let ambientCentered = false;
+            let settingsBackdropActive = false;
+            let currentOccluderOpacity = 1.0;
+            let targetOccluderOpacity = 1.0;
             let pendingHorizonSettle = false;
             let poseTransition = null;
             let targetRotY = 0;
@@ -370,6 +374,14 @@
                 }
             };
 
+            window.setSettingsBackdropActive = function(active) {
+                const next = !!active;
+                if (settingsBackdropActive === next) return;
+                settingsBackdropActive = next;
+                targetOccluderOpacity = next ? 0.78 : 1.0;
+                wakeLoop(450);
+            };
+
             // 8C. ZOOM IN / ZOOM OUT CONTROLS
             window.applyZoomDelta = function(factor) {
                 userZoom = Math.max(0.4, Math.min(1.85, userZoom * factor));
@@ -456,8 +468,11 @@
                 if (graticule && typeof graticule.setRibsProgress === 'function') {
                     graticule.setRibsProgress(1, 1);
                 }
+                const settledOccluderOpacity = settingsBackdropActive ? 0.78 : 1.0;
+                currentOccluderOpacity = settledOccluderOpacity;
+                targetOccluderOpacity = settledOccluderOpacity;
                 if (graticule && typeof graticule.setOccluderActive === 'function') {
-                    graticule.setOccluderActive(true, 1.0);
+                    graticule.setOccluderActive(true, settledOccluderOpacity);
                 }
                 if (landmass && typeof landmass.setRadarSweep === 'function') {
                     landmass.setRadarSweep(10.0);
@@ -642,7 +657,9 @@
                         graticule.setRibsProgress(pLat, pLon);
                     }
                     if (graticule && typeof graticule.setOccluderActive === 'function') {
-                        graticule.setOccluderActive(true, THREE.MathUtils.lerp(0.15, 1.0, pLat));
+                        const startupOccluderOpacity = THREE.MathUtils.lerp(0.15, settingsBackdropActive ? 0.78 : 1.0, pLat);
+                        currentOccluderOpacity = startupOccluderOpacity;
+                        graticule.setOccluderActive(true, startupOccluderOpacity);
                     }
 
                     if (st <= 0.45) {
@@ -743,6 +760,18 @@
                     }
                 }
 
+                // Smoothly transition inner-depth-occluder opacity when settings backdrop is active
+                if (!startupActive && Math.abs(targetOccluderOpacity - currentOccluderOpacity) > 0.001) {
+                    const occluderLerpT = 1 - Math.pow(0.84, step60);
+                    currentOccluderOpacity = THREE.MathUtils.lerp(currentOccluderOpacity, targetOccluderOpacity, occluderLerpT);
+                    if (Math.abs(targetOccluderOpacity - currentOccluderOpacity) <= 0.002) {
+                        currentOccluderOpacity = targetOccluderOpacity;
+                    }
+                    if (graticule && typeof graticule.setOccluderActive === 'function') {
+                        graticule.setOccluderActive(true, currentOccluderOpacity);
+                    }
+                }
+
                 // Update sub-systems
                 if (userLocation && typeof userLocation.update === 'function') userLocation.update(elapsed);
                 if (geodesicPulse && typeof geodesicPulse.update === 'function') geodesicPulse.update(elapsed);
@@ -756,6 +785,7 @@
                 }
 
                 const keepFast = startupActive || isDragging || poseTransition !== null ||
+                    (!startupActive && Math.abs(targetOccluderOpacity - currentOccluderOpacity) > 0.001) ||
                     (!searchModeActive && (Math.abs(rotVelocity.x) > 0.0001 || Math.abs(rotVelocity.y) > 0.0001)) ||
                     Math.abs(targetScale - currentScale) > 0.0008 ||
                     Math.abs(targetPosY - currentPosY) > 0.04 ||
