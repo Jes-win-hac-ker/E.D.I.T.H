@@ -13,6 +13,8 @@ data class NotificationTriage(
   val urgency: String = "LOW",
   @SerialName("suggested_reply")
   val suggestedReply: String = "",
+  @SerialName("extracted_destination")
+  val extractedDestination: String = "",
 )
 
 /**
@@ -168,6 +170,95 @@ data class TrustedContact(
 )
 
 /**
+ * Coarse physical activity classification mapped from [ActivityRecognitionClient] transitions.
+ */
+enum class MotionState {
+  UNKNOWN,
+  IN_VEHICLE,
+  WALKING,
+  STILL,
+}
+
+/**
+ * Known saved Wi-Fi zone profile.
+ */
+enum class PlaceTag {
+  NONE,
+  HOME,
+  CAMPUS,
+}
+
+/**
+ * Immutable passive ambient context snapshot emitted by [com.nexwork.edith.jarvis.senses.PassiveContextEngine]
+ * after 45-second transition debouncing.
+ */
+data class AmbientContext(
+  val motionState: MotionState = MotionState.UNKNOWN,
+  val previousMotionState: MotionState = MotionState.UNKNOWN,
+  val wifiSsid: String? = null,
+  val placeTag: PlaceTag = PlaceTag.NONE,
+  val focusQuietActive: Boolean = false,
+  val bluetoothConnectedCount: Int = 0,
+  val isScreenInteractive: Boolean = true,
+  val lastUnlockMs: Long = 0L,
+  val batteryPct: Int = 100,
+  val isCharging: Boolean = false,
+  val motionSinceMs: Long = 0L,
+  val awayDwellSinceMs: Long? = null,
+  val updatedAtMs: Long = 0L,
+)
+
+/**
+ * User-tagged SSID profile stored in `saved_places` to classify HOME vs CAMPUS zones.
+ */
+data class SavedPlaceProfile(
+  val id: Long = 0L,
+  val ssidNormalized: String,
+  val displaySsid: String,
+  val placeTag: PlaceTag,
+  val autoFocusQuiet: Boolean = true,
+  val updatedAtMs: Long = 0L,
+)
+
+/**
+ * Destination harvested from an incoming message by [com.nexwork.edith.jarvis.brain.GeminiClient]
+ * with a 24-hour expiration TTL stored in `upcoming_destinations`.
+ */
+data class UpcomingDestination(
+  val id: Long = 0L,
+  val placeName: String,
+  val sourceSummary: String,
+  val expiresAtMs: Long,
+  val used: Boolean = false,
+  val createdAtMs: Long = 0L,
+)
+
+/**
+ * Proactive launcher pill / fallback notification action surfaced by [com.nexwork.edith.jarvis.reflex.ProactiveEngine].
+ */
+sealed interface ProactiveSuggestion {
+  val id: String
+  val sourceSummary: String
+  val triggeredAtMs: Long
+
+  data class OpenMaps(
+    override val id: String,
+    val destinationId: Long,
+    val placeName: String,
+    override val sourceSummary: String,
+    override val triggeredAtMs: Long = System.currentTimeMillis(),
+  ) : ProactiveSuggestion
+
+  data class ScanUpiQr(
+    override val id: String,
+    val placeLabel: String,
+    val dwellMinutes: Long,
+    override val sourceSummary: String,
+    override val triggeredAtMs: Long = System.currentTimeMillis(),
+  ) : ProactiveSuggestion
+}
+
+/**
  * Pending Tier-3 action suspended awaiting explicit hardware BiometricPrompt confirmation.
  */
 data class Tier3ApprovalRequest(
@@ -202,6 +293,10 @@ data class JarvisUiState(
   val notificationListenerConnected: Boolean = false,
   val accessibilityEnabled: Boolean = false,
   val accessibilityConnected: Boolean = false,
+  val hasLocationPermission: Boolean = false,
+  val hasBackgroundLocationPermission: Boolean = false,
+  val hasBluetoothConnectPermission: Boolean = false,
+  val hasActivityRecognitionPermission: Boolean = false,
   val batteryUnrestricted: Boolean = false,
   val hasApiKey: Boolean = false,
   val maskedApiKey: String = "",
@@ -212,6 +307,10 @@ data class JarvisUiState(
   val lastError: String? = null,
   val lastExecutionLog: List<String> = emptyList(),
   val pendingTier3Approval: Tier3ApprovalRequest? = null,
+  val ambientContext: AmbientContext = AmbientContext(),
+  val savedPlaces: List<SavedPlaceProfile> = emptyList(),
+  val upcomingDestinations: List<UpcomingDestination> = emptyList(),
+  val proactiveSuggestion: ProactiveSuggestion? = null,
   val events: List<JarvisEventRecord> = emptyList(),
   val rules: List<JarvisRule> = emptyList(),
   val playbooks: List<UiPlaybook> = emptyList(),

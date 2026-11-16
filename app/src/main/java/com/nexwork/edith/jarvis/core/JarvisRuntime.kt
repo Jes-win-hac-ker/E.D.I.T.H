@@ -1,24 +1,37 @@
 package com.nexwork.edith.jarvis.core
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.Choreographer
 import androidx.activity.ComponentActivity
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import com.nexwork.edith.MainActivity
+import com.nexwork.edith.R
 import com.nexwork.edith.jarvis.brain.GeminiClient
 import com.nexwork.edith.jarvis.brain.PlannerClient
 import com.nexwork.edith.jarvis.memory.JarvisDatabase
 import com.nexwork.edith.jarvis.reflex.CommandExecutionResult
+import com.nexwork.edith.jarvis.reflex.DestinationStore
 import com.nexwork.edith.jarvis.reflex.GatekeeperCandidate
 import com.nexwork.edith.jarvis.reflex.GatekeeperDecision
 import com.nexwork.edith.jarvis.reflex.LocalGatekeeper
+import com.nexwork.edith.jarvis.reflex.PlayServicesOneShotLocationVerifier
 import com.nexwork.edith.jarvis.reflex.PlaybookEnvironment
 import com.nexwork.edith.jarvis.reflex.PlaybookExecutor
 import com.nexwork.edith.jarvis.reflex.PlaybookStore
+import com.nexwork.edith.jarvis.reflex.ProactiveEngine
 import com.nexwork.edith.jarvis.security.DenyCode
 import com.nexwork.edith.jarvis.security.JarvisActionType
 import com.nexwork.edith.jarvis.security.SecurityActionRequest
@@ -27,6 +40,7 @@ import com.nexwork.edith.jarvis.security.SecurityVerdict
 import com.nexwork.edith.jarvis.senses.ExtractedNotification
 import com.nexwork.edith.jarvis.senses.JarvisAccessibilityService
 import com.nexwork.edith.jarvis.senses.JarvisNotificationService
+import com.nexwork.edith.jarvis.senses.PassiveContextEngine
 import com.nexwork.edith.jarvis.senses.RemoteInputCache
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -52,9 +66,13 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 object JarvisRuntime {
 
+  private const val PROACTIVE_CHANNEL_ID = "jarvis_proactive_channel"
+  private const val PROACTIVE_NOTIFICATION_ID = 4110
+
   private val firstFrameScheduled = AtomicBoolean(false)
   private val initialized = AtomicBoolean(false)
   private val observersStarted = AtomicBoolean(false)
+  private val contextCollectorsStarted = AtomicBoolean(false)
   private val componentLock = Any()
 
   private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
@@ -88,8 +106,23 @@ object JarvisRuntime {
   @Volatile
   private var playbookExecutor: PlaybookExecutor? = null
 
+  @Volatile
+  private var passiveContextEngine: PassiveContextEngine? = null
+
+  @Volatile
+  private var proactiveEngine: ProactiveEngine? = null
+
+  @Volatile
+  private var appContextRef: Context? = null
+
+  @Volatile
+  private var launcherInForeground: Boolean = true
+
   private val approvalLock = Any()
   private var pendingApprovalPair: Pair<String, CompletableDeferred<Boolean>>? = null
+
+  private val _proactiveSuggestion = MutableStateFlow<ProactiveSuggestion?>(null)
+  val proactiveSuggestion: StateFlow<ProactiveSuggestion?> = _proactiveSuggestion.asStateFlow()
 
   private val _uiState = MutableStateFlow(JarvisUiState())
   val uiState: StateFlow<JarvisUiState> = _uiState.asStateFlow()
@@ -229,8 +262,17 @@ object JarvisRuntime {
               triage = triageResult.triage,
               triageJson = triageResult.triageJson,
             )
+            val harvestedDest = triageResult.triage.extractedDestination.trim()
+            if (harvestedDest.isNotEmpty()) {
+              db.insertUpcomingDestination(
+                placeName = harvestedDest,
+                sourceSummary = "${captured.appLabel} · ${captured.sender}: ${captured.body.take(72)}",
+              )
+              syncProactiveSnapshot(db)
+            }
+            val quietPrefix = if (passiveContextEngine?.contextState?.value?.focusQuietActive == true) "[QUIET] " else ""
             JarvisForegroundService.recordProcessed(
-              "${triageResult.triage.urgency} · ${triageResult.triage.sender}: ${triageResult.triage.intent}",
+              "$quietPrefix${triageResult.triage.urgency} · ${triageResult.triage.sender}: ${triageResult.triage.intent}",
             )
           }
           .onFailure { err ->
@@ -504,6 +546,263 @@ object JarvisRuntime {
     _uiState.update { it.copy(lastStatusBanner = null, lastError = null) }
   }
 
+  fun setLauncherForeground(context: Context, visible: Boolean) {
+    val appCtx = context.applicationContext
+    appContextRef = appCtx
+    launcherInForeground = visible
+    if (visible) {
+      cancelProactiveNotification(appCtx)
+      refreshEnvironmentStatus(appCtx)
+    } else {
+      val currentSuggestion = _proactiveSuggestion.value
+      if (currentSuggestion != null) {
+        handleFallbackNotification(appCtx, currentSuggestion)
+      }
+    }
+  }
+
+  fun dismissProactiveSuggestion() {
+    proactiveEngine?.dismissSuggestion()
+    _proactiveSuggestion.value = null
+    _uiState.update { it.copy(proactiveSuggestion = null) }
+    appContextRef?.let { cancelProactiveNotification(it) }
+  }
+
+  fun executeProactiveSuggestion(context: Context, suggestion: ProactiveSuggestion) {
+    val appCtx = context.applicationContext
+    cancelProactiveNotification(appCtx)
+    when (suggestion) {
+      is ProactiveSuggestion.OpenMaps -> {
+        scope.launch {
+          ensureComponentsLocked(appCtx)
+          if (suggestion.destinationId > 0L) {
+            proactiveEngine?.consumeOpenMapsSuggestion(suggestion.destinationId)
+          } else {
+            proactiveEngine?.dismissSuggestion()
+          }
+          database?.let { syncProactiveSnapshot(it) }
+        }
+        val mapsIntent = buildMapsNavigationIntent(appCtx, suggestion.placeName)
+        runCatching { appCtx.startActivity(mapsIntent) }.onFailure { err ->
+          _uiState.update { it.copy(lastError = err.message ?: "Unable to launch Maps navigation") }
+        }
+      }
+
+      is ProactiveSuggestion.ScanUpiQr -> {
+        proactiveEngine?.dismissSuggestion()
+        val upiIntent = buildUpiScannerIntent(appCtx)
+        if (upiIntent == null) {
+          _uiState.update { it.copy(lastError = "No UPI or payment scanner app found on device") }
+        } else {
+          runCatching { appCtx.startActivity(upiIntent) }.onFailure { err ->
+            _uiState.update { it.copy(lastError = err.message ?: "Unable to launch UPI QR scanner") }
+          }
+        }
+      }
+    }
+  }
+
+  fun savePlaceProfile(
+    context: Context,
+    ssid: String,
+    placeTag: PlaceTag,
+    autoFocusQuiet: Boolean = true,
+  ) {
+    val cleanSsid = ssid.trim()
+    if (cleanSsid.isEmpty()) return
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      val db = database ?: return@launch
+      db.upsertSavedPlace(cleanSsid, placeTag, autoFocusQuiet = autoFocusQuiet)
+      val saved = db.getSavedPlaces()
+      passiveContextEngine?.updateSavedPlaces(saved)
+      val activeContext = passiveContextEngine?.contextState?.value ?: _uiState.value.ambientContext
+      _uiState.update {
+        it.copy(
+          savedPlaces = saved,
+          ambientContext = activeContext,
+          lastError = null,
+          lastStatusBanner = "Saved '$cleanSsid' as ${placeTag.name} (Focus/Quiet=${if (autoFocusQuiet) "ON" else "OFF"})",
+        )
+      }
+    }
+  }
+
+  fun deletePlaceProfile(context: Context, ssidNormalized: String) {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      val db = database ?: return@launch
+      db.deleteSavedPlace(ssidNormalized)
+      val saved = db.getSavedPlaces()
+      passiveContextEngine?.updateSavedPlaces(saved)
+      val activeContext = passiveContextEngine?.contextState?.value ?: _uiState.value.ambientContext
+      _uiState.update {
+        it.copy(
+          savedPlaces = saved,
+          ambientContext = activeContext,
+          lastStatusBanner = "Removed saved Wi-Fi profile",
+        )
+      }
+    }
+  }
+
+  fun addUpcomingDestinationManual(
+    context: Context,
+    placeName: String,
+    sourceSummary: String = "Manual destination entry",
+  ) {
+    val clean = placeName.trim()
+    if (clean.isEmpty()) return
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      val db = database ?: return@launch
+      db.insertUpcomingDestination(clean, sourceSummary)
+      syncProactiveSnapshot(db)
+      _uiState.update { it.copy(lastError = null, lastStatusBanner = "Saved destination (24h TTL): $clean") }
+    }
+  }
+
+  fun refreshSensorsAfterPermissions(context: Context) {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      // Re-invoke FGS start so API 34+ dynamically promotes location/connectedDevice FGS types once granted.
+      JarvisForegroundService.start(appCtx)
+      passiveContextEngine?.refreshSensorsAfterPermissionGrant(appCtx)
+      syncEnvironmentOnly(appCtx)
+    }
+  }
+
+  fun simulateTrafficStallTrigger(context: Context, fallbackPlace: String = "Koramangala 4th Block") {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      val db = database ?: return@launch
+      if (db.getActiveUpcomingDestinations().isEmpty()) {
+        db.insertUpcomingDestination(
+          placeName = fallbackPlace,
+          sourceSummary = "Debug WhatsApp trip note: Meet at $fallbackPlace",
+        )
+        syncProactiveSnapshot(db)
+      }
+      proactiveEngine?.simulateOpenMapsForDebug(fallbackPlace)
+      _uiState.update { it.copy(lastError = null, lastStatusBanner = "Simulated IN_VEHICLE -> STILL Maps trigger") }
+    }
+  }
+
+  fun simulatePostDiningQrTrigger(context: Context, venueLabel: String = "Truffles Indiranagar") {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      proactiveEngine?.simulateScanUpiQrForDebug(venueLabel)
+      _uiState.update { it.copy(lastError = null, lastStatusBanner = "Simulated >20m Post-Dining QR trigger") }
+    }
+  }
+
+  fun buildMapsNavigationIntent(context: Context, placeName: String): Intent {
+    val encoded = Uri.encode(placeName)
+    val pm = context.packageManager
+    val candidates = listOf(
+      Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=$encoded")).setPackage("com.google.android.apps.maps"),
+      Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=$encoded")),
+      Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=$encoded")),
+      Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps/search/?api=1&query=$encoded")),
+    )
+    val chosen = candidates.firstOrNull { it.resolveActivity(pm) != null } ?: candidates.last()
+    return chosen.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+  }
+
+  fun buildUpiScannerIntent(context: Context): Intent? {
+    val pm = context.packageManager
+    val uriCandidates = listOf(
+      "tez://upi/scan",
+      "phonepe://scan",
+      "paytmmp://scan",
+      "upi://pay",
+    ).map { Intent(Intent.ACTION_VIEW, Uri.parse(it)) }
+
+    uriCandidates.firstOrNull { it.resolveActivity(pm) != null }?.let { resolved ->
+      return resolved.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    val packageFallbacks = listOf(
+      "com.google.android.apps.nbu.paisa.user",
+      "com.phonepe.app",
+      "net.one97.paytm",
+      "in.org.npci.upiapp",
+      "com.google.android.apps.walletnfcrel",
+    )
+    for (pkg in packageFallbacks) {
+      val launch = pm.getLaunchIntentForPackage(pkg)
+      if (launch != null) {
+        return launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+    }
+    return null
+  }
+
+  fun foregroundContextPermissions(): Array<String> = buildList {
+    add(Manifest.permission.ACCESS_FINE_LOCATION)
+    add(Manifest.permission.ACCESS_COARSE_LOCATION)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      add(Manifest.permission.ACTIVITY_RECOGNITION)
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      add(Manifest.permission.BLUETOOTH_CONNECT)
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      add(Manifest.permission.POST_NOTIFICATIONS)
+    }
+  }.toTypedArray()
+
+  fun openAppDetailsSettings(context: Context) {
+    runCatching {
+      val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+        data = Uri.parse("package:${context.packageName}")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      context.startActivity(intent)
+    }
+  }
+
+  fun hasFineOrCoarseLocation(context: Context): Boolean {
+    val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+      PackageManager.PERMISSION_GRANTED
+    val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+      PackageManager.PERMISSION_GRANTED
+    return fine || coarse
+  }
+
+  fun hasBackgroundLocation(context: Context): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION) ==
+        PackageManager.PERMISSION_GRANTED
+    } else {
+      hasFineOrCoarseLocation(context)
+    }
+  }
+
+  fun hasBluetoothConnect(context: Context): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
+        PackageManager.PERMISSION_GRANTED
+    } else {
+      true
+    }
+  }
+
+  fun hasActivityRecognition(context: Context): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) ==
+        PackageManager.PERMISSION_GRANTED
+    } else {
+      true
+    }
+  }
+
   fun isBatteryUnrestricted(context: Context): Boolean {
     return runCatching {
       val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return false
@@ -574,6 +873,7 @@ object JarvisRuntime {
   }
 
   private fun ensureComponentsLocked(appCtx: Context) {
+    appContextRef = appCtx
     synchronized(componentLock) {
       if (keyVault == null) keyVault = KeyVault(appCtx)
       if (database == null) database = JarvisDatabase(appCtx)
@@ -658,6 +958,46 @@ object JarvisRuntime {
         }
         playbookExecutor = PlaybookExecutor(env = env, store = store, security = gw, planner = pc)
       }
+      if (passiveContextEngine == null) {
+        passiveContextEngine = PassiveContextEngine(scope = scope)
+      }
+      if (proactiveEngine == null) {
+        val db = database!!
+        val destStore = object : DestinationStore {
+          override fun getActiveUpcomingDestinations(nowMs: Long): List<UpcomingDestination> =
+            db.getActiveUpcomingDestinations(nowMs = nowMs)
+
+          override fun markDestinationUsed(id: Long) {
+            db.markDestinationUsed(id)
+            syncProactiveSnapshot(db)
+          }
+        }
+        proactiveEngine = ProactiveEngine(
+          destinationStore = destStore,
+          locationVerifier = PlayServicesOneShotLocationVerifier(appCtx),
+          onSuggestionUpdated = { next ->
+            _proactiveSuggestion.value = next
+            _uiState.update { it.copy(proactiveSuggestion = next) }
+            handleFallbackNotification(appCtx, next)
+          },
+        )
+      }
+    }
+
+    val engine = passiveContextEngine ?: return
+    val savedPlaces = runCatching { database?.getSavedPlaces().orEmpty() }.getOrDefault(emptyList())
+    engine.start(appCtx, savedPlaces)
+    if (contextCollectorsStarted.compareAndSet(false, true)) {
+      scope.launch {
+        engine.contextState.collect { ambient ->
+          _uiState.update { it.copy(ambientContext = ambient) }
+        }
+      }
+      scope.launch {
+        engine.signals.collect { signal ->
+          proactiveEngine?.onSignal(signal)
+        }
+      }
     }
   }
 
@@ -670,6 +1010,9 @@ object JarvisRuntime {
     val rules = runCatching { db.getActiveRules() }.getOrDefault(emptyList())
     val playbooks = runCatching { db.getAllPlaybooks() }.getOrDefault(emptyList())
     val contacts = runCatching { db.getTrustedContacts() }.getOrDefault(emptyList())
+    val savedPlaces = runCatching { db.getSavedPlaces() }.getOrDefault(emptyList())
+    val destinations = runCatching { db.getActiveUpcomingDestinations() }.getOrDefault(emptyList())
+    val ambient = passiveContextEngine?.contextState?.value ?: _uiState.value.ambientContext
 
     _uiState.update { current ->
       current.copy(
@@ -679,10 +1022,18 @@ object JarvisRuntime {
         notificationListenerConnected = JarvisNotificationService.isConnected.value,
         accessibilityEnabled = JarvisAccessibilityService.isEnabledInSettings(appCtx),
         accessibilityConnected = JarvisAccessibilityService.isConnected.value,
+        hasLocationPermission = hasFineOrCoarseLocation(appCtx),
+        hasBackgroundLocationPermission = hasBackgroundLocation(appCtx),
+        hasBluetoothConnectPermission = hasBluetoothConnect(appCtx),
+        hasActivityRecognitionPermission = hasActivityRecognition(appCtx),
         batteryUnrestricted = isBatteryUnrestricted(appCtx),
         hasApiKey = vault?.hasApiKey?.value ?: false,
         maskedApiKey = vault?.maskedKeyPreview?.value.orEmpty(),
         activeReplyHandleCount = remoteInputCache.activeCount(),
+        ambientContext = ambient,
+        savedPlaces = savedPlaces,
+        upcomingDestinations = destinations,
+        proactiveSuggestion = _proactiveSuggestion.value,
         events = events,
         rules = rules,
         playbooks = playbooks,
@@ -693,6 +1044,7 @@ object JarvisRuntime {
 
   private fun syncEnvironmentOnly(appCtx: Context) {
     val vault = keyVault
+    val ambient = passiveContextEngine?.contextState?.value ?: _uiState.value.ambientContext
     _uiState.update { current ->
       current.copy(
         serviceStatus = JarvisForegroundService.status.value,
@@ -700,11 +1052,90 @@ object JarvisRuntime {
         notificationListenerConnected = JarvisNotificationService.isConnected.value,
         accessibilityEnabled = JarvisAccessibilityService.isEnabledInSettings(appCtx),
         accessibilityConnected = JarvisAccessibilityService.isConnected.value,
+        hasLocationPermission = hasFineOrCoarseLocation(appCtx),
+        hasBackgroundLocationPermission = hasBackgroundLocation(appCtx),
+        hasBluetoothConnectPermission = hasBluetoothConnect(appCtx),
+        hasActivityRecognitionPermission = hasActivityRecognition(appCtx),
         batteryUnrestricted = isBatteryUnrestricted(appCtx),
         hasApiKey = vault?.hasApiKey?.value ?: current.hasApiKey,
         maskedApiKey = vault?.maskedKeyPreview?.value ?: current.maskedApiKey,
         activeReplyHandleCount = remoteInputCache.activeCount(),
+        ambientContext = ambient,
+        proactiveSuggestion = _proactiveSuggestion.value,
       )
+    }
+  }
+
+  private fun syncProactiveSnapshot(db: JarvisDatabase) {
+    val savedPlaces = runCatching { db.getSavedPlaces() }.getOrDefault(emptyList())
+    val destinations = runCatching { db.getActiveUpcomingDestinations() }.getOrDefault(emptyList())
+    _uiState.update {
+      it.copy(
+        savedPlaces = savedPlaces,
+        upcomingDestinations = destinations,
+        proactiveSuggestion = _proactiveSuggestion.value,
+      )
+    }
+  }
+
+  @SuppressLint("MissingPermission")
+  private fun handleFallbackNotification(appCtx: Context, suggestion: ProactiveSuggestion?) {
+    if (suggestion == null || launcherInForeground) {
+      cancelProactiveNotification(appCtx)
+      return
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+      ContextCompat.checkSelfPermission(appCtx, Manifest.permission.POST_NOTIFICATIONS) !=
+      PackageManager.PERMISSION_GRANTED
+    ) {
+      return
+    }
+    val nm = appCtx.getSystemService(NotificationManager::class.java) ?: return
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      val channel = NotificationChannel(
+        PROACTIVE_CHANNEL_ID,
+        "Jarvis Proactive Context",
+        NotificationManager.IMPORTANCE_HIGH,
+      ).apply {
+        description = "Anticipatory navigation and UPI scanner actions outside launcher"
+      }
+      nm.createNotificationChannel(channel)
+    }
+    val actionIntent = when (suggestion) {
+      is ProactiveSuggestion.OpenMaps -> buildMapsNavigationIntent(appCtx, suggestion.placeName)
+      is ProactiveSuggestion.ScanUpiQr ->
+        buildUpiScannerIntent(appCtx) ?: Intent(appCtx, MainActivity::class.java).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+    }
+    val contentPi = PendingIntent.getActivity(
+      appCtx,
+      PROACTIVE_NOTIFICATION_ID,
+      actionIntent,
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+    val (title, text) = when (suggestion) {
+      is ProactiveSuggestion.OpenMaps ->
+        "Navigate to ${suggestion.placeName}" to suggestion.sourceSummary
+      is ProactiveSuggestion.ScanUpiQr ->
+        "Scan UPI QR (${suggestion.placeLabel})" to "Dwelt ${suggestion.dwellMinutes}m away · Tap to open scanner"
+    }
+    val notification = NotificationCompat.Builder(appCtx, PROACTIVE_CHANNEL_ID)
+      .setSmallIcon(R.mipmap.ic_launcher)
+      .setContentTitle(title)
+      .setContentText(text)
+      .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+      .setPriority(NotificationCompat.PRIORITY_HIGH)
+      .setAutoCancel(true)
+      .setContentIntent(contentPi)
+      .build()
+    runCatching { nm.notify(PROACTIVE_NOTIFICATION_ID, notification) }
+  }
+
+  private fun cancelProactiveNotification(appCtx: Context) {
+    runCatching {
+      val nm = appCtx.getSystemService(NotificationManager::class.java) ?: return
+      nm.cancel(PROACTIVE_NOTIFICATION_ID)
     }
   }
 

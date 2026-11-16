@@ -150,4 +150,57 @@ class GeminiClientTest {
     assertTrue(httpErrRes.isFailure)
     assertTrue(httpErrRes.exceptionOrNull()!!.message!!.contains("API key not valid."))
   }
+
+  @Test
+  fun classifyNotification_extractsOptionalDestinationIntoTriageResult() {
+    var capturedBody = ""
+    val client = OkHttpClient.Builder()
+      .addInterceptor(Interceptor { chain ->
+        val req = chain.request()
+        val sink = Buffer()
+        req.body?.writeTo(sink)
+        capturedBody = sink.readUtf8()
+        val responseJson = """
+          {
+            "candidates": [
+              {
+                "content": {
+                  "parts": [
+                    {
+                      "text": "{\"sender\":\"Riya\",\"intent\":\"meetup\",\"urgency\":\"important\",\"suggested_reply\":\"On my way\",\"extracted_destination\":\"Third Wave Coffee Indiranagar\"}"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        """.trimIndent()
+        Response.Builder()
+          .request(req)
+          .protocol(Protocol.HTTP_1_1)
+          .code(200)
+          .message("OK")
+          .body(responseJson.toResponseBody("application/json".toMediaType()))
+          .build()
+      })
+      .build()
+
+    val geminiClient = GeminiClient(httpClient = client)
+    val notification = CapturedNotification(
+      sbnKey = "0|com.whatsapp|501|null|1000",
+      packageName = "com.whatsapp",
+      appLabel = "WhatsApp",
+      title = "Riya",
+      sender = "Riya",
+      body = "Let's meet at Third Wave Coffee Indiranagar at 7pm",
+    )
+
+    val result = geminiClient.classifyNotification("AIzaTestKey123456", notification)
+    assertTrue(result.isSuccess)
+    assertTrue(capturedBody.contains("extracted_destination"))
+    val output = result.getOrThrow()
+    assertEquals("Third Wave Coffee Indiranagar", output.triage.extractedDestination)
+    assertEquals("HIGH", output.triage.urgency)
+    assertTrue(output.triageJson.contains("Third Wave Coffee Indiranagar"))
+  }
 }

@@ -1,6 +1,10 @@
 package com.nexwork.edith.jarvis.ui
 
+import android.Manifest
+import android.os.Build
 import android.text.format.DateFormat
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -58,9 +62,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nexwork.edith.jarvis.core.JarvisEventRecord
 import com.nexwork.edith.jarvis.core.JarvisRuntime
 import com.nexwork.edith.jarvis.core.JarvisUiState
+import com.nexwork.edith.jarvis.core.PlaceTag
+import com.nexwork.edith.jarvis.core.SavedPlaceProfile
 import com.nexwork.edith.jarvis.core.Tier3ApprovalRequest
 import com.nexwork.edith.jarvis.core.TriageStatus
 import com.nexwork.edith.jarvis.core.TrustedContact
+import com.nexwork.edith.jarvis.core.UpcomingDestination
 import com.nexwork.edith.jarvis.security.BiometricPromptHelper
 import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.GlassSurface
@@ -137,6 +144,38 @@ fun JarvisBaseplatePanel(
   var revealApiKey by remember { mutableStateOf(false) }
   var commandDraft by remember { mutableStateOf("") }
   var contactDraft by remember { mutableStateOf("") }
+  var ssidDraft by remember { mutableStateOf("") }
+
+  val bgLocLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestPermission(),
+  ) { granted ->
+    JarvisRuntime.refreshSensorsAfterPermissions(context)
+    if (!granted) {
+      JarvisRuntime.openAppDetailsSettings(context)
+    }
+  }
+  val fgPermLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestMultiplePermissions(),
+  ) {
+    JarvisRuntime.refreshSensorsAfterPermissions(context)
+    if (
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+      JarvisRuntime.hasFineOrCoarseLocation(context) &&
+      !JarvisRuntime.hasBackgroundLocation(context)
+    ) {
+      bgLocLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+    }
+  }
+  val requestAmbientPermissions: () -> Unit = {
+    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    if (!uiState.hasLocationPermission || !uiState.hasActivityRecognitionPermission || !uiState.hasBluetoothConnectPermission) {
+      fgPermLauncher.launch(JarvisRuntime.foregroundContextPermissions())
+    } else if (!uiState.hasBackgroundLocationPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      bgLocLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+    } else {
+      JarvisRuntime.refreshSensorsAfterPermissions(context)
+    }
+  }
 
   Column(
     modifier = modifier.imePadding(),
@@ -273,7 +312,58 @@ fun JarvisBaseplatePanel(
               JarvisRuntime.requestBatteryUnrestricted(context)
             },
           )
+
+          val ctxAllOk = uiState.hasLocationPermission &&
+            uiState.hasBackgroundLocationPermission &&
+            uiState.hasActivityRecognitionPermission &&
+            uiState.hasBluetoothConnectPermission
+          val ctxAnyOk = uiState.hasLocationPermission || uiState.hasActivityRecognitionPermission
+          StatusPill(
+            label = "CTX SENSORS",
+            value = when {
+              ctxAllOk -> "LIVE"
+              ctxAnyOk -> "PARTIAL"
+              else -> "GRANT"
+            },
+            state = when {
+              ctxAllOk -> PillState.OK
+              ctxAnyOk -> PillState.WARN
+              else -> PillState.FAULT
+            },
+            accent = accent,
+            onClick = requestAmbientPermissions,
+          )
         }
+      }
+
+      // Milestone 3 Saved Places & Context Debug Card
+      item(key = "saved_places_context_debug") {
+        SavedPlacesContextDebugCard(
+          uiState = uiState,
+          draftSsid = ssidDraft,
+          accent = accent,
+          onDraftSsidChange = { ssidDraft = it },
+          onTagPlace = { ssid, tag ->
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.savePlaceProfile(context, ssid, tag, autoFocusQuiet = true)
+            if (ssid == ssidDraft) ssidDraft = ""
+            keyboardController?.hide()
+            focusManager.clearFocus()
+          },
+          onDeletePlace = { ssidNorm ->
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.deletePlaceProfile(context, ssidNorm)
+          },
+          onRequestPermissions = requestAmbientPermissions,
+          onSimStallMaps = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.simulateTrafficStallTrigger(context)
+          },
+          onSimDiningQr = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.simulatePostDiningQrTrigger(context)
+          },
+        )
       }
 
       // Interactive Tier-3 Biometric Approval Card (BiometricPrompt)
@@ -1092,6 +1182,223 @@ private fun JarvisEventCard(
         tint = if (event.canReplyNow) accent else TextSilver.copy(alpha = 0.45f),
         enabled = event.canReplyNow,
         onClick = { onSendTestReply(replyDraft) },
+      )
+    }
+  }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SavedPlacesContextDebugCard(
+  uiState: JarvisUiState,
+  draftSsid: String,
+  accent: Color,
+  onDraftSsidChange: (String) -> Unit,
+  onTagPlace: (String, PlaceTag) -> Unit,
+  onDeletePlace: (String) -> Unit,
+  onRequestPermissions: () -> Unit,
+  onSimStallMaps: () -> Unit,
+  onSimDiningQr: () -> Unit,
+) {
+  val ambient = uiState.ambientContext
+  val currentSsid = ambient.wifiSsid?.trim().orEmpty()
+  val awayMins = ambient.awayDwellSinceMs?.let { ((System.currentTimeMillis() - it) / 60_000L).coerceAtLeast(0L) }
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(10.dp))
+      .background(GlassSurface.copy(alpha = 0.72f))
+      .border(0.8.dp, accent.copy(alpha = 0.32f), RoundedCornerShape(10.dp))
+      .padding(10.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        text = "SAVED PLACES & CONTEXT DEBUG",
+        color = TextSilver,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 9.5.sp,
+        fontWeight = FontWeight.SemiBold,
+      )
+      Text(
+        text = if (ambient.focusQuietActive) "${ambient.placeTag.name} · QUIET" else "${ambient.motionState.name}",
+        color = if (ambient.focusQuietActive) WarmSunAccent else accent,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 9.sp,
+        fontWeight = FontWeight.Bold,
+      )
+    }
+
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(7.dp))
+        .background(ObsidianBgTop.copy(alpha = 0.75f))
+        .padding(8.dp),
+      verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+      Text(
+        text = "MOTION: ${ambient.motionState.name} (prev: ${ambient.previousMotionState.name}) · BT: ${ambient.bluetoothConnectedCount}",
+        color = TextPureWhite,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 9.5.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+      Text(
+        text = "WIFI: ${currentSsid.ifEmpty { "<disconnected>" }} · ZONE: ${ambient.placeTag.name} · QUIET: ${if (ambient.focusQuietActive) "ON" else "OFF"}",
+        color = TextSilver,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 9.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+      Text(
+        text = "PERMS: LOC=${uiState.hasLocationPermission} BG=${uiState.hasBackgroundLocationPermission} ACT=${uiState.hasActivityRecognitionPermission} BT=${uiState.hasBluetoothConnectPermission}",
+        color = TextSilver.copy(alpha = 0.85f),
+        fontFamily = FontFamily.Monospace,
+        fontSize = 8.5.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+      Text(
+        text = "AWAY DWELL: ${awayMins?.let { "${it}m" } ?: "none"} · 24H DESTINATIONS: ${uiState.upcomingDestinations.size}",
+        color = accent.copy(alpha = 0.9f),
+        fontFamily = FontFamily.Monospace,
+        fontSize = 9.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+      uiState.upcomingDestinations.firstOrNull()?.let { nextDest ->
+        Text(
+          text = "NEXT DEST: ${nextDest.placeName} (${nextDest.sourceSummary})",
+          color = TextPureWhite.copy(alpha = 0.9f),
+          fontFamily = FontFamily.Monospace,
+          fontSize = 8.8.sp,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+      }
+    }
+
+    if (currentSsid.isNotEmpty()) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
+        ActionChip(
+          text = "TAG '${currentSsid.take(12)}' HOME",
+          tint = accent,
+          enabled = true,
+          onClick = { onTagPlace(currentSsid, PlaceTag.HOME) },
+        )
+        ActionChip(
+          text = "TAG '${currentSsid.take(12)}' CAMPUS",
+          tint = WarmSunAccent,
+          enabled = true,
+          onClick = { onTagPlace(currentSsid, PlaceTag.CAMPUS) },
+        )
+      }
+    }
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+      Box(
+        modifier = Modifier
+          .weight(1f)
+          .clip(RoundedCornerShape(7.dp))
+          .background(ObsidianBgTop.copy(alpha = 0.85f))
+          .border(0.8.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(7.dp))
+          .padding(horizontal = 9.dp, vertical = 7.dp),
+      ) {
+        if (draftSsid.isEmpty()) {
+          Text(
+            text = "Wi-Fi SSID (e.g. Home_5G)",
+            color = TextSilver.copy(alpha = 0.50f),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+        BasicTextField(
+          value = draftSsid,
+          onValueChange = onDraftSsidChange,
+          singleLine = true,
+          textStyle = TextStyle(
+            color = TextPureWhite,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.5.sp,
+          ),
+          cursorBrush = SolidColor(accent),
+          keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+          keyboardActions = KeyboardActions(onDone = {
+            if (draftSsid.isNotBlank()) onTagPlace(draftSsid, PlaceTag.HOME)
+          }),
+          modifier = Modifier.fillMaxWidth(),
+        )
+      }
+      ActionChip(
+        text = "+HOME",
+        tint = accent,
+        enabled = draftSsid.isNotBlank(),
+        onClick = { onTagPlace(draftSsid, PlaceTag.HOME) },
+      )
+      ActionChip(
+        text = "+CAMPUS",
+        tint = WarmSunAccent,
+        enabled = draftSsid.isNotBlank(),
+        onClick = { onTagPlace(draftSsid, PlaceTag.CAMPUS) },
+      )
+    }
+
+    if (uiState.savedPlaces.isNotEmpty()) {
+      FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
+        uiState.savedPlaces.forEach { place ->
+          ActionChip(
+            text = "${place.placeTag.name}:${place.displaySsid} ×",
+            tint = if (place.placeTag == PlaceTag.HOME) accent else WarmSunAccent,
+            enabled = true,
+            onClick = { onDeletePlace(place.ssidNormalized) },
+          )
+        }
+      }
+    }
+
+    FlowRow(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+      verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+      ActionChip(
+        text = "GRANT SENSORS",
+        tint = accent,
+        enabled = true,
+        onClick = onRequestPermissions,
+      )
+      ActionChip(
+        text = "SIM STALL -> MAPS",
+        tint = accent,
+        enabled = true,
+        onClick = onSimStallMaps,
+      )
+      ActionChip(
+        text = "SIM DINING -> QR",
+        tint = WarmSunAccent,
+        enabled = true,
+        onClick = onSimDiningQr,
       )
     }
   }

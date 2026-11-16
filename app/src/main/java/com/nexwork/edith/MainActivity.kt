@@ -60,6 +60,16 @@ class MainActivity : ComponentActivity() {
     JarvisRuntime.schedulePostFirstFrame(this)
   }
 
+  override fun onResume() {
+    super.onResume()
+    JarvisRuntime.setLauncherForeground(this, visible = true)
+  }
+
+  override fun onPause() {
+    JarvisRuntime.setLauncherForeground(this, visible = false)
+    super.onPause()
+  }
+
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     setIntent(intent)

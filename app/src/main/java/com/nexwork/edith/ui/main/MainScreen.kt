@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import kotlin.math.roundToInt
@@ -61,6 +62,7 @@ import androidx.navigation3.runtime.NavKey
 import kotlinx.coroutines.delay
 import com.nexwork.edith.LocalHomeResetSignal
 import com.nexwork.edith.jarvis.core.JarvisRuntime
+import com.nexwork.edith.jarvis.ui.JarvisAmbientPill
 import com.nexwork.edith.jarvis.ui.JarvisDrawerSheet
 import com.nexwork.edith.model.SettingsStage
 import com.nexwork.edith.theme.EDITHTheme
@@ -107,7 +109,9 @@ fun MainScreen(
   val isStartupComplete by globeController.isStartupComplete.collectAsStateWithLifecycle()
   var isClockMounted by remember { mutableStateOf(false) }
   var isOtaMounted by remember { mutableStateOf(false) }
-  val isHudMounted = isClockMounted || isOtaMounted
+  var isAmbientPillMounted by remember { mutableStateOf(false) }
+  val isHudMounted = isClockMounted || isOtaMounted || isAmbientPillMounted
+  val proactiveSuggestion by JarvisRuntime.proactiveSuggestion.collectAsStateWithLifecycle()
   var isSettingsRootMounted by remember { mutableStateOf(false) }
   var isSettingsOverlayMounted by remember { mutableStateOf(false) }
   val isSettingsMounted = isSettingsRootMounted || isSettingsOverlayMounted
@@ -578,6 +582,28 @@ fun MainScreen(
         .zIndex(2f)
         .align(Alignment.TopStart)
         .padding(start = 18.dp, end = 18.dp, top = otaTop),
+    )
+
+    val ambientPillTargetTop = (if (isOtaMounted) otaTop - 70.dp else otaTop - 18.dp).coerceAtLeast(36.dp)
+    val ambientPillTop by animateDpAsState(
+      targetValue = ambientPillTargetTop,
+      animationSpec = tween(220, easing = FastOutSlowInEasing),
+      label = "ambientPillTop",
+    )
+    JarvisAmbientPill(
+      suggestion = proactiveSuggestion,
+      onAction = { suggestion ->
+        JarvisRuntime.executeProactiveSuggestion(context, suggestion)
+      },
+      onDismiss = {
+        JarvisRuntime.dismissProactiveSuggestion()
+      },
+      hidden = topHudHidden,
+      onMountedChange = { isAmbientPillMounted = it },
+      modifier = Modifier
+        .zIndex(2f)
+        .align(Alignment.TopStart)
+        .padding(start = 18.dp, end = 18.dp, top = ambientPillTop),
     )
 
     HudSettingsOverlayLayer(

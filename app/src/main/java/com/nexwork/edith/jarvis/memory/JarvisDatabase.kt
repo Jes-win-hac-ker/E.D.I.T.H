@@ -8,11 +8,14 @@ import com.nexwork.edith.jarvis.core.CapturedNotification
 import com.nexwork.edith.jarvis.core.JarvisEventRecord
 import com.nexwork.edith.jarvis.core.JarvisRule
 import com.nexwork.edith.jarvis.core.NotificationTriage
+import com.nexwork.edith.jarvis.core.PlaceTag
 import com.nexwork.edith.jarvis.core.PlaybookStep
+import com.nexwork.edith.jarvis.core.SavedPlaceProfile
 import com.nexwork.edith.jarvis.core.ThreadMessage
 import com.nexwork.edith.jarvis.core.TriageStatus
 import com.nexwork.edith.jarvis.core.TrustedContact
 import com.nexwork.edith.jarvis.core.UiPlaybook
+import com.nexwork.edith.jarvis.core.UpcomingDestination
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -92,11 +95,15 @@ class JarvisDatabase(
       "CREATE INDEX IF NOT EXISTS idx_rulebook_enabled ON $TABLE_USER_RULEBOOK($COL_ENABLED)"
     )
     createV2Tables(db)
+    createV3Tables(db)
   }
 
   override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
     if (oldVersion < 2) {
       createV2Tables(db)
+    }
+    if (oldVersion < 3) {
+      createV3Tables(db)
     }
   }
 
@@ -134,6 +141,36 @@ class JarvisDatabase(
     )
     db.execSQL(
       "CREATE INDEX IF NOT EXISTS idx_trusted_contacts_name ON $TABLE_TRUSTED_CONTACTS($COL_DISPLAY_NAME)"
+    )
+  }
+
+  private fun createV3Tables(db: SQLiteDatabase) {
+    db.execSQL(
+      """
+      CREATE TABLE IF NOT EXISTS $TABLE_UPCOMING_DESTINATIONS (
+        $COL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+        $COL_PLACE_NAME TEXT NOT NULL,
+        $COL_SOURCE_SUMMARY TEXT NOT NULL,
+        $COL_EXPIRES_AT INTEGER NOT NULL,
+        $COL_USED INTEGER NOT NULL DEFAULT 0,
+        $COL_CREATED_AT_MS INTEGER NOT NULL
+      )
+      """.trimIndent()
+    )
+    db.execSQL(
+      "CREATE INDEX IF NOT EXISTS idx_destinations_active ON $TABLE_UPCOMING_DESTINATIONS($COL_USED, $COL_EXPIRES_AT DESC)"
+    )
+    db.execSQL(
+      """
+      CREATE TABLE IF NOT EXISTS $TABLE_SAVED_PLACES (
+        $COL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+        $COL_SSID_NORMALIZED TEXT NOT NULL UNIQUE,
+        $COL_DISPLAY_SSID TEXT NOT NULL,
+        $COL_PLACE_TYPE TEXT NOT NULL,
+        $COL_AUTO_FOCUS_QUIET INTEGER NOT NULL DEFAULT 1,
+        $COL_UPDATED_AT_MS INTEGER NOT NULL
+      )
+      """.trimIndent()
     )
   }
 
@@ -598,6 +635,143 @@ class JarvisDatabase(
     return writableDatabase.delete(TABLE_TRUSTED_CONTACTS, "$COL_CONTACT_KEY = ?", arrayOf(contactKey))
   }
 
+  fun insertUpcomingDestination(
+    placeName: String,
+    sourceSummary: String,
+    nowMs: Long = System.currentTimeMillis(),
+    ttlMs: Long = DESTINATION_TTL_24H_MS,
+  ): Long {
+    val cleanPlace = placeName.trim()
+    if (cleanPlace.isEmpty()) return -1L
+    val db = writableDatabase
+    db.delete(TABLE_UPCOMING_DESTINATIONS, "$COL_EXPIRES_AT <= ?", arrayOf(nowMs.toString()))
+    val expiresAt = nowMs + ttlMs
+    val values = ContentValues().apply {
+      put(COL_PLACE_NAME, cleanPlace)
+      put(COL_SOURCE_SUMMARY, sourceSummary.trim())
+      put(COL_EXPIRES_AT, expiresAt)
+      put(COL_USED, 0)
+      put(COL_CREATED_AT_MS, nowMs)
+    }
+    return db.insertOrThrow(TABLE_UPCOMING_DESTINATIONS, null, values)
+  }
+
+  fun getActiveUpcomingDestinations(
+    nowMs: Long = System.currentTimeMillis(),
+    limit: Int = 20,
+  ): List<UpcomingDestination> {
+    val list = mutableListOf<UpcomingDestination>()
+    readableDatabase.query(
+      TABLE_UPCOMING_DESTINATIONS,
+      null,
+      "$COL_USED = 0 AND $COL_EXPIRES_AT > ?",
+      arrayOf(nowMs.toString()),
+      null,
+      null,
+      "$COL_CREATED_AT_MS DESC, $COL_ID DESC",
+      limit.coerceIn(1, 50).toString(),
+    ).use { c ->
+      val idxId = c.getColumnIndexOrThrow(COL_ID)
+      val idxPlace = c.getColumnIndexOrThrow(COL_PLACE_NAME)
+      val idxSource = c.getColumnIndexOrThrow(COL_SOURCE_SUMMARY)
+      val idxExp = c.getColumnIndexOrThrow(COL_EXPIRES_AT)
+      val idxUsed = c.getColumnIndexOrThrow(COL_USED)
+      val idxCreated = c.getColumnIndexOrThrow(COL_CREATED_AT_MS)
+      while (c.moveToNext()) {
+        list.add(
+          UpcomingDestination(
+            id = c.getLong(idxId),
+            placeName = c.getString(idxPlace),
+            sourceSummary = c.getString(idxSource),
+            expiresAtMs = c.getLong(idxExp),
+            used = c.getInt(idxUsed) == 1,
+            createdAtMs = c.getLong(idxCreated),
+          )
+        )
+      }
+    }
+    return list
+  }
+
+  fun markDestinationUsed(id: Long): Int {
+    val values = ContentValues().apply { put(COL_USED, 1) }
+    return writableDatabase.update(TABLE_UPCOMING_DESTINATIONS, values, "$COL_ID = ?", arrayOf(id.toString()))
+  }
+
+  fun upsertSavedPlace(
+    ssid: String,
+    placeTag: PlaceTag,
+    autoFocusQuiet: Boolean = true,
+    nowMs: Long = System.currentTimeMillis(),
+  ): Long {
+    val cleanDisplay = normalizeSsidDisplay(ssid)
+    val normKey = cleanDisplay.lowercase()
+    if (normKey.isEmpty() || placeTag == PlaceTag.NONE) return -1L
+    val values = ContentValues().apply {
+      put(COL_SSID_NORMALIZED, normKey)
+      put(COL_DISPLAY_SSID, cleanDisplay)
+      put(COL_PLACE_TYPE, placeTag.name)
+      put(COL_AUTO_FOCUS_QUIET, if (autoFocusQuiet) 1 else 0)
+      put(COL_UPDATED_AT_MS, nowMs)
+    }
+    val db = writableDatabase
+    val updated = db.update(TABLE_SAVED_PLACES, values, "$COL_SSID_NORMALIZED = ?", arrayOf(normKey))
+    if (updated > 0) {
+      db.query(
+        TABLE_SAVED_PLACES,
+        arrayOf(COL_ID),
+        "$COL_SSID_NORMALIZED = ?",
+        arrayOf(normKey),
+        null,
+        null,
+        null,
+      ).use { c -> if (c.moveToFirst()) return c.getLong(0) }
+    }
+    return db.insertOrThrow(TABLE_SAVED_PLACES, null, values)
+  }
+
+  fun getSavedPlaces(): List<SavedPlaceProfile> {
+    val list = mutableListOf<SavedPlaceProfile>()
+    readableDatabase.query(
+      TABLE_SAVED_PLACES,
+      null,
+      null,
+      null,
+      null,
+      null,
+      "$COL_UPDATED_AT_MS DESC",
+    ).use { c ->
+      val idxId = c.getColumnIndexOrThrow(COL_ID)
+      val idxNorm = c.getColumnIndexOrThrow(COL_SSID_NORMALIZED)
+      val idxDisp = c.getColumnIndexOrThrow(COL_DISPLAY_SSID)
+      val idxType = c.getColumnIndexOrThrow(COL_PLACE_TYPE)
+      val idxFocus = c.getColumnIndexOrThrow(COL_AUTO_FOCUS_QUIET)
+      val idxUpdated = c.getColumnIndexOrThrow(COL_UPDATED_AT_MS)
+      while (c.moveToNext()) {
+        val tag = runCatching { PlaceTag.valueOf(c.getString(idxType)) }.getOrDefault(PlaceTag.NONE)
+        list.add(
+          SavedPlaceProfile(
+            id = c.getLong(idxId),
+            ssidNormalized = c.getString(idxNorm),
+            displaySsid = c.getString(idxDisp),
+            placeTag = tag,
+            autoFocusQuiet = c.getInt(idxFocus) == 1,
+            updatedAtMs = c.getLong(idxUpdated),
+          )
+        )
+      }
+    }
+    return list
+  }
+
+  fun deleteSavedPlace(ssidNormalized: String): Int {
+    return writableDatabase.delete(
+      TABLE_SAVED_PLACES,
+      "$COL_SSID_NORMALIZED = ?",
+      arrayOf(normalizeSsidDisplay(ssidNormalized).lowercase()),
+    )
+  }
+
   private fun pruneOldEvents(db: SQLiteDatabase) {
     db.execSQL(
       """
@@ -613,7 +787,8 @@ class JarvisDatabase(
 
   companion object {
     const val DB_NAME = "jarvis_memory.db"
-    const val DB_VERSION = 2
+    const val DB_VERSION = 3
+    const val DESTINATION_TTL_24H_MS = 24L * 60L * 60L * 1000L
     private const val DEFAULT_FEED_LIMIT = 50
     private const val MAX_EVENT_ROWS = 500
 
@@ -621,6 +796,8 @@ class JarvisDatabase(
     const val TABLE_USER_RULEBOOK = "user_rulebook"
     const val TABLE_UI_PLAYBOOKS = "ui_playbooks"
     const val TABLE_TRUSTED_CONTACTS = "trusted_contacts"
+    const val TABLE_UPCOMING_DESTINATIONS = "upcoming_destinations"
+    const val TABLE_SAVED_PLACES = "saved_places"
 
     private const val COL_ID = "id"
     private const val COL_SBN_KEY = "sbn_key"
@@ -661,6 +838,16 @@ class JarvisDatabase(
     private const val COL_AUTO_REPLY_ENABLED = "auto_reply_enabled"
     private const val COL_MAX_TIER = "max_tier"
 
+    private const val COL_PLACE_NAME = "place_name"
+    private const val COL_SOURCE_SUMMARY = "source_summary"
+    private const val COL_EXPIRES_AT = "expires_at"
+    private const val COL_USED = "used"
+
+    private const val COL_SSID_NORMALIZED = "ssid_normalized"
+    private const val COL_DISPLAY_SSID = "display_ssid"
+    private const val COL_PLACE_TYPE = "place_type"
+    private const val COL_AUTO_FOCUS_QUIET = "auto_focus_quiet"
+
     internal fun buildContactKey(displayName: String, packageName: String): String {
       val name = displayName.trim().lowercase().replace(Regex("""\s+"""), " ")
       val pkg = packageName.trim().lowercase()
@@ -669,5 +856,8 @@ class JarvisDatabase(
 
     internal fun normalizeKey(raw: String): String =
       raw.trim().lowercase().replace(Regex("""\s+"""), " ")
+
+    internal fun normalizeSsidDisplay(raw: String): String =
+      raw.trim().removePrefix("\"").removeSuffix("\"").trim()
   }
 }

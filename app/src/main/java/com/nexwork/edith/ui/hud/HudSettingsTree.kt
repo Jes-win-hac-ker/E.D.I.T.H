@@ -1,8 +1,12 @@
 package com.nexwork.edith.ui.hud
 
+import android.Manifest
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.os.Build
 import android.text.format.DateFormat
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -75,6 +79,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nexwork.edith.data.OtaState
 import com.nexwork.edith.jarvis.core.JarvisEventRecord
 import com.nexwork.edith.jarvis.core.JarvisRuntime
+import com.nexwork.edith.jarvis.core.PlaceTag
 import com.nexwork.edith.jarvis.core.TriageStatus
 import com.nexwork.edith.jarvis.security.BiometricPromptHelper
 import com.nexwork.edith.model.DeviceTelemetry
@@ -1384,6 +1389,37 @@ private fun JarvisDetailCardContent(
   var commandDraft by remember { mutableStateOf("") }
   var contactDraft by remember { mutableStateOf("") }
 
+  val bgLocLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestPermission(),
+  ) { granted ->
+    JarvisRuntime.refreshSensorsAfterPermissions(context)
+    if (!granted) {
+      JarvisRuntime.openAppDetailsSettings(context)
+    }
+  }
+  val fgPermLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestMultiplePermissions(),
+  ) {
+    JarvisRuntime.refreshSensorsAfterPermissions(context)
+    if (
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+      JarvisRuntime.hasFineOrCoarseLocation(context) &&
+      !JarvisRuntime.hasBackgroundLocation(context)
+    ) {
+      bgLocLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+    }
+  }
+  val requestAmbientPermissions: () -> Unit = {
+    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    if (!uiState.hasLocationPermission || !uiState.hasActivityRecognitionPermission || !uiState.hasBluetoothConnectPermission) {
+      fgPermLauncher.launch(JarvisRuntime.foregroundContextPermissions())
+    } else if (!uiState.hasBackgroundLocationPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      bgLocLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+    } else {
+      JarvisRuntime.refreshSensorsAfterPermissions(context)
+    }
+  }
+
   Column(
     modifier = Modifier
       .fillMaxSize()
@@ -1469,8 +1505,58 @@ private fun JarvisDetailCardContent(
 
     when (section) {
       JarvisSettingsSection.RUNTIME -> {
-        val totalSteps = 6
+        val totalSteps = 8
         val fgsRunning = uiState.serviceStatus.isRunning
+        val ambient = uiState.ambientContext
+        val currentSsid = ambient.wifiSsid?.trim().orEmpty()
+        CompactHudCard(
+          eyebrow = "AMBIENT // ${ambient.placeTag.name}${if (ambient.focusQuietActive) " · QUIET" else ""}",
+          title = "${ambient.motionState.name} · ${currentSsid.ifEmpty { "NO WIFI" }.uppercase()}",
+          badge = "${uiState.upcomingDestinations.size}D",
+          pipColor = if (ambient.focusQuietActive) WarmSunAccent else accent,
+          focused = ambient.focusQuietActive,
+          accent = if (ambient.focusQuietActive) WarmSunAccent else accent,
+          titleSizeSp = 9.6f,
+          reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.12f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(42.dp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onOpenJarvisDrawer()
+          },
+        )
+        if (currentSsid.isNotEmpty()) {
+          CompactHudCard(
+            eyebrow = "SAVED PLACE PROFILE",
+            title = "TAG '$currentSsid' HOME",
+            badge = "HOME",
+            focused = ambient.placeTag == PlaceTag.HOME,
+            accent = accent,
+            titleSizeSp = 9.5f,
+            reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.12f) },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth().height(40.dp),
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              JarvisRuntime.savePlaceProfile(context, currentSsid, PlaceTag.HOME, autoFocusQuiet = true)
+            },
+          )
+        }
+        CompactHudCard(
+          eyebrow = "PROACTIVE DEBUG",
+          title = "SIM STALL -> MAPS",
+          badge = "SIM",
+          focused = false,
+          accent = accent,
+          titleSizeSp = 9.5f,
+          reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.12f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(40.dp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.simulateTrafficStallTrigger(context)
+          },
+        )
         CompactHudCard(
           eyebrow = "STICKY FGS",
           title = if (fgsRunning) "ACTIVE · ${uiState.serviceStatus.processedCount}" else "STOPPED",
@@ -1479,7 +1565,7 @@ private fun JarvisDetailCardContent(
           focused = fgsRunning,
           accent = if (fgsRunning) accent else CrimsonBright,
           titleSizeSp = 10.2f,
-          reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.14f) },
+          reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.12f) },
           enabled = enabled,
           modifier = Modifier.fillMaxWidth().height(44.dp),
           onClick = {
@@ -1494,7 +1580,7 @@ private fun JarvisDetailCardContent(
           focused = uiState.pendingTier3Approval != null,
           accent = WarmSunAccent,
           titleSizeSp = 9.8f,
-          reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.14f) },
+          reveal = { staggeredReveal(reveal(), 4, totalSteps, stagger = 0.12f) },
           enabled = enabled,
           modifier = Modifier.fillMaxWidth().height(42.dp),
           onClick = {
@@ -1504,13 +1590,13 @@ private fun JarvisDetailCardContent(
         )
         HudMicroLabel(
           text = "CMD // ${uiState.playbooks.size} PLAYBOOKS",
-          reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.14f) },
+          reveal = { staggeredReveal(reveal(), 5, totalSteps, stagger = 0.12f) },
         )
         HudSharpTextInput(
           value = commandDraft,
           onValueChange = { commandDraft = it },
           placeholder = "search app for ...",
-          reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.14f) },
+          reveal = { staggeredReveal(reveal(), 5, totalSteps, stagger = 0.12f) },
           accent = accent,
           onDone = {
             if (commandDraft.isNotBlank() && !uiState.isExecutingCommand) {
@@ -1529,7 +1615,7 @@ private fun JarvisDetailCardContent(
           accent = accent,
           titleSizeSp = 9.6f,
           centerText = true,
-          reveal = { staggeredReveal(reveal(), 4, totalSteps, stagger = 0.14f) },
+          reveal = { staggeredReveal(reveal(), 6, totalSteps, stagger = 0.12f) },
           enabled = enabled && !uiState.isExecutingCommand && commandDraft.isNotBlank(),
           modifier = Modifier.fillMaxWidth().height(36.dp),
           onClick = {
@@ -1555,7 +1641,7 @@ private fun JarvisDetailCardContent(
       }
 
       JarvisSettingsSection.PERMISSIONS -> {
-        val totalSteps = 5
+        val totalSteps = 6
         val listenerOk = uiState.notificationListenerEnabled && uiState.notificationListenerConnected
         val listenerTag = when {
           listenerOk -> "LIVE"
@@ -1610,6 +1696,34 @@ private fun JarvisDetailCardContent(
             JarvisRuntime.openAccessibilitySettings(context)
           },
         )
+        val ctxAllOk = uiState.hasLocationPermission &&
+          uiState.hasBackgroundLocationPermission &&
+          uiState.hasActivityRecognitionPermission &&
+          uiState.hasBluetoothConnectPermission
+        val ctxAnyOk = uiState.hasLocationPermission || uiState.hasActivityRecognitionPermission
+        val ctxBadge = when {
+          ctxAllOk -> "LIVE"
+          ctxAnyOk -> "PART"
+          else -> "GRANT"
+        }
+        val ctxTint = when {
+          ctxAllOk -> accent
+          ctxAnyOk -> WarmSunAccent
+          else -> CrimsonBright
+        }
+        CompactHudCard(
+          eyebrow = "LOC · BG · ACT · BT",
+          title = "CONTEXT SENSORS",
+          badge = ctxBadge,
+          pipColor = ctxTint,
+          focused = ctxAllOk,
+          accent = ctxTint,
+          titleSizeSp = 9.8f,
+          reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.14f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(44.dp),
+          onClick = requestAmbientPermissions,
+        )
         CompactHudCard(
           eyebrow = "DOZE POLICY",
           title = if (uiState.batteryUnrestricted) "UNRESTRICTED" else "OPTIMIZED",
@@ -1618,7 +1732,7 @@ private fun JarvisDetailCardContent(
           focused = uiState.batteryUnrestricted,
           accent = if (uiState.batteryUnrestricted) accent else WarmSunAccent,
           titleSizeSp = 10.2f,
-          reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.14f) },
+          reveal = { staggeredReveal(reveal(), 4, totalSteps, stagger = 0.14f) },
           enabled = enabled,
           modifier = Modifier.fillMaxWidth().height(44.dp),
           onClick = {
@@ -1633,7 +1747,7 @@ private fun JarvisDetailCardContent(
           focused = false,
           accent = accent,
           titleSizeSp = 10.0f,
-          reveal = { staggeredReveal(reveal(), 4, totalSteps, stagger = 0.14f) },
+          reveal = { staggeredReveal(reveal(), 5, totalSteps, stagger = 0.14f) },
           enabled = enabled,
           modifier = Modifier.fillMaxWidth().height(42.dp),
           onClick = {

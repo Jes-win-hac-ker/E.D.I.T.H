@@ -1,5 +1,6 @@
 package com.nexwork.edith.jarvis.core
 
+import android.Manifest
 import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
@@ -8,6 +9,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -79,7 +81,24 @@ class JarvisForegroundService : Service() {
     runCatching {
       val notification = buildStickyNotification()
       val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        var mask = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+          PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+          PackageManager.PERMISSION_GRANTED
+        if (hasFine || hasCoarse) {
+          mask = mask or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        }
+        val hasBtConnect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+          ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) ==
+            PackageManager.PERMISSION_GRANTED
+        } else {
+          true
+        }
+        if (hasBtConnect) {
+          mask = mask or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+        }
+        mask
       } else {
         0
       }
