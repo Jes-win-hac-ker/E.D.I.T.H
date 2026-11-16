@@ -6,6 +6,11 @@ import com.nexwork.edith.jarvis.core.CompactUiTree
 import com.nexwork.edith.jarvis.core.PlaybookStep
 import com.nexwork.edith.jarvis.core.UiPlaybook
 import com.nexwork.edith.jarvis.security.SecurityGateway
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -243,5 +248,50 @@ class PlaybookExecutorTest {
     assertTrue(res.securityBlocked)
     assertFalse(llmCalled)
     assertTrue(res.summary.contains("DLP"))
+  }
+
+  @OptIn(ExperimentalCoroutinesApi::class)
+  @Test
+  fun replayPlaybook_cancellationHaltsRemainingUiSteps() = runTest {
+    val store = FakePlaybookStore().apply {
+      upsertPlaybook(
+        skillId = "settings_search",
+        triggerIntent = "search settings",
+        targetPackage = "com.android.settings",
+        steps = listOf(
+          PlaybookStep(action = "open_app", packageName = "com.android.settings"),
+          PlaybookStep(action = "input_text", viewId = "search_bar", inputTemplate = "{{query}}"),
+          PlaybookStep(action = "click_node", viewId = "go_btn"),
+        ),
+        incrementSuccess = true,
+      )
+    }
+    val env = FakeEnv()
+    val executor = PlaybookExecutor(
+      env = env,
+      store = store,
+      security = SecurityGateway("com.nexwork.edith"),
+      settleDelayMs = 2_000L,
+    )
+
+    var aborted = false
+    val job = launch {
+      try {
+        executor.executeCommand("search settings for wifi", apiKey = null)
+      } catch (c: CancellationException) {
+        aborted = true
+        throw c
+      }
+    }
+    advanceTimeBy(100L)
+    runCurrent()
+    assertEquals(listOf("open:com.android.settings"), env.actions)
+
+    job.cancel(CancellationException("Physical stop pressed"))
+    advanceTimeBy(10_000L)
+    runCurrent()
+
+    assertTrue(aborted)
+    assertEquals(listOf("open:com.android.settings"), env.actions)
   }
 }

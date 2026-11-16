@@ -39,10 +39,15 @@ class JarvisForegroundService : Service() {
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     if (intent?.action == ACTION_STOP) {
+      JarvisRuntime.emergencyStop(applicationContext, reason = "Baseplate service stopped", bounceHome = false)
       _status.update { it.copy(isRunning = false, lastEventSummary = "Service stopped") }
       ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
       stopSelf()
       return START_NOT_STICKY
+    }
+    if (intent?.action == ACTION_EMERGENCY_ABORT) {
+      JarvisRuntime.emergencyStop(applicationContext, reason = "Notification ABORT tapped", bounceHome = true)
+      return START_STICKY
     }
 
     ensureChannel()
@@ -122,28 +127,9 @@ class JarvisForegroundService : Service() {
     nm.createNotificationChannel(channel)
   }
 
-  private fun buildStickyNotification(): Notification {
-    val launchIntent = Intent(this, MainActivity::class.java).apply {
-      flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-    }
-    val contentPendingIntent = PendingIntent.getActivity(
-      this,
-      REQUEST_OPEN_APP,
-      launchIntent,
-      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
-
-    return NotificationCompat.Builder(this, CHANNEL_ID)
-      .setSmallIcon(R.mipmap.ic_launcher)
-      .setContentTitle("JARVIS // BASEPLATE ACTIVE")
-      .setContentText("Monitoring notifications & reply cache")
-      .setContentIntent(contentPendingIntent)
-      .setOngoing(true)
-      .setSilent(true)
-      .setCategory(NotificationCompat.CATEGORY_SERVICE)
-      .setPriority(NotificationCompat.PRIORITY_LOW)
-      .build()
-  }
+  private fun buildStickyNotification(
+    contentText: String = "Monitoring notifications & reply cache",
+  ): Notification = buildNotification(this, contentText)
 
   private fun scheduleRestartFallback() {
     runCatching {
@@ -170,9 +156,12 @@ class JarvisForegroundService : Service() {
     private const val NOTIFICATION_ID = 4107
     private const val REQUEST_OPEN_APP = 4108
     private const val REQUEST_RESTART = 4109
+    private const val REQUEST_ABORT_TASK = 4111
+    private const val REQUEST_STOP_SERVICE = 4112
 
     const val ACTION_START = "com.nexwork.edith.jarvis.action.START"
     const val ACTION_STOP = "com.nexwork.edith.jarvis.action.STOP"
+    const val ACTION_EMERGENCY_ABORT = "com.nexwork.edith.jarvis.action.EMERGENCY_ABORT"
 
     private val _status = MutableStateFlow(JarvisServiceStatus())
     val status: StateFlow<JarvisServiceStatus> = _status.asStateFlow()
@@ -195,6 +184,73 @@ class JarvisForegroundService : Service() {
         action = ACTION_STOP
       }
       runCatching { appCtx.startService(intent) }
+    }
+
+    internal fun updateRunningTask(context: Context, taskLabel: String?) {
+      if (!_status.value.isRunning) return
+      val label = taskLabel ?: "Monitoring notifications & reply cache"
+      refreshNotification(context, label)
+    }
+
+    internal fun recordStopped(context: Context, summary: String) {
+      _status.update { current ->
+        current.copy(
+          lastEventSummary = "STOPPED: $summary",
+          lastError = null,
+        )
+      }
+      if (_status.value.isRunning) {
+        refreshNotification(context, "STOPPED: $summary")
+      }
+    }
+
+    private fun buildNotification(context: Context, contentText: String): Notification {
+      val launchIntent = Intent(context, MainActivity::class.java).apply {
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+      }
+      val contentPi = PendingIntent.getActivity(
+        context,
+        REQUEST_OPEN_APP,
+        launchIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+      val abortPi = PendingIntent.getService(
+        context,
+        REQUEST_ABORT_TASK,
+        Intent(context, JarvisForegroundService::class.java).apply { action = ACTION_EMERGENCY_ABORT },
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+      val stopPi = PendingIntent.getService(
+        context,
+        REQUEST_STOP_SERVICE,
+        Intent(context, JarvisForegroundService::class.java).apply { action = ACTION_STOP },
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+      return NotificationCompat.Builder(context, CHANNEL_ID)
+        .setSmallIcon(R.mipmap.ic_launcher)
+        .setContentTitle("JARVIS // BASEPLATE ACTIVE")
+        .setContentText(contentText)
+        .setContentIntent(contentPi)
+        .setOngoing(true)
+        .setSilent(true)
+        .setCategory(NotificationCompat.CATEGORY_SERVICE)
+        .setPriority(NotificationCompat.PRIORITY_LOW)
+        .addAction(0, "ABORT TASK", abortPi)
+        .addAction(0, "STOP FGS", stopPi)
+        .build()
+    }
+
+    private fun refreshNotification(context: Context, contentText: String) {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+        PackageManager.PERMISSION_GRANTED
+      ) {
+        return
+      }
+      runCatching {
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return
+        nm.notify(NOTIFICATION_ID, buildNotification(context, contentText))
+      }
     }
 
     internal fun recordProcessed(summary: String) {

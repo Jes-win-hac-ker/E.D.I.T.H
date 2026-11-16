@@ -5,13 +5,20 @@ import com.nexwork.edith.jarvis.core.JarvisRule
 import com.nexwork.edith.jarvis.core.NotificationTriage
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 
 data class GeminiTriageResult(
   val triage: NotificationTriage,
@@ -42,33 +49,66 @@ class GeminiClient(
     notification: CapturedNotification,
     rules: List<JarvisRule> = emptyList(),
   ): Result<GeminiTriageResult> {
-    val trimmedKey = apiKey.trim()
-    if (trimmedKey.isEmpty()) {
-      return Result.failure(IllegalStateException("Missing Google AI Studio API key"))
+    val request = prepareTriageRequest(apiKey, notification, rules)
+      ?: return Result.failure(IllegalStateException("Missing Google AI Studio API key"))
+    return try {
+      httpClient.newCall(request).execute().use { response ->
+        decodeTriageHttpResponse(response, notification.sender)
+      }
+    } catch (t: Throwable) {
+      Result.failure(t)
     }
+  }
 
+  /**
+   * Cancellable coroutine variant of [classifyNotification] that immediately cancels the in-flight
+   * OkHttp call when stopped by hardware or UI emergency controls.
+   */
+  suspend fun classifyNotificationCancellable(
+    apiKey: String,
+    notification: CapturedNotification,
+    rules: List<JarvisRule> = emptyList(),
+  ): Result<GeminiTriageResult> {
+    val request = prepareTriageRequest(apiKey, notification, rules)
+      ?: return Result.failure(IllegalStateException("Missing Google AI Studio API key"))
+    return try {
+      httpClient.awaitResponse(request).use { response ->
+        decodeTriageHttpResponse(response, notification.sender)
+      }
+    } catch (c: CancellationException) {
+      throw c
+    } catch (t: Throwable) {
+      Result.failure(t)
+    }
+  }
+
+  private fun prepareTriageRequest(
+    apiKey: String,
+    notification: CapturedNotification,
+    rules: List<JarvisRule>,
+  ): Request? {
+    val trimmedKey = apiKey.trim()
+    if (trimmedKey.isEmpty()) return null
     val requestPayload = buildRequestPayload(notification, rules)
     val requestBodyJson = json.encodeToString(requestPayload)
-
-    val request = Request.Builder()
+    return Request.Builder()
       .url(endpointUrl)
       .header("x-goog-api-key", trimmedKey)
       .header("Content-Type", "application/json")
       .post(requestBodyJson.toRequestBody(JSON_MEDIA_TYPE))
       .build()
+  }
 
-    return try {
-      httpClient.newCall(request).execute().use { response ->
-        val rawBody = response.body?.string().orEmpty()
-        if (!response.isSuccessful) {
-          val apiMsg = parseApiErrorMessage(rawBody) ?: "HTTP ${response.code}"
-          return Result.failure(IOException("Gemini triage failed: $apiMsg"))
-        }
-        parseTriageResponse(rawBody, fallbackSender = notification.sender)
-      }
-    } catch (t: Throwable) {
-      Result.failure(t)
+  private fun decodeTriageHttpResponse(
+    response: Response,
+    fallbackSender: String,
+  ): Result<GeminiTriageResult> {
+    val rawBody = response.body?.string().orEmpty()
+    if (!response.isSuccessful) {
+      val apiMsg = parseApiErrorMessage(rawBody) ?: "HTTP ${response.code}"
+      return Result.failure(IOException("Gemini triage failed: $apiMsg"))
     }
+    return parseTriageResponse(rawBody, fallbackSender = fallbackSender)
   }
 
   internal fun buildRequestPayload(
@@ -248,3 +288,22 @@ internal data class GeminiErrorEnvelope(
 internal data class GeminiErrorDetail(
   val message: String? = null,
 )
+
+internal suspend fun OkHttpClient.awaitResponse(request: Request): Response =
+  suspendCancellableCoroutine { cont ->
+    val call = newCall(request)
+    cont.invokeOnCancellation { call.cancel() }
+    call.enqueue(object : Callback {
+      override fun onFailure(call: Call, e: IOException) {
+        if (cont.isActive) cont.resumeWithException(e)
+      }
+
+      override fun onResponse(call: Call, response: Response) {
+        if (cont.isActive) {
+          cont.resume(response)
+        } else {
+          response.close()
+        }
+      }
+    })
+  }

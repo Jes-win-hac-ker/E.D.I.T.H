@@ -209,26 +209,62 @@ fun JarvisBaseplatePanel(
 
       Spacer(modifier = Modifier.width(8.dp))
 
-      Box(
-        modifier = Modifier
-          .clip(RoundedCornerShape(6.dp))
-          .background(GlassSurfaceElevated.copy(alpha = 0.85f))
-          .border(0.8.dp, accent.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
-          .clickable {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            keyboardController?.hide()
-            focusManager.clearFocus()
-            onClose()
-          }
-          .padding(horizontal = 10.dp, vertical = 6.dp),
+      val hasActiveJobs = uiState.isExecutingCommand ||
+        uiState.isProcessing ||
+        uiState.pendingTier3Approval != null
+      Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
       ) {
-        Text(
-          text = closeLabel,
-          color = accent,
-          fontFamily = FontFamily.Monospace,
-          fontSize = 10.sp,
-          fontWeight = FontWeight.Bold,
-        )
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+              if (hasActiveJobs) CrimsonBright.copy(alpha = 0.24f) else CrimsonBright.copy(alpha = 0.08f)
+            )
+            .border(
+              if (hasActiveJobs) 1.2.dp else 0.8.dp,
+              if (hasActiveJobs) CrimsonBright else CrimsonBright.copy(alpha = 0.48f),
+              RoundedCornerShape(6.dp),
+            )
+            .clickable {
+              haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+              keyboardController?.hide()
+              focusManager.clearFocus()
+              JarvisRuntime.emergencyStop(context, "Jarvis E-STOP tapped")
+            }
+            .padding(horizontal = 9.dp, vertical = 6.dp),
+        ) {
+          Text(
+            text = if (hasActiveJobs) "■ STOP" else "■ E-STOP",
+            color = if (hasActiveJobs) TextPureWhite else CrimsonBright,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+          )
+        }
+
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(GlassSurfaceElevated.copy(alpha = 0.85f))
+            .border(0.8.dp, accent.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+            .clickable {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              keyboardController?.hide()
+              focusManager.clearFocus()
+              onClose()
+            }
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        ) {
+          Text(
+            text = closeLabel,
+            color = accent,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+          )
+        }
       }
     }
 
@@ -333,6 +369,19 @@ fun JarvisBaseplatePanel(
             accent = accent,
             onClick = requestAmbientPermissions,
           )
+
+          if (uiState.serviceStatus.isRunning) {
+            StatusPill(
+              label = "FGS",
+              value = "STOP",
+              state = PillState.FAULT,
+              accent = CrimsonBright,
+              onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                JarvisRuntime.stopForegroundService(context)
+              },
+            )
+          }
         }
       }
 
@@ -413,6 +462,10 @@ fun JarvisBaseplatePanel(
             keyboardController?.hide()
             focusManager.clearFocus()
             JarvisRuntime.executeUiCommand(context, cmd)
+          },
+          onStop = {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            JarvisRuntime.stopCommandExecution(context, reason = "Playbook STOP button tapped")
           },
         )
       }
@@ -663,6 +716,7 @@ private fun CommandTestBarCard(
   accent: Color,
   onDraftChange: (String) -> Unit,
   onRun: () -> Unit,
+  onStop: () -> Unit,
 ) {
   Column(
     modifier = Modifier
@@ -731,12 +785,21 @@ private fun CommandTestBarCard(
           modifier = Modifier.fillMaxWidth(),
         )
       }
-      ActionChip(
-        text = if (isExecuting) "RUN..." else "RUN",
-        tint = accent,
-        enabled = !isExecuting && draftCommand.isNotBlank(),
-        onClick = onRun,
-      )
+      if (isExecuting) {
+        ActionChip(
+          text = "■ STOP",
+          tint = CrimsonBright,
+          enabled = true,
+          onClick = onStop,
+        )
+      } else {
+        ActionChip(
+          text = "RUN",
+          tint = accent,
+          enabled = draftCommand.isNotBlank(),
+          onClick = onRun,
+        )
+      }
     }
     if (traceLog.isNotEmpty()) {
       Text(

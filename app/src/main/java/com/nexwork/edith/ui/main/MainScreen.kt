@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -64,6 +65,7 @@ import com.nexwork.edith.LocalHomeResetSignal
 import com.nexwork.edith.jarvis.core.JarvisRuntime
 import com.nexwork.edith.jarvis.ui.JarvisAmbientPill
 import com.nexwork.edith.jarvis.ui.JarvisDrawerSheet
+import com.nexwork.edith.jarvis.ui.JarvisEmergencyStopHudPill
 import com.nexwork.edith.model.SettingsStage
 import com.nexwork.edith.theme.EDITHTheme
 import com.nexwork.edith.ui.hud.CrimeSceneFocusOverlay
@@ -112,6 +114,7 @@ fun MainScreen(
   var isAmbientPillMounted by remember { mutableStateOf(false) }
   val isHudMounted = isClockMounted || isOtaMounted || isAmbientPillMounted
   val proactiveSuggestion by JarvisRuntime.proactiveSuggestion.collectAsStateWithLifecycle()
+  val jarvisUiState by JarvisRuntime.uiState.collectAsStateWithLifecycle()
   var isSettingsRootMounted by remember { mutableStateOf(false) }
   var isSettingsOverlayMounted by remember { mutableStateOf(false) }
   val isSettingsMounted = isSettingsRootMounted || isSettingsOverlayMounted
@@ -711,6 +714,25 @@ fun MainScreen(
         .graphicsLayer {
           translationY = with(density) { (deckResting - 236.dp).toPx() } * deckShift.value
         },
+    )
+
+    val hasJarvisBusy = jarvisUiState.isExecutingCommand ||
+      jarvisUiState.isProcessing ||
+      jarvisUiState.pendingTier3Approval != null
+    val busyLabel = when {
+      jarvisUiState.isExecutingCommand -> "PLAYBOOK · VOL-"
+      jarvisUiState.pendingTier3Approval != null -> "TIER 3 GATE"
+      else -> "TRIAGE"
+    }
+    JarvisEmergencyStopHudPill(
+      visible = hasJarvisBusy && !jarvisOpen && !settingsOpen && !isSettingsMounted,
+      label = busyLabel,
+      onStop = { JarvisRuntime.emergencyStop(context, "Home HUD STOP tapped") },
+      modifier = Modifier
+        .zIndex(4.5f)
+        .align(Alignment.TopEnd)
+        .statusBarsPadding()
+        .padding(top = 14.dp, end = 18.dp),
     )
 
     if (jarvisOpen) {

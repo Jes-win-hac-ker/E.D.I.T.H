@@ -11,7 +11,10 @@ import com.nexwork.edith.jarvis.security.JarvisActionType
 import com.nexwork.edith.jarvis.security.SecurityActionRequest
 import com.nexwork.edith.jarvis.security.SecurityGateway
 import com.nexwork.edith.jarvis.security.SecurityVerdict
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
@@ -93,6 +96,7 @@ class PlaybookExecutor(
 
     // 1. Attempt local zero-LLM replay first
     for (playbook in candidates) {
+      currentCoroutineContext().ensureActive()
       traceLog += "Playbook hit: ${playbook.skillId} (0 LLM tokens)"
       val replayOutcome = replayPlaybook(playbook, parsed.params, traceLog)
       when (replayOutcome) {
@@ -181,6 +185,7 @@ class PlaybookExecutor(
         )
       },
       onFailure = { err ->
+        if (err is CancellationException) throw err
         CommandExecutionResult(
           ok = false,
           summary = err.message ?: "Planner execution failed",
@@ -207,6 +212,7 @@ class PlaybookExecutor(
     var runStepCount = 0
 
     for ((idx, step) in playbook.steps.withIndex()) {
+      currentCoroutineContext().ensureActive()
       when (step.action) {
         "open_app" -> {
           val pkg = resolveTemplate(step.packageName ?: playbook.targetPackage, params)

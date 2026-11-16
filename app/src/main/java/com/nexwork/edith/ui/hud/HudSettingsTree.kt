@@ -1476,29 +1476,39 @@ private fun JarvisDetailCardContent(
     }
 
     val bannerText = when {
-      uiState.isExecutingCommand -> "EXECUTING // HYDROGEN"
-      uiState.isProcessing -> "TRIAGING // 3.5-LITE"
+      uiState.isExecutingCommand -> "EXECUTING // VOL- OR TAP TO STOP"
+      uiState.isProcessing -> "TRIAGING // TAP TO STOP"
+      uiState.pendingTier3Approval != null -> "TIER 3 GATE // TAP TO ABORT"
       !uiState.lastError.isNullOrBlank() -> uiState.lastError
       !uiState.lastStatusBanner.isNullOrBlank() -> uiState.lastStatusBanner
       else -> null
     }
     if (bannerText != null) {
-      val busy = uiState.isProcessing || uiState.isExecutingCommand
+      val busy = uiState.isProcessing || uiState.isExecutingCommand || uiState.pendingTier3Approval != null
       val isErr = !busy && !uiState.lastError.isNullOrBlank()
       CompactHudCard(
-        eyebrow = if (isErr) "FAULT" else "STATUS",
+        eyebrow = when {
+          busy -> "EMERGENCY STOP"
+          isErr -> "FAULT"
+          else -> "STATUS"
+        },
         title = bannerText.uppercase(),
-        badge = if (busy) "RUN" else "CLR",
+        badge = if (busy) "STOP" else "CLR",
         focused = true,
-        accent = if (isErr) CrimsonBright else accent,
-        pipColor = if (isErr) CrimsonBright else accent,
+        accent = if (busy || isErr) CrimsonBright else accent,
+        pipColor = if (busy || isErr) CrimsonBright else accent,
         titleSizeSp = 9.4f,
         reveal = { staggeredReveal(reveal(), 1, 5, stagger = 0.14f) },
-        enabled = enabled && !busy,
+        enabled = enabled,
         modifier = Modifier.fillMaxWidth().height(42.dp),
         onClick = {
-          haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-          JarvisRuntime.clearBanner()
+          if (busy) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            JarvisRuntime.emergencyStop(context, "Branch 02 STOP tapped")
+          } else {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.clearBanner()
+          }
         },
       )
     }
@@ -1558,19 +1568,24 @@ private fun JarvisDetailCardContent(
           },
         )
         CompactHudCard(
-          eyebrow = "STICKY FGS",
+          eyebrow = if (fgsRunning) "STICKY FGS · TAP TO STOP" else "STICKY FGS",
           title = if (fgsRunning) "ACTIVE · ${uiState.serviceStatus.processedCount}" else "STOPPED",
-          badge = if (fgsRunning) "ON" else "START",
+          badge = if (fgsRunning) "STOP" else "START",
           pipColor = if (fgsRunning) accent else CrimsonBright,
           focused = fgsRunning,
-          accent = if (fgsRunning) accent else CrimsonBright,
+          accent = if (fgsRunning) CrimsonBright else accent,
           titleSizeSp = 10.2f,
           reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.12f) },
           enabled = enabled,
           modifier = Modifier.fillMaxWidth().height(44.dp),
           onClick = {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            JarvisRuntime.startServiceSafely(context)
+            if (fgsRunning) {
+              haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+              JarvisRuntime.stopForegroundService(context)
+            } else {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              JarvisRuntime.startServiceSafely(context)
+            }
           },
         )
         CompactHudCard(
@@ -1610,21 +1625,27 @@ private fun JarvisDetailCardContent(
           },
         )
         CompactHudCard(
-          title = if (uiState.isExecutingCommand) "RUNNING..." else "RUN UI COMMAND",
-          focused = commandDraft.isNotBlank(),
-          accent = accent,
+          title = if (uiState.isExecutingCommand) "■ STOP EXECUTION (VOL-)" else "RUN UI COMMAND",
+          focused = uiState.isExecutingCommand || commandDraft.isNotBlank(),
+          accent = if (uiState.isExecutingCommand) CrimsonBright else accent,
+          pipColor = if (uiState.isExecutingCommand) CrimsonBright else accent,
           titleSizeSp = 9.6f,
           centerText = true,
           reveal = { staggeredReveal(reveal(), 6, totalSteps, stagger = 0.12f) },
-          enabled = enabled && !uiState.isExecutingCommand && commandDraft.isNotBlank(),
+          enabled = enabled && (uiState.isExecutingCommand || commandDraft.isNotBlank()),
           modifier = Modifier.fillMaxWidth().height(36.dp),
           onClick = {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            val cmd = commandDraft
-            commandDraft = ""
-            keyboardController?.hide()
-            focusManager.clearFocus()
-            JarvisRuntime.executeUiCommand(context, cmd)
+            if (uiState.isExecutingCommand) {
+              haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+              JarvisRuntime.stopCommandExecution(context, "Branch 02 STOP tapped")
+            } else {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              val cmd = commandDraft
+              commandDraft = ""
+              keyboardController?.hide()
+              focusManager.clearFocus()
+              JarvisRuntime.executeUiCommand(context, cmd)
+            }
           },
         )
         if (uiState.lastExecutionLog.isNotEmpty()) {

@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexwork.edith.jarvis.core.ProactiveSuggestion
+import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.GlassSurfaceElevated
 import com.nexwork.edith.theme.LocalLauncherStyle
 import com.nexwork.edith.theme.TextPureWhite
@@ -177,6 +178,59 @@ fun JarvisAmbientPill(
           )
         }
       }
+    }
+  }
+}
+
+/**
+ * Compact crimson emergency-brake HUD capsule shown on Home while Jarvis playbooks, triage,
+ * or Tier-3 biometric prompts are actively running outside the full Jarvis drawer.
+ */
+@Composable
+fun JarvisEmergencyStopHudPill(
+  visible: Boolean,
+  label: String,
+  onStop: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val haptic = LocalHapticFeedback.current
+  AnimatedVisibility(
+    visible = visible,
+    enter = fadeIn(tween(160, easing = FastOutSlowInEasing)) +
+      slideInVertically(tween(180, easing = FastOutSlowInEasing)) { -it / 2 },
+    exit = fadeOut(tween(150, easing = FastOutSlowInEasing)) +
+      slideOutVertically(tween(160, easing = FastOutSlowInEasing)) { -it / 2 },
+    modifier = modifier,
+  ) {
+    Row(
+      modifier = Modifier
+        .clip(RoundedCornerShape(14.dp))
+        .background(GlassSurfaceElevated.copy(alpha = 0.94f))
+        .border(1.1.dp, CrimsonBright.copy(alpha = 0.85f), RoundedCornerShape(14.dp))
+        .clickable {
+          haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+          onStop()
+        }
+        .padding(horizontal = 12.dp, vertical = 8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Text(
+        text = "■ STOP",
+        color = CrimsonBright,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 0.8.sp,
+      )
+      Text(
+        text = label,
+        color = TextPureWhite,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 10.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
     }
   }
 }

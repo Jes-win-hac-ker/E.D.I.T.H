@@ -3,6 +3,9 @@ package com.nexwork.edith.jarvis.brain
 import com.nexwork.edith.jarvis.core.PlaybookStep
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -90,9 +93,11 @@ class PlannerClient(
     var turnsUsed = 0
 
     for (turn in 0 until maxTurns) {
+      currentCoroutineContext().ensureActive()
       turnsUsed = turn + 1
       val requestPayload = buildRequestJson(history)
       val responseJson = postGenerateContent(trimmedKey, requestPayload).getOrElse { err ->
+        if (err is CancellationException) throw err
         return Result.failure(err)
       }
 
@@ -132,6 +137,7 @@ class PlannerClient(
 
       val responseParts = buildJsonArray {
         for (call in functionCalls) {
+          currentCoroutineContext().ensureActive()
           val fnName = call["name"]?.jsonPrimitive?.content.orEmpty()
           val fnArgs = call["args"] as? JsonObject ?: JsonObject(emptyMap())
           val outcome = bridge.executeTool(fnName, fnArgs)
@@ -196,7 +202,7 @@ class PlannerClient(
     return json.encodeToString(JsonObject.serializer(), body)
   }
 
-  private fun postGenerateContent(apiKey: String, bodyJson: String): Result<JsonObject> {
+  private suspend fun postGenerateContent(apiKey: String, bodyJson: String): Result<JsonObject> {
     val request = Request.Builder()
       .url(endpointUrl)
       .header("x-goog-api-key", apiKey)
@@ -205,7 +211,7 @@ class PlannerClient(
       .build()
 
     return try {
-      httpClient.newCall(request).execute().use { resp ->
+      httpClient.awaitResponse(request).use { resp ->
         val raw = resp.body?.string().orEmpty()
         if (!resp.isSuccessful) {
           val errMsg = runCatching {
@@ -216,6 +222,8 @@ class PlannerClient(
         }
         Result.success(json.parseToJsonElement(raw).jsonObject)
       }
+    } catch (c: CancellationException) {
+      throw c
     } catch (t: Throwable) {
       Result.failure(t)
     }

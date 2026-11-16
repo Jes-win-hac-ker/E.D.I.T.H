@@ -1,25 +1,49 @@
 package com.nexwork.edith.jarvis.senses
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
+import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.graphics.Path
+import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.provider.Settings
 import android.util.SparseArray
+import android.view.Gravity
+import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.ViewConfiguration
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.TextView
 import com.nexwork.edith.jarvis.core.CompactUiNode
 import com.nexwork.edith.jarvis.core.CompactUiTree
 import com.nexwork.edith.jarvis.core.JarvisRuntime
 import com.nexwork.edith.jarvis.security.SecurityGateway
+import kotlin.math.hypot
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -32,11 +56,31 @@ class JarvisAccessibilityService : AccessibilityService() {
   private val nodeLock = Any()
   private val nodeMap = SparseArray<AccessibilityNodeInfo>()
   private val compactMetaMap = SparseArray<CompactUiNode>()
+  private val mainHandler = Handler(Looper.getMainLooper())
+  private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+  @Volatile
+  private var overlayObserverJob: Job? = null
+
+  @Volatile
+  private var activeGestureDeferred: CompletableDeferred<Boolean>? = null
+
+  @Volatile
+  private var volumeAbortPressed: Boolean = false
+
+  private var emergencyOverlayView: TextView? = null
+  private var emergencyOverlayParams: WindowManager.LayoutParams? = null
 
   override fun onServiceConnected() {
     super.onServiceConnected()
     activeInstance = this
     _isConnected.value = true
+    runCatching {
+      serviceInfo = serviceInfo?.apply {
+        flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+      }
+    }
+    startOverlayObserver()
     JarvisRuntime.refreshEnvironmentStatus(applicationContext)
   }
 
@@ -44,9 +88,39 @@ class JarvisAccessibilityService : AccessibilityService() {
     // Intentionally idle until invoked on-demand via dumpCompactUiTree() / UI actions.
   }
 
-  override fun onInterrupt() = Unit
+  override fun onInterrupt() {
+    abortActiveAutomation(bounceHome = false)
+  }
+
+  override fun onKeyEvent(event: KeyEvent?): Boolean {
+    event ?: return super.onKeyEvent(event)
+    if (event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+      val active = JarvisRuntime.isAutomationActive.value
+      if (shouldConsumePhysicalAbortKey(event.keyCode, event.action, event.repeatCount, active)) {
+        volumeAbortPressed = true
+        JarvisRuntime.emergencyStop(
+          context = applicationContext,
+          reason = "Volume-Down physical stop",
+          bounceHome = true,
+        )
+        return true
+      }
+      if (event.action == KeyEvent.ACTION_DOWN && volumeAbortPressed) {
+        return true
+      }
+      if (event.action == KeyEvent.ACTION_UP && volumeAbortPressed) {
+        volumeAbortPressed = false
+        return true
+      }
+    }
+    return super.onKeyEvent(event)
+  }
 
   override fun onUnbind(intent: Intent?): Boolean {
+    volumeAbortPressed = false
+    overlayObserverJob?.cancel()
+    overlayObserverJob = null
+    hideEmergencyOverlay()
     clearNodeCache()
     if (activeInstance === this) activeInstance = null
     _isConnected.value = false
@@ -55,10 +129,164 @@ class JarvisAccessibilityService : AccessibilityService() {
   }
 
   override fun onDestroy() {
+    volumeAbortPressed = false
+    overlayObserverJob?.cancel()
+    overlayObserverJob = null
+    hideEmergencyOverlay()
     clearNodeCache()
     if (activeInstance === this) activeInstance = null
     _isConnected.value = false
     super.onDestroy()
+  }
+
+  fun abortActiveAutomation(bounceHome: Boolean) {
+    activeGestureDeferred?.takeIf { !it.isCompleted }?.complete(false)
+    activeGestureDeferred = null
+    clearNodeCache()
+    mainHandler.post {
+      hideEmergencyOverlay()
+      triggerStopVibration()
+      if (bounceHome) {
+        val fg = currentForegroundPackage()
+        if (fg.isNotBlank() && fg != applicationContext.packageName) {
+          runCatching { performGlobalAction(GLOBAL_ACTION_HOME) }
+        }
+      }
+    }
+  }
+
+  private fun startOverlayObserver() {
+    overlayObserverJob?.cancel()
+    overlayObserverJob = serviceScope.launch {
+      JarvisRuntime.isAutomationActive.collect { active ->
+        if (active) {
+          showEmergencyOverlay()
+        } else {
+          hideEmergencyOverlay()
+        }
+      }
+    }
+  }
+
+  @SuppressLint("ClickableViewAccessibility")
+  private fun showEmergencyOverlay() {
+    if (emergencyOverlayView != null) return
+    runCatching {
+      val wm = getSystemService(WINDOW_SERVICE) as? WindowManager ?: return
+      val density = resources.displayMetrics.density
+      val statusBarHeight = resources.getIdentifier("status_bar_height", "dimen", "android")
+        .takeIf { it > 0 }
+        ?.let { resources.getDimensionPixelSize(it) }
+        ?: (28f * density).toInt()
+
+      val pillBg = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = 20f * density
+        setColor(Color.parseColor("#EB16090D"))
+        setStroke((1.4f * density).toInt().coerceAtLeast(1), Color.parseColor("#FFFF4D5E"))
+      }
+
+      val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
+      val pill = TextView(this).apply {
+        text = "■ STOP"
+        setTextColor(Color.parseColor("#FFF8FAFC"))
+        textSize = 12f
+        typeface = Typeface.MONOSPACE
+        setTypeface(typeface, Typeface.BOLD)
+        letterSpacing = 0.08f
+        background = pillBg
+        elevation = 10f * density
+        val hPad = (14f * density).toInt()
+        val vPad = (9f * density).toInt()
+        setPadding(hPad, vPad, hPad, vPad)
+      }
+
+      val params = WindowManager.LayoutParams(
+        WindowManager.LayoutParams.WRAP_CONTENT,
+        WindowManager.LayoutParams.WRAP_CONTENT,
+        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+          WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+          WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+        PixelFormat.TRANSLUCENT,
+      ).apply {
+        gravity = Gravity.TOP or Gravity.END
+        x = (14f * density).toInt()
+        y = statusBarHeight + (10f * density).toInt()
+      }
+
+      var startX = 0
+      var startY = 0
+      var downRawX = 0f
+      var downRawY = 0f
+      var dragged = false
+
+      pill.setOnTouchListener { _, ev ->
+        when (ev.actionMasked) {
+          MotionEvent.ACTION_DOWN -> {
+            startX = params.x
+            startY = params.y
+            downRawX = ev.rawX
+            downRawY = ev.rawY
+            dragged = false
+            true
+          }
+          MotionEvent.ACTION_MOVE -> {
+            val dx = ev.rawX - downRawX
+            val dy = ev.rawY - downRawY
+            if (!dragged && hypot(dx.toDouble(), dy.toDouble()) > touchSlop) {
+              dragged = true
+            }
+            if (dragged) {
+              params.x = (startX - dx.toInt()).coerceAtLeast(0)
+              params.y = (startY + dy.toInt()).coerceAtLeast(statusBarHeight)
+              runCatching { wm.updateViewLayout(pill, params) }
+            }
+            true
+          }
+          MotionEvent.ACTION_UP -> {
+            if (!dragged) {
+              JarvisRuntime.emergencyStop(
+                context = applicationContext,
+                reason = "Floating STOP pill tapped",
+                bounceHome = true,
+              )
+            }
+            true
+          }
+          else -> false
+        }
+      }
+
+      wm.addView(pill, params)
+      emergencyOverlayView = pill
+      emergencyOverlayParams = params
+    }
+  }
+
+  private fun hideEmergencyOverlay() {
+    val view = emergencyOverlayView ?: return
+    emergencyOverlayView = null
+    emergencyOverlayParams = null
+    runCatching {
+      val wm = getSystemService(WINDOW_SERVICE) as? WindowManager ?: return
+      wm.removeViewImmediate(view)
+    }
+  }
+
+  @SuppressLint("MissingPermission")
+  @Suppress("DEPRECATION")
+  private fun triggerStopVibration() {
+    runCatching {
+      val effect = VibrationEffect.createWaveform(longArrayOf(0L, 40L, 50L, 60L), -1)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+        vm?.defaultVibrator?.vibrate(effect)
+      } else {
+        val vib = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        vib?.vibrate(effect)
+      }
+    }
   }
 
   private fun clearNodeCache() {
@@ -307,22 +535,7 @@ class JarvisAccessibilityService : AccessibilityService() {
     val path = Path().apply { moveTo(x, y) }
     val stroke = GestureDescription.StrokeDescription(path, 0L, 45L)
     val gesture = GestureDescription.Builder().addStroke(stroke).build()
-    val deferred = CompletableDeferred<Boolean>()
-    val dispatched = dispatchGesture(
-      gesture,
-      object : GestureResultCallback() {
-        override fun onCompleted(gestureDescription: GestureDescription?) {
-          if (!deferred.isCompleted) deferred.complete(true)
-        }
-
-        override fun onCancelled(gestureDescription: GestureDescription?) {
-          if (!deferred.isCompleted) deferred.complete(false)
-        }
-      },
-      null,
-    )
-    if (!dispatched) return false
-    return withTimeoutOrNull(1_500L) { deferred.await() } ?: false
+    return dispatchGestureAndAwait(gesture, 1_500L)
   }
 
   private suspend fun dispatchSwipeGesture(
@@ -338,7 +551,12 @@ class JarvisAccessibilityService : AccessibilityService() {
     }
     val stroke = GestureDescription.StrokeDescription(path, 0L, durationMs)
     val gesture = GestureDescription.Builder().addStroke(stroke).build()
+    return dispatchGestureAndAwait(gesture, 1_800L)
+  }
+
+  private suspend fun dispatchGestureAndAwait(gesture: GestureDescription, timeoutMs: Long): Boolean {
     val deferred = CompletableDeferred<Boolean>()
+    activeGestureDeferred = deferred
     val dispatched = dispatchGesture(
       gesture,
       object : GestureResultCallback() {
@@ -352,8 +570,15 @@ class JarvisAccessibilityService : AccessibilityService() {
       },
       null,
     )
-    if (!dispatched) return false
-    return withTimeoutOrNull(1_800L) { deferred.await() } ?: false
+    if (!dispatched) {
+      if (activeGestureDeferred === deferred) activeGestureDeferred = null
+      return false
+    }
+    return try {
+      withTimeoutOrNull(timeoutMs) { deferred.await() } ?: false
+    } finally {
+      if (activeGestureDeferred === deferred) activeGestureDeferred = null
+    }
   }
 
   internal data class RawNodeSnapshot(
@@ -396,6 +621,20 @@ class JarvisAccessibilityService : AccessibilityService() {
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
     fun instance(): JarvisAccessibilityService? = activeInstance
+
+    /**
+     * Pure gate deciding when a hardware key event triggers immediate automation abort.
+     * Consumes Volume-Down ONLY while automation is active so normal media volume stays intact.
+     */
+    internal fun shouldConsumePhysicalAbortKey(
+      keyCode: Int,
+      action: Int,
+      repeatCount: Int,
+      isAutomationActive: Boolean,
+    ): Boolean {
+      if (!isAutomationActive) return false
+      return keyCode == KeyEvent.KEYCODE_VOLUME_DOWN && action == KeyEvent.ACTION_DOWN && repeatCount == 0
+    }
 
     fun isEnabledInSettings(context: Context): Boolean {
       return runCatching {

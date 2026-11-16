@@ -3,6 +3,7 @@ package com.nexwork.edith
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.SystemBarStyle
@@ -24,6 +25,7 @@ import com.nexwork.edith.theme.EDITHTheme
 
 class MainActivity : ComponentActivity() {
   private var homeResetSignal by mutableIntStateOf(0)
+  private var volumeDownAbortConsumed: Boolean = false
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -66,8 +68,32 @@ class MainActivity : ComponentActivity() {
   }
 
   override fun onPause() {
+    volumeDownAbortConsumed = false
     JarvisRuntime.setLauncherForeground(this, visible = false)
     super.onPause()
+  }
+
+  override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+    if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN && JarvisRuntime.isAnyAbortableWorkActive()) {
+      if (event?.repeatCount == 0) {
+        volumeDownAbortConsumed = true
+        JarvisRuntime.emergencyStop(
+          context = this,
+          reason = "Volume-Down physical stop",
+          bounceHome = false,
+        )
+      }
+      return true
+    }
+    return super.onKeyDown(keyCode, event)
+  }
+
+  override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+    if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN && volumeDownAbortConsumed) {
+      volumeDownAbortConsumed = false
+      return true
+    }
+    return super.onKeyUp(keyCode, event)
   }
 
   override fun onNewIntent(intent: Intent) {

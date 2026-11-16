@@ -48,10 +48,15 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -120,6 +125,22 @@ object JarvisRuntime {
 
   private val approvalLock = Any()
   private var pendingApprovalPair: Pair<String, CompletableDeferred<Boolean>>? = null
+
+  private val jobLock = Any()
+  private var activeCommandJob: Job? = null
+  private val activeTriageJobs = LinkedHashSet<Job>()
+
+  @Volatile
+  private var isOtaBusy: Boolean = false
+
+  private val _isAutomationActive = MutableStateFlow(false)
+  val isAutomationActive: StateFlow<Boolean> = _isAutomationActive.asStateFlow()
+
+  private val _isLauncherForegroundFlow = MutableStateFlow(true)
+  val isLauncherForegroundFlow: StateFlow<Boolean> = _isLauncherForegroundFlow.asStateFlow()
+
+  private val _emergencyStopEvents = MutableSharedFlow<String>(extraBufferCapacity = 8)
+  val emergencyStopEvents: SharedFlow<String> = _emergencyStopEvents.asSharedFlow()
 
   private val _proactiveSuggestion = MutableStateFlow<ProactiveSuggestion?>(null)
   val proactiveSuggestion: StateFlow<ProactiveSuggestion?> = _proactiveSuggestion.asStateFlow()
@@ -203,7 +224,7 @@ object JarvisRuntime {
 
   fun onNotificationCaptured(context: Context, extracted: ExtractedNotification) {
     val appCtx = context.applicationContext
-    scope.launch {
+    val triageJob = scope.launch(start = CoroutineStart.LAZY) {
       ensureComponentsLocked(appCtx)
       val keeper = gatekeeper ?: return@launch
       val db = database ?: return@launch
@@ -254,7 +275,7 @@ object JarvisRuntime {
       try {
         val rules = db.getActiveRules()
         val client = geminiClient ?: return@launch
-        val result = client.classifyNotification(apiKey, captured, rules)
+        val result = client.classifyNotificationCancellable(apiKey, captured, rules)
         result
           .onSuccess { triageResult ->
             db.updateTriageResult(
@@ -286,11 +307,31 @@ object JarvisRuntime {
             JarvisForegroundService.recordError(msg)
             _uiState.update { it.copy(lastError = msg) }
           }
+      } catch (c: CancellationException) {
+        db.updateTriageStatus(
+          eventId = eventId,
+          status = TriageStatus.FAILED,
+          errorMessage = "Triage stopped by user",
+        )
+        throw c
       } finally {
-        _uiState.update { it.copy(isProcessing = false) }
+        val stillProcessing = synchronized(jobLock) {
+          activeTriageJobs.removeAll { !it.isActive }
+          activeTriageJobs.isNotEmpty()
+        }
+        _uiState.update { it.copy(isProcessing = stillProcessing) }
         syncEventsSnapshot(db)
       }
     }
+    synchronized(jobLock) {
+      activeTriageJobs.add(triageJob)
+    }
+    triageJob.invokeOnCompletion {
+      synchronized(jobLock) {
+        activeTriageJobs.remove(triageJob)
+      }
+    }
+    triageJob.start()
   }
 
   fun onNotificationRemoved(sbnKey: String) {
@@ -432,7 +473,7 @@ object JarvisRuntime {
     val trimmed = rawCommand.trim()
     if (trimmed.isEmpty()) return
     val appCtx = context.applicationContext
-    scope.launch {
+    val job = scope.launch(start = CoroutineStart.LAZY) {
       ensureComponentsLocked(appCtx)
       val executor = playbookExecutor ?: return@launch
       val apiKey = keyVault?.getApiKey()
@@ -443,6 +484,8 @@ object JarvisRuntime {
           lastStatusBanner = "Executing: $trimmed",
         )
       }
+      _isAutomationActive.value = true
+      JarvisForegroundService.updateRunningTask(appCtx, "PLAYBOOK // ${trimmed.take(36)}")
       try {
         val result: CommandExecutionResult = executor.executeCommand(
           commandText = trimmed,
@@ -458,10 +501,128 @@ object JarvisRuntime {
           )
         }
         JarvisForegroundService.recordProcessed("CMD: ${result.summary.take(64)}")
+      } catch (c: CancellationException) {
+        val reason = c.message?.takeIf { it.isNotBlank() } ?: "Execution stopped by user"
+        _uiState.update {
+          it.copy(
+            isExecutingCommand = false,
+            lastExecutionLog = (it.lastExecutionLog + "[STOP] $reason").takeLast(12),
+            lastError = null,
+            lastStatusBanner = "STOPPED: $reason",
+          )
+        }
+        throw c
       } finally {
-        _uiState.update { it.copy(isExecutingCommand = false) }
+        synchronized(jobLock) {
+          if (activeCommandJob === coroutineContext[Job]) {
+            activeCommandJob = null
+          }
+        }
+        recomputeAutomationActive()
+        _uiState.update { state ->
+          val cmdStillRunning = synchronized(jobLock) { activeCommandJob?.isActive == true }
+          if (cmdStillRunning) state else state.copy(isExecutingCommand = false)
+        }
+        JarvisForegroundService.updateRunningTask(appCtx, null)
       }
     }
+    val previousJob = synchronized(jobLock) {
+      val prev = activeCommandJob
+      activeCommandJob = job
+      prev
+    }
+    previousJob?.cancel(CancellationException("Superseded by new UI command"))
+    recomputeAutomationActive()
+    job.start()
+  }
+
+  fun setOtaActive(active: Boolean) {
+    isOtaBusy = active
+  }
+
+  fun isAnyAbortableWorkActive(): Boolean = synchronized(jobLock) {
+    activeCommandJob?.isActive == true ||
+      activeTriageJobs.any { it.isActive } ||
+      synchronized(approvalLock) { pendingApprovalPair != null } ||
+      isOtaBusy
+  }
+
+  fun stopCommandExecution(context: Context, reason: String = "Playbook execution stopped") {
+    val appCtx = context.applicationContext
+    val cmdToCancel = synchronized(jobLock) {
+      val job = activeCommandJob
+      activeCommandJob = null
+      job
+    }
+    cmdToCancel?.cancel(CancellationException(reason))
+    cancelPendingTier3Approval()
+    recomputeAutomationActive()
+    JarvisAccessibilityService.instance()?.abortActiveAutomation(bounceHome = false)
+    _uiState.update { current ->
+      current.copy(
+        isExecutingCommand = false,
+        pendingTier3Approval = null,
+        lastExecutionLog = (current.lastExecutionLog + "[STOP] $reason").takeLast(12),
+        lastError = null,
+        lastStatusBanner = "STOPPED: $reason",
+      )
+    }
+    JarvisForegroundService.recordStopped(appCtx, reason)
+  }
+
+  fun emergencyStop(
+    context: Context,
+    reason: String = "Emergency stop triggered",
+    bounceHome: Boolean = false,
+  ) {
+    val appCtx = context.applicationContext
+    val (cmdJob, triageSnapshot) = synchronized(jobLock) {
+      val cmd = activeCommandJob
+      activeCommandJob = null
+      val triage = activeTriageJobs.toList()
+      activeTriageJobs.clear()
+      cmd to triage
+    }
+    cmdJob?.cancel(CancellationException(reason))
+    triageSnapshot.forEach { it.cancel(CancellationException(reason)) }
+    cancelPendingTier3Approval()
+    recomputeAutomationActive()
+    JarvisAccessibilityService.instance()?.abortActiveAutomation(bounceHome = bounceHome)
+    _uiState.update { current ->
+      current.copy(
+        isExecutingCommand = false,
+        isProcessing = false,
+        pendingTier3Approval = null,
+        lastExecutionLog = (current.lastExecutionLog + "[E-STOP] $reason").takeLast(12),
+        lastError = null,
+        lastStatusBanner = "STOPPED // $reason",
+      )
+    }
+    JarvisForegroundService.recordStopped(appCtx, reason)
+    _emergencyStopEvents.tryEmit(reason)
+  }
+
+  fun stopForegroundService(context: Context) {
+    val appCtx = context.applicationContext
+    emergencyStop(appCtx, reason = "Baseplate FGS stopped", bounceHome = false)
+    JarvisForegroundService.stop(appCtx)
+  }
+
+  private fun cancelPendingTier3Approval() {
+    val deferred = synchronized(approvalLock) {
+      val prev = pendingApprovalPair?.second
+      pendingApprovalPair = null
+      prev
+    }
+    if (deferred != null && !deferred.isCompleted) {
+      deferred.complete(false)
+    }
+  }
+
+  private fun recomputeAutomationActive() {
+    val cmdRunning = synchronized(jobLock) { activeCommandJob?.isActive == true }
+    val approvalWaiting = synchronized(approvalLock) { pendingApprovalPair != null }
+    _isAutomationActive.value = cmdRunning || approvalWaiting
   }
 
   fun triggerTier3BiometricTest(context: Context, actionLabel: String = "Authorize Tier 3 Sensitive Action") {
@@ -502,6 +663,7 @@ object JarvisRuntime {
     if (deferred != null && !deferred.isCompleted) {
       deferred.complete(approved)
     }
+    recomputeAutomationActive()
   }
 
   private suspend fun awaitTier3Approval(
@@ -519,6 +681,7 @@ object JarvisRuntime {
       prev
     }
     previousToCancel?.takeIf { !it.isCompleted }?.complete(false)
+    recomputeAutomationActive()
 
     val req = Tier3ApprovalRequest(
       requestId = reqId,
@@ -530,16 +693,19 @@ object JarvisRuntime {
     )
     _uiState.update { it.copy(pendingTier3Approval = req) }
 
-    val approved = withTimeoutOrNull(60_000L) { deferred.await() } ?: false
-    synchronized(approvalLock) {
-      if (pendingApprovalPair?.first == reqId) {
-        pendingApprovalPair = null
+    return try {
+      withTimeoutOrNull(60_000L) { deferred.await() } ?: false
+    } finally {
+      synchronized(approvalLock) {
+        if (pendingApprovalPair?.first == reqId) {
+          pendingApprovalPair = null
+        }
       }
+      _uiState.update { state ->
+        if (state.pendingTier3Approval?.requestId == reqId) state.copy(pendingTier3Approval = null) else state
+      }
+      recomputeAutomationActive()
     }
-    _uiState.update { state ->
-      if (state.pendingTier3Approval?.requestId == reqId) state.copy(pendingTier3Approval = null) else state
-    }
-    return approved
   }
 
   fun clearBanner() {
@@ -550,6 +716,7 @@ object JarvisRuntime {
     val appCtx = context.applicationContext
     appContextRef = appCtx
     launcherInForeground = visible
+    _isLauncherForegroundFlow.value = visible
     if (visible) {
       cancelProactiveNotification(appCtx)
       refreshEnvironmentStatus(appCtx)

@@ -14,6 +14,7 @@ import com.nexwork.edith.data.OtaState
 import com.nexwork.edith.data.OtaUpdater
 import com.nexwork.edith.data.ShizukuControlManager
 import com.nexwork.edith.data.WeatherRepository
+import com.nexwork.edith.jarvis.core.JarvisRuntime
 import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.model.AppFootprint
 import com.nexwork.edith.model.DeviceTelemetry
@@ -31,6 +32,7 @@ import com.nexwork.edith.ui.hud.filterMatchingApps
 import com.nexwork.edith.ui.hud.parseHudCommand
 import com.nexwork.edith.ui.hud.warmAppIcons
 import com.nexwork.edith.ui.main.MainScreenUiState.Success
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -42,6 +44,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -136,6 +139,20 @@ class MainScreenViewModel(
     if (otaUpdater == null) {
       otaUpdater = OtaUpdater(appCtx).also {
         it.requestShizukuPermissionUpfront()
+      }
+      viewModelScope.launch {
+        JarvisRuntime.emergencyStopEvents.collect {
+          val curOta = _launcherState.value.otaState
+          if (curOta is OtaState.Downloading || curOta is OtaState.Checking) {
+            dismissOtaPill()
+          }
+        }
+      }
+      viewModelScope.launch {
+        _launcherState
+          .map { it.otaState is OtaState.Downloading || it.otaState is OtaState.Checking }
+          .distinctUntilChanged()
+          .collect { active -> JarvisRuntime.setOtaActive(active) }
       }
     }
     if (monetThemeManager == null) {
@@ -635,7 +652,9 @@ class MainScreenViewModel(
   }
 
   fun dismissOtaPill() {
-    if (_launcherState.value.otaState is OtaState.Downloading) {
+    val wasBusy = _launcherState.value.otaState is OtaState.Downloading ||
+      _launcherState.value.otaState is OtaState.Checking
+    if (wasBusy) {
       otaJob?.cancel()
       otaJob = null
     }
@@ -660,6 +679,7 @@ class MainScreenViewModel(
         }
       },
       onFailure = { err ->
+        if (err is CancellationException) throw err
         _launcherState.update { it.copy(otaState = OtaState.Error(err.message ?: "Download failed")) }
       },
     )

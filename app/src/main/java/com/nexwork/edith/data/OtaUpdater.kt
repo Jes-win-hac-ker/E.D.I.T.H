@@ -20,8 +20,11 @@ import android.provider.Settings
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.content.IntentCompat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
@@ -171,6 +174,7 @@ class OtaUpdater(private val context: Context) {
           FileOutputStream(temp).use { output ->
             val buf = ByteArray(16 * 1024)
             while (true) {
+              currentCoroutineContext().ensureActive()
               val read = input.read(buf)
               if (read <= 0) break
               output.write(buf, 0, read)
@@ -204,9 +208,14 @@ class OtaUpdater(private val context: Context) {
           .putString(KEY_CACHED_SHA256, actualHash)
           .apply()
         target
+      } catch (c: CancellationException) {
+        temp.delete()
+        throw c
       } finally {
         conn.disconnect()
       }
+    }.onFailure { err ->
+      if (err is CancellationException) throw err
     }
   }
 
