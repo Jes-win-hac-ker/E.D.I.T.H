@@ -87,6 +87,8 @@ class CommandEngineTest {
     assertEquals(HudCommand.SetRefreshRate(60), parseHudCommand("!refresh 60"))
     assertEquals(HudCommand.SetRefreshRate(90), parseHudCommand("!refresh 90"))
     assertEquals(HudCommand.Unknown("!refresh fast"), parseHudCommand("!refresh fast"))
+    assertEquals(HudCommand.OpenJarvis, parseHudCommand("!jarvis"))
+    assertEquals(HudCommand.OpenJarvis, parseHudCommand("!agent"))
     assertEquals(HudCommand.ShowHelp, parseHudCommand("!help"))
     assertEquals(HudCommand.ShowHelp, parseHudCommand("!cmd"))
     assertEquals(HudCommand.ShowHelp, parseHudCommand("!"))

@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexwork.edith.data.OtaState
+import com.nexwork.edith.jarvis.ui.JarvisBaseplatePanel
 import com.nexwork.edith.model.DeviceTelemetry
 import com.nexwork.edith.model.LauncherAccentPreset
 import com.nexwork.edith.model.LauncherFontStyle
@@ -503,9 +504,9 @@ fun HudSettingsRootLayer(
           },
         )
         CompactHudCard(
-          eyebrow = "02 // STANDBY",
-          title = "AGENT",
-          pipColor = TreeRailColor.copy(alpha = 0.65f),
+          eyebrow = "02 // BASEPLATE",
+          title = "JARVIS",
+          pipColor = accent.copy(alpha = 0.85f),
           focused = false,
           accent = accent,
           titleSizeSp = 11.5f,
@@ -916,15 +917,24 @@ fun HudSettingsOverlayLayer(
         }
       }
     } else if (activeStage == SettingsStage.AGENT_PLACEHOLDER || activeStage == SettingsStage.SHIZUKU_PLACEHOLDER) {
-      // Standby Branch (02 AGENT or 03 SHIZUKU): laser starts from exact sunken card top center
+      // Branch 02 (JARVIS Baseplate) or Branch 03 (SHIZUKU standby): laser starts from exact sunken card top center
       val isAgent = activeStage == SettingsStage.AGENT_PLACEHOLDER
       val originIdx = if (isAgent) 1 else 2
       val origin = geo.sunkenCardTopCenter(originIdx)
 
-      val cardWDp = (geo.widthDp - 56.dp).coerceIn(220.dp, 312.dp)
-      val cardHDp = 152.dp
+      val cardWDp = if (isAgent) {
+        (geo.widthDp - 24.dp).coerceIn(280.dp, 420.dp)
+      } else {
+        (geo.widthDp - 56.dp).coerceIn(220.dp, 312.dp)
+      }
+      val cardTopDp = if (isAgent) 44.dp else 154.dp
+      val cardHDp = if (isAgent) {
+        val originYDp = with(density) { origin.y.toDp() }
+        (originYDp - cardTopDp - 18.dp).coerceIn(320.dp, 580.dp)
+      } else {
+        152.dp
+      }
       val cardLeftDp = (geo.widthDp - cardWDp) * 0.5f
-      val cardTopDp = 154.dp
 
       val cardLeftPx = with(density) { cardLeftDp.toPx() }
       val cardTopPx = with(density) { cardTopDp.toPx() }
@@ -980,42 +990,52 @@ fun HudSettingsOverlayLayer(
             .height(cardHDp)
             .padding(14.dp),
         ) {
-          Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.SpaceBetween,
-          ) {
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-              HudHeaderDecryptBlock(
-                eyebrow = if (isAgent) "SYS.02 // AI AGENT" else "SYS.03 // SHIZUKU BRIDGE",
-                title = if (isAgent) "STANDBY // RESERVED" else "STANDBY // OS MONET",
-                reveal = { phase(bodyReveal, 0f, 0.72f) },
-                accent = accent,
-              )
-              Text(
-                text = if (isAgent) {
-                  "Personalized agent controls will mount in this branch."
-                } else {
-                  "Reserved for OS-wide Monet palette & voice styling."
-                },
-                color = TextSilver.copy(alpha = phase(bodyReveal, 0.35f, 1.0f)),
-                fontSize = 11.5.sp,
-                lineHeight = 15.sp,
+          if (isAgent) {
+            Box(
+              modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { alpha = bodyReveal },
+            ) {
+              JarvisBaseplatePanel(
+                onClose = onBackStep,
+                closeLabel = "< BACK",
+                modifier = Modifier.fillMaxSize(),
               )
             }
-            CompactHudCard(
-              title = "< BACK TO BRANCHES",
-              reveal = { phase(bodyReveal, 0.28f, 1.0f) },
-              accent = accent,
-              focused = true,
-              titleSizeSp = 10f,
-              centerText = true,
-              enabled = isInteractive && bodyReveal > 0.5f,
-              modifier = Modifier.fillMaxWidth().height(34.dp),
-              onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onBackStep()
-              },
-            )
+          } else {
+            Column(
+              modifier = Modifier.fillMaxSize(),
+              verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+              Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                HudHeaderDecryptBlock(
+                  eyebrow = "SYS.03 // SHIZUKU BRIDGE",
+                  title = "STANDBY // OS MONET",
+                  reveal = { phase(bodyReveal, 0f, 0.72f) },
+                  accent = accent,
+                )
+                Text(
+                  text = "Reserved for OS-wide Monet palette & voice styling.",
+                  color = TextSilver.copy(alpha = phase(bodyReveal, 0.35f, 1.0f)),
+                  fontSize = 11.5.sp,
+                  lineHeight = 15.sp,
+                )
+              }
+              CompactHudCard(
+                title = "< BACK TO BRANCHES",
+                reveal = { phase(bodyReveal, 0.28f, 1.0f) },
+                accent = accent,
+                focused = true,
+                titleSizeSp = 10f,
+                centerText = true,
+                enabled = isInteractive && bodyReveal > 0.5f,
+                modifier = Modifier.fillMaxWidth().height(34.dp),
+                onClick = {
+                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                  onBackStep()
+                },
+              )
+            }
           }
         }
       }

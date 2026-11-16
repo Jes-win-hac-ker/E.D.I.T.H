@@ -90,4 +90,9 @@ dependencies {
   implementation(libs.shizuku.api)
   implementation(libs.shizuku.provider)
   implementation(libs.hiddenapibypass)
+
+  // Jarvis Baseplate
+  implementation(libs.okhttp)
+  implementation(libs.kotlinx.serialization.json)
+  implementation(libs.androidx.security.crypto)
 }

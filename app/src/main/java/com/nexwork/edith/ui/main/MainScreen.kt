@@ -60,6 +60,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
 import kotlinx.coroutines.delay
 import com.nexwork.edith.LocalHomeResetSignal
+import com.nexwork.edith.jarvis.core.JarvisRuntime
+import com.nexwork.edith.jarvis.ui.JarvisDrawerSheet
 import com.nexwork.edith.model.SettingsStage
 import com.nexwork.edith.theme.EDITHTheme
 import com.nexwork.edith.ui.hud.CrimeSceneFocusOverlay
@@ -99,6 +101,7 @@ fun MainScreen(
   var lastScreenActivityMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
   var lastAmbientWakeMs by remember { mutableLongStateOf(0L) }
   val isAmbientCenteredState = rememberUpdatedState(state.isAmbientCentered)
+  val isSettingsOrJarvisOpen = rememberUpdatedState(state.settingsStage != SettingsStage.CLOSED || state.isJarvisSheetOpen)
   val globeController = remember { GlobeController() }
   val isGlobeAtHorizon by globeController.isGlobeAtHorizon.collectAsStateWithLifecycle()
   val isStartupComplete by globeController.isStartupComplete.collectAsStateWithLifecycle()
@@ -125,6 +128,7 @@ fun MainScreen(
     viewModel.closeSpotlightSearch()
     viewModel.closeAppBrowse()
     viewModel.dismissSettings()
+    viewModel.closeJarvisSheet()
     if (now - lastHomeWakeMs > 600L) {
       lastHomeWakeMs = now
       clockRedrawSignal++
@@ -153,9 +157,10 @@ fun MainScreen(
   LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
     isResumed = true
     val keyguardManager = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-    if (keyguardManager?.isKeyguardLocked != true) {
+    if (keyguardManager?.isKeyguardLocked != true && !isSettingsOrJarvisOpen.value) {
       triggerHomeWake()
     }
+    JarvisRuntime.refreshEnvironmentStatus(context)
     viewModel.refreshLauncherData()
     viewModel.checkForUpdates(force = false)
     viewModel.ensureMonetPersisted()
@@ -231,6 +236,7 @@ fun MainScreen(
 
   val consoleOpen = state.isSpotlightSearchOpen || state.isAppBrowseOpen
   val settingsOpen = state.settingsStage != SettingsStage.CLOSED
+  val jarvisOpen = state.isJarvisSheetOpen
   val searchOpen = state.isSpotlightSearchOpen
   val dismissConsole: () -> Unit = {
     lastScreenActivityMs = System.currentTimeMillis()
@@ -288,6 +294,7 @@ fun MainScreen(
     isResumed,
     consoleOpen,
     settingsOpen,
+    jarvisOpen,
     searchOpen,
     state.searchQuery,
     state.browseGroup,
@@ -296,7 +303,7 @@ fun MainScreen(
     lastScreenActivityMs,
   ) {
     if (!isResumed) return@LaunchedEffect
-    if (settingsOpen) return@LaunchedEffect
+    if (settingsOpen || jarvisOpen) return@LaunchedEffect
     if (consoleOpen) {
       if (isCardActionArmed) return@LaunchedEffect
       val timeoutMs = if (searchOpen && state.searchQuery.isEmpty()) 4_000L else 10_000L
@@ -312,8 +319,8 @@ fun MainScreen(
     }
   }
 
-  // Back climbs one level: detail -> branch -> root settings -> home, or search/browse unwind.
-  BackHandler(enabled = consoleOpen || settingsOpen || isSettingsMounted) {
+  // Back climbs one level: detail -> branch -> root settings -> home, or search/browse/jarvis unwind.
+  BackHandler(enabled = consoleOpen || settingsOpen || isSettingsMounted || jarvisOpen) {
     lastScreenActivityMs = System.currentTimeMillis()
     viewModel.handleBackPress()
   }
@@ -345,8 +352,8 @@ fun MainScreen(
           }
         }
       }
-      .pointerInput(consoleOpen, settingsOpen, isSettingsMounted) {
-        if (!consoleOpen && !settingsOpen && !isSettingsMounted) {
+      .pointerInput(consoleOpen, settingsOpen, isSettingsMounted, jarvisOpen) {
+        if (!consoleOpen && !settingsOpen && !isSettingsMounted && !jarvisOpen) {
           awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val downTimeMs = System.currentTimeMillis()
@@ -544,7 +551,7 @@ fun MainScreen(
 
     // The clock crowns the globe horizon apex after startup assembly completes and the globe rests at horizon.
     val topHudHidden =
-      consoleOpen || settingsOpen || isSettingsMounted || state.isAmbientCentered || !isGlobeAtHorizon || !isStartupComplete
+      consoleOpen || settingsOpen || isSettingsMounted || jarvisOpen || state.isAmbientCentered || !isGlobeAtHorizon || !isStartupComplete
     val globeApexY = maxHeight * 0.64f
     val clockTop = (globeApexY - 82.dp).coerceAtLeast(66.dp)
     HudClock(
@@ -676,6 +683,13 @@ fun MainScreen(
           translationY = with(density) { (deckResting - 236.dp).toPx() } * deckShift.value
         },
     )
+
+    if (jarvisOpen) {
+      JarvisDrawerSheet(
+        onDismiss = viewModel::closeJarvisSheet,
+        modifier = Modifier.zIndex(5f),
+      )
+    }
   }
   }
 }

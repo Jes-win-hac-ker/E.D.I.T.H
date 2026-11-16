@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">E.D.I.T.H</string>
+    <string name="jarvis_listener_label">E.D.I.T.H Jarvis</string>
+    <string name="jarvis_fgs_channel_name">Jarvis Baseplate</string>
 </resources>

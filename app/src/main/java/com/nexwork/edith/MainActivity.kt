@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.nexwork.edith.jarvis.core.JarvisRuntime
 import com.nexwork.edith.theme.EDITHTheme
 
 class MainActivity : ComponentActivity() {
@@ -54,6 +55,9 @@ class MainActivity : ComponentActivity() {
         }
       }
     }
+
+    // Defer Jarvis KeyVault, SQLite WAL, and ForegroundService startup until frame 1 renders.
+    JarvisRuntime.schedulePostFirstFrame(this)
   }
 
   override fun onNewIntent(intent: Intent) {

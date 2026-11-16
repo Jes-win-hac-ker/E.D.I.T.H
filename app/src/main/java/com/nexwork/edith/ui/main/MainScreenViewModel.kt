@@ -76,6 +76,7 @@ data class LauncherHomeState(
   val settingsStage: SettingsStage = SettingsStage.CLOSED,
   val selectedSettingsSection: LauncherSettingsSection? = null,
   val launcherSettings: LauncherSettingsConfig = LauncherSettingsConfig(),
+  val isJarvisSheetOpen: Boolean = false,
 )
 
 class MainScreenViewModel(
@@ -365,12 +366,15 @@ class MainScreenViewModel(
       is HudCommand.SetRefreshRate -> {
         setRefreshRatePreset(command.hz, closeConsole = true)
       }
+      HudCommand.OpenJarvis -> {
+        openJarvisSheet()
+      }
       HudCommand.ShowHelp -> {
         _launcherState.update {
-          it.copy(commandHint = "!PIN !WIFI !BT !DND !HZ !BAT !RAM !WX !OTA")
+          it.copy(commandHint = "!JARVIS !PIN !WIFI !BT !DND !BAT !RAM !WX !OTA")
         }
         _feedbackEvents.tryEmit(
-          HudFeedbackEvent("Commands: !pin !wifi !bt !dnd !refresh !bat !ram !wx !ota !usage !notif !home ?web =math")
+          HudFeedbackEvent("Commands: !jarvis !pin !wifi !bt !dnd !refresh !bat !ram !wx !ota !usage !notif !home ?web =math")
         )
       }
       is HudCommand.WebSearch -> {
@@ -498,7 +502,8 @@ class MainScreenViewModel(
       HudCommand.ToggleDnd -> if (shizukuReady) "DND  ·  TOGGLE" else "DND  ·  SETTINGS"
       is HudCommand.SetRefreshRate ->
         if (command.hz == null) "HZ  ·  AUTO" else "HZ  ·  ${command.hz}HZ"
-      HudCommand.ShowHelp -> "!PIN !WIFI !BT !DND !BAT !RAM !WX !OTA"
+      HudCommand.OpenJarvis -> "JARVIS  ·  BASEPLATE"
+      HudCommand.ShowHelp -> "!JARVIS !PIN !WIFI !BT !DND !BAT !RAM !WX !OTA"
       is HudCommand.WebSearch ->
         if (command.query.isBlank()) "WEB  ·  TYPE QUERY" else "WEB  ·  ${command.query.take(18).uppercase()}"
       is HudCommand.Unknown -> "UNKNOWN CMD  ·  !HELP"
@@ -756,7 +761,30 @@ class MainScreenViewModel(
         searchQuery = "",
         commandHint = null,
         isAmbientCentered = false,
+        isJarvisSheetOpen = false,
       )
+    }
+  }
+
+  fun openJarvisSheet() {
+    _launcherState.update { state ->
+      state.copy(
+        isJarvisSheetOpen = true,
+        isSpotlightSearchOpen = false,
+        isAppBrowseOpen = false,
+        browseGroup = null,
+        searchQuery = "",
+        commandHint = null,
+        isAmbientCentered = false,
+        settingsStage = SettingsStage.CLOSED,
+        selectedSettingsSection = null,
+      )
+    }
+  }
+
+  fun closeJarvisSheet() {
+    _launcherState.update { state ->
+      if (!state.isJarvisSheetOpen) state else state.copy(isJarvisSheetOpen = false)
     }
   }
 
@@ -909,6 +937,7 @@ class MainScreenViewModel(
       if (state.isSpotlightSearchOpen ||
         state.isAppBrowseOpen ||
         state.settingsStage != SettingsStage.CLOSED ||
+        state.isJarvisSheetOpen ||
         state.isAmbientCentered
       ) {
         state
@@ -942,6 +971,10 @@ class MainScreenViewModel(
 
   fun handleBackPress(): Boolean {
     val current = _launcherState.value
+    if (current.isJarvisSheetOpen) {
+      closeJarvisSheet()
+      return true
+    }
     if (current.isSpotlightSearchOpen) {
       closeSpotlightSearch()
       return true

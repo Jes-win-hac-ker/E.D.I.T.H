@@ -22,6 +22,7 @@ sealed interface HudCommand {
   data object ToggleBluetooth : HudCommand
   data object ToggleDnd : HudCommand
   data class SetRefreshRate(val hz: Int?) : HudCommand
+  data object OpenJarvis : HudCommand
   data object ShowHelp : HudCommand
   data class WebSearch(val query: String) : HudCommand
   data class Unknown(val raw: String) : HudCommand
@@ -75,6 +76,7 @@ private fun parseBangCommand(trimmed: String): HudCommand {
     "wifi" -> if (arg.isEmpty()) HudCommand.ToggleWifi else HudCommand.Unknown(trimmed)
     "bt", "bluetooth" -> if (arg.isEmpty()) HudCommand.ToggleBluetooth else HudCommand.Unknown(trimmed)
     "dnd" -> if (arg.isEmpty()) HudCommand.ToggleDnd else HudCommand.Unknown(trimmed)
+    "jarvis", "agent" -> if (arg.isEmpty()) HudCommand.OpenJarvis else HudCommand.Unknown(trimmed)
     "refresh" -> when {
       arg.isEmpty() || arg.equals("auto", ignoreCase = true) -> HudCommand.SetRefreshRate(null)
       else -> arg.toIntOrNull()?.takeIf { it > 0 }?.let { HudCommand.SetRefreshRate(it) }

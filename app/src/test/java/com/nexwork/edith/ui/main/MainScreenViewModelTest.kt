@@ -327,6 +327,28 @@ class MainScreenViewModelTest {
     assertEquals("OTA  ·  CHECK RELEASE", viewModel.launcherState.value.commandHint)
     assertTrue(viewModel.submitConsoleQuery())
   }
+
+  @Test
+  fun jarvisDrawer_opensViaCommandAndUnwindsViaBack() = runTest {
+    val viewModel = MainScreenViewModel(FakeMyModelRepository())
+    assertFalse(viewModel.launcherState.value.isJarvisSheetOpen)
+
+    viewModel.openSpotlightSearch()
+    viewModel.onSearchQueryChange("!jarvis")
+    assertEquals("JARVIS  ·  BASEPLATE", viewModel.launcherState.value.commandHint)
+    assertTrue(viewModel.submitConsoleQuery())
+    assertTrue(viewModel.launcherState.value.isJarvisSheetOpen)
+    assertFalse(viewModel.launcherState.value.isSpotlightSearchOpen)
+
+    // Cannot enter ambient center while Jarvis sheet is open
+    viewModel.enterAmbientCenter()
+    assertFalse(viewModel.launcherState.value.isAmbientCentered)
+
+    // Back closes Jarvis drawer cleanly
+    assertTrue(viewModel.handleBackPress())
+    assertFalse(viewModel.launcherState.value.isJarvisSheetOpen)
+    assertFalse(viewModel.handleBackPress())
+  }
 }
 
 private class FakeMyModelRepository : DataRepository {
