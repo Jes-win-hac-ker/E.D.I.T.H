@@ -2,10 +2,13 @@ package com.nexwork.edith.ui.hud
 
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.text.format.DateFormat
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -17,9 +20,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -37,6 +44,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.TransformOrigin
@@ -46,15 +54,30 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nexwork.edith.data.OtaState
-import com.nexwork.edith.jarvis.ui.JarvisBaseplatePanel
+import com.nexwork.edith.jarvis.core.JarvisEventRecord
+import com.nexwork.edith.jarvis.core.JarvisRuntime
+import com.nexwork.edith.jarvis.core.TriageStatus
 import com.nexwork.edith.model.DeviceTelemetry
+import com.nexwork.edith.model.JarvisSettingsSection
 import com.nexwork.edith.model.LauncherAccentPreset
 import com.nexwork.edith.model.LauncherFontStyle
 import com.nexwork.edith.model.LauncherSettingsConfig
@@ -63,8 +86,12 @@ import com.nexwork.edith.model.LiveWeather
 import com.nexwork.edith.model.SettingsStage
 import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.LocalLauncherStyle
+import com.nexwork.edith.theme.ObsidianBgTop
+import com.nexwork.edith.theme.TextPureWhite
 import com.nexwork.edith.theme.TextSilver
+import com.nexwork.edith.theme.WarmSunAccent
 import com.nexwork.edith.theme.toColor
+import java.util.Date
 import kotlin.math.abs
 import kotlin.math.asin
 import kotlin.math.cos
@@ -222,6 +249,9 @@ fun HudSettingsTree(
   onOpenNotificationSettings: () -> Unit,
   onCheckOta: () -> Unit,
   modifier: Modifier = Modifier,
+  selectedJarvisSection: JarvisSettingsSection? = null,
+  onSelectJarvisSection: (JarvisSettingsSection?) -> Unit = {},
+  onOpenJarvisDrawer: () -> Unit = {},
   onMountedChange: (Boolean) -> Unit = {},
 ) {
   var rootMounted by remember { mutableStateOf(false) }
@@ -243,6 +273,7 @@ fun HudSettingsTree(
     HudSettingsOverlayLayer(
       stage = stage,
       selectedSection = selectedSection,
+      selectedJarvisSection = selectedJarvisSection,
       settings = settings,
       telemetry = telemetry,
       liveWeather = liveWeather,
@@ -252,6 +283,8 @@ fun HudSettingsTree(
       screenWidth = maxWidth,
       screenHeight = maxHeight,
       onSelectSection = onSelectSection,
+      onSelectJarvisSection = onSelectJarvisSection,
+      onOpenJarvisDrawer = onOpenJarvisDrawer,
       onBackStep = onBackStep,
       onAccentChange = onAccentChange,
       onFontChange = onFontChange,
@@ -504,10 +537,10 @@ fun HudSettingsRootLayer(
           },
         )
         CompactHudCard(
-          eyebrow = "02 // BASEPLATE",
+          eyebrow = "02 // AI AGENT",
           title = "JARVIS",
-          pipColor = accent.copy(alpha = 0.85f),
-          focused = false,
+          pipColor = accent,
+          focused = true,
           accent = accent,
           titleSizeSp = 11.5f,
           reveal = { staggeredReveal(cardsMaster, 1, 3, stagger = 0.14f) },
@@ -571,7 +604,11 @@ fun HudSettingsOverlayLayer(
   onCheckOta: () -> Unit,
   onMountedChange: (Boolean) -> Unit,
   modifier: Modifier = Modifier,
+  selectedJarvisSection: JarvisSettingsSection? = null,
+  onSelectJarvisSection: (JarvisSettingsSection?) -> Unit = {},
+  onOpenJarvisDrawer: () -> Unit = {},
 ) {
+  val context = LocalContext.current
   val accent = LocalLauncherStyle.current.accent
   val haptic = LocalHapticFeedback.current
   val density = LocalDensity.current
@@ -585,12 +622,17 @@ fun HudSettingsOverlayLayer(
   var mounted by remember { mutableStateOf(stage != SettingsStage.CLOSED) }
   var retainedStage by remember { mutableStateOf(stage) }
   var retainedSection by remember { mutableStateOf(selectedSection) }
+  var retainedJarvisSection by remember { mutableStateOf(selectedJarvisSection) }
 
   LaunchedEffect(mounted) {
     currentOnMountedChange.value(mounted)
   }
 
   LaunchedEffect(stage) {
+    if (stage == SettingsStage.AGENT_PLACEHOLDER) {
+      JarvisRuntime.ensureInitialized(context)
+      JarvisRuntime.refreshEnvironmentStatus(context)
+    }
     if (stage == SettingsStage.CLOSED) {
       if (!mounted) {
         masterExitAnim.snapTo(0f)
@@ -598,6 +640,7 @@ fun HudSettingsOverlayLayer(
         detailCardAnim.snapTo(0f)
         retainedStage = SettingsStage.CLOSED
         retainedSection = null
+        retainedJarvisSection = null
         return@LaunchedEffect
       }
       val ms = (masterExitAnim.value.coerceIn(0f, 1f) * EXIT_DURATION_MS).roundToInt().coerceAtLeast(1)
@@ -606,6 +649,7 @@ fun HudSettingsOverlayLayer(
       detailCardAnim.snapTo(0f)
       retainedStage = SettingsStage.CLOSED
       retainedSection = null
+      retainedJarvisSection = null
       mounted = false
       return@LaunchedEffect
     }
@@ -617,6 +661,7 @@ fun HudSettingsOverlayLayer(
       if (wasUnmounted) {
         retainedStage = SettingsStage.ROOT_BRANCHES
         retainedSection = null
+        retainedJarvisSection = null
         branchTreeAnim.snapTo(0f)
         detailCardAnim.snapTo(0f)
         masterExitAnim.animateTo(1f, tween(220, easing = LinearEasing))
@@ -645,6 +690,7 @@ fun HudSettingsOverlayLayer(
               }
             }
             retainedSection = null
+            retainedJarvisSection = null
             retainedStage = SettingsStage.ROOT_BRANCHES
           }
         }
@@ -652,9 +698,8 @@ fun HudSettingsOverlayLayer(
     } else {
       val switchedBranch = retainedStage != stage
       retainedStage = stage
-      if (stage != SettingsStage.LAUNCHER_TREE) {
-        retainedSection = null
-      }
+      if (stage != SettingsStage.LAUNCHER_TREE) retainedSection = null
+      if (stage != SettingsStage.AGENT_PLACEHOLDER) retainedJarvisSection = null
       masterExitAnim.snapTo(1f)
       if (switchedBranch) {
         branchTreeAnim.snapTo(0f)
@@ -668,14 +713,23 @@ fun HudSettingsOverlayLayer(
     }
   }
 
-  LaunchedEffect(stage, selectedSection) {
-    if (stage != SettingsStage.LAUNCHER_TREE) return@LaunchedEffect
-    if (selectedSection != null) {
-      if (detailCardAnim.value > 0.01f && retainedSection != null && retainedSection != selectedSection) {
+  LaunchedEffect(stage, selectedSection, selectedJarvisSection) {
+    if (stage != SettingsStage.LAUNCHER_TREE && stage != SettingsStage.AGENT_PLACEHOLDER) {
+      return@LaunchedEffect
+    }
+    val nextLauncher = if (stage == SettingsStage.LAUNCHER_TREE) selectedSection else null
+    val nextJarvis = if (stage == SettingsStage.AGENT_PLACEHOLDER) selectedJarvisSection else null
+    val hasSelection = nextLauncher != null || nextJarvis != null
+    val switchedDetail = (nextLauncher != null && retainedSection != null && retainedSection != nextLauncher) ||
+      (nextJarvis != null && retainedJarvisSection != null && retainedJarvisSection != nextJarvis)
+
+    if (hasSelection) {
+      if (detailCardAnim.value > 0.01f && switchedDetail) {
         val switchOutMs = (detailCardAnim.value.coerceIn(0f, 1f) * 280f).roundToInt().coerceAtLeast(1)
         detailCardAnim.animateTo(0f, tween(switchOutMs, easing = LinearEasing))
       }
-      retainedSection = selectedSection
+      retainedSection = nextLauncher
+      retainedJarvisSection = nextJarvis
       if (branchTreeAnim.value < 0.35f) {
         delay(180L)
       }
@@ -687,8 +741,10 @@ fun HudSettingsOverlayLayer(
         .coerceAtLeast(1)
       detailCardAnim.animateTo(0f, tween(ms, easing = LinearEasing))
       retainedSection = null
+      retainedJarvisSection = null
     } else {
       retainedSection = null
+      retainedJarvisSection = null
     }
   }
 
@@ -698,6 +754,7 @@ fun HudSettingsOverlayLayer(
   val isInteractive = stage != SettingsStage.CLOSED && exitP > 0.55f
   val activeStage = retainedStage
   val activeSection = if (activeStage == SettingsStage.LAUNCHER_TREE) retainedSection else null
+  val activeJarvisSection = if (activeStage == SettingsStage.AGENT_PLACEHOLDER) retainedJarvisSection else null
   val effectiveTreeP = branchTreeAnim.value * exitP
   val effectiveDetailP = detailCardAnim.value * exitP
 
@@ -708,233 +765,110 @@ fun HudSettingsOverlayLayer(
         alpha = (exitP / 0.16f).coerceIn(0f, 1f)
       },
   ) {
-    // ------------------------------------------------------------------
-    // STAGE 2 & 3: LAUNCHER Deep Tree (Sunken Card 01 Origin -> Left Tree -> Right Detail HUD)
-    // ------------------------------------------------------------------
     if (activeStage == SettingsStage.LAUNCHER_TREE) {
-      val sections = LauncherSettingsSection.entries
-      val trunkXDp = 16.dp
-      val leftCardXDp = 28.dp
-      val leftCardWDp = 116.dp
-      val cardHeightDp = 52.dp
-      val cardGapDp = 10.dp
-      val topRowDp = 92.dp
-      val rightElbowXDp = leftCardXDp + leftCardWDp + 10.dp
-      val rightCardLeftDp = rightElbowXDp + 10.dp
-      val rightCardWDp = (geo.widthDp - rightCardLeftDp - 14.dp).coerceAtLeast(150.dp)
-      val rightCardHDp = cardHeightDp * 5 + cardGapDp * 4
-
-      val trunkXPx = with(density) { trunkXDp.toPx() }
-      val leftCardXPx = with(density) { leftCardXDp.toPx() }
-      val leftCardRightPx = with(density) { (leftCardXDp + leftCardWDp).toPx() }
-      val cardHeightPx = with(density) { cardHeightDp.toPx() }
-      val cardGapPx = with(density) { cardGapDp.toPx() }
-      val topRowPx = with(density) { topRowDp.toPx() }
-      val elbowXPx = with(density) { rightElbowXDp.toPx() }
-      val rightCardLeftPx = with(density) { rightCardLeftDp.toPx() }
-      val rightCardWPx = with(density) { rightCardWDp.toPx() }
-      val rightCardHPx = with(density) { rightCardHDp.toPx() }
-
-      val origin = geo.sunkenCardTopCenter(0)
-      val rowMidY: (Int) -> Float = { idx -> topRowPx + idx * (cardHeightPx + cardGapPx) + cardHeightPx * 0.5f }
-      val row4BottomPx = topRowPx + 5f * cardHeightPx + 4f * cardGapPx
-      val elbowTurnY = ((row4BottomPx + origin.y) * 0.5f)
-        .coerceAtMost(origin.y - with(density) { 10.dp.toPx() })
-        .coerceAtLeast(rowMidY(4) + with(density) { 8.dp.toPx() })
-
-      Canvas(modifier = Modifier.fillMaxSize()) {
-        if (effectiveTreeP > 0.005f) {
-          // 1. Laser rises directly from sunken 01 LAUNCHER top center, turns 90 deg to trunkX, climbs to row 0
-          val stemP = hudEaseOutCubic(phase(effectiveTreeP, 0.00f, 0.28f))
-          if (stemP > 0.005f) {
-            val tip = drawOrthogonalPolyline(
-              points = listOf(
-                origin,
-                Offset(origin.x, elbowTurnY),
-                Offset(trunkXPx, elbowTurnY),
-                Offset(trunkXPx, rowMidY(0)),
-              ),
-              progress = stemP,
-              color = accent.copy(alpha = 0.88f),
-              strokeWidth = 1.2f.dp.toPx(),
-            )
-            if (stemP < 0.97f) drawLaserTip(tip, accent)
-          }
-
-          // 2. Sharp 90 deg right turns into each of the 5 left CompactHudCards
-          sections.forEachIndexed { idx, section ->
-            val branchStart = 0.16f + idx * 0.09f
-            val branchP = hudEaseOutCubic(phase(effectiveTreeP, branchStart, (branchStart + 0.18f).coerceAtMost(1f)))
-            val midY = rowMidY(idx)
-            val isSelected = section == activeSection
-            if (branchP > 0.005f) {
-              val tip = drawOrthogonalPolyline(
-                points = listOf(
-                  Offset(trunkXPx, midY),
-                  Offset(leftCardXPx, midY),
-                ),
-                progress = branchP,
-                color = if (isSelected) accent else TreeRailColor.copy(alpha = 0.84f),
-                strokeWidth = 1.15f.dp.toPx(),
-              )
-              if (branchP < 0.96f) drawLaserTip(tip, accent)
-            }
-          }
-        }
-
-        // 3. Stage 3 orthogonal 90 deg elbow connector from pressed left card's right edge -> right HUD container
-        val activeIdx = activeSection?.let { sections.indexOf(it) } ?: -1
-        if (activeIdx >= 0 && effectiveDetailP > 0.005f) {
-          val linkP = hudEaseOutCubic(phase(effectiveDetailP, 0.00f, 0.30f))
-          val boxP = hudEaseOutCubic(phase(effectiveDetailP, 0.14f, 0.96f))
-          val sourceY = rowMidY(activeIdx)
-          val targetY = topRowPx + 32.dp.toPx()
-
-          if (linkP > 0.005f) {
-            val tip = drawOrthogonalPolyline(
-              points = listOf(
-                Offset(leftCardRightPx, sourceY),
-                Offset(elbowXPx, sourceY),
-                Offset(elbowXPx, targetY),
-                Offset(rightCardLeftPx, targetY),
-              ),
-              progress = linkP,
-              color = accent.copy(alpha = 0.92f),
-              strokeWidth = 1.25f.dp.toPx(),
-            )
-            if (linkP < 0.97f) drawLaserTip(tip, accent)
-          }
-
-          if (boxP > 0.005f) {
-            drawHudContainerFrame(
-              left = rightCardLeftPx,
-              top = topRowPx,
-              width = rightCardWPx,
-              height = rightCardHPx,
-              progress = boxP,
-              accent = accent,
-            )
-          }
-        }
+      // STAGE 2 & 3: Branch 01 LAUNCHER Deep Tree (Sunken Card 01 -> Left Tree -> Right Detail HUD)
+      OrthogonalBranchTreeStage(
+        origin = geo.sunkenCardTopCenter(0),
+        geo = geo,
+        sections = LauncherSettingsSection.entries,
+        activeSection = activeSection,
+        tagOf = { it.tag },
+        titleOf = { it.title },
+        effectiveTreeP = effectiveTreeP,
+        effectiveDetailP = effectiveDetailP,
+        isInteractive = isInteractive,
+        accent = accent,
+        onSelectSection = onSelectSection,
+      ) { section, innerReveal, innerEnabled ->
+        LauncherDetailCardContent(
+          section = section,
+          reveal = innerReveal,
+          enabled = innerEnabled,
+          settings = settings,
+          telemetry = telemetry,
+          liveWeather = liveWeather,
+          isDefaultLauncher = isDefaultLauncher,
+          hasNotificationAccess = hasNotificationAccess,
+          otaState = otaState,
+          accent = accent,
+          onAccentChange = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onAccentChange(it)
+          },
+          onFontChange = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onFontChange(it)
+          },
+          onFontScaleChange = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onFontScaleChange(it)
+          },
+          onUse24HourChange = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onUse24HourChange(it)
+          },
+          onRefreshRateSelect = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onRefreshRateSelect(it)
+          },
+          onRefreshWeather = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onRefreshWeather()
+          },
+          onOpenAlarms = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onOpenAlarms()
+          },
+          onOpenHomeSettings = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onOpenHomeSettings()
+          },
+          onOpenUsageSettings = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onOpenUsageSettings()
+          },
+          onOpenNotificationSettings = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onOpenNotificationSettings()
+          },
+          onCheckOta = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onCheckOta()
+          },
+        )
       }
-
-      // Left column 5 CompactHudCards
-      Column(
-        modifier = Modifier
-          .padding(start = leftCardXDp, top = topRowDp)
-          .width(leftCardWDp),
-        verticalArrangement = Arrangement.spacedBy(cardGapDp),
-      ) {
-        sections.forEachIndexed { idx, section ->
-          val cardReveal = hudEaseOutCubic(
-            phase(effectiveTreeP, 0.22f + idx * 0.09f, (0.76f + idx * 0.06f).coerceAtMost(1f)),
-          )
-          val isSelected = section == activeSection
-          CompactHudCard(
-            eyebrow = section.tag,
-            title = section.title,
-            pipColor = if (isSelected) accent else TreeRailColor.copy(alpha = 0.55f),
-            focused = isSelected,
-            accent = accent,
-            titleSizeSp = 10.6f,
-            reveal = { cardReveal },
-            enabled = isInteractive && cardReveal > 0.30f,
-            modifier = Modifier.fillMaxWidth().height(cardHeightDp),
-            onClick = {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              onSelectSection(if (isSelected) null else section)
-            },
-          )
-        }
+    } else if (activeStage == SettingsStage.AGENT_PLACEHOLDER) {
+      // STAGE 2 & 3: Branch 02 JARVIS Deep Tree (Sunken Card 02 -> Left Tree -> Right Detail HUD)
+      val jarvisState by JarvisRuntime.uiState.collectAsStateWithLifecycle()
+      OrthogonalBranchTreeStage(
+        origin = geo.sunkenCardTopCenter(1),
+        geo = geo,
+        sections = JarvisSettingsSection.entries,
+        activeSection = activeJarvisSection,
+        tagOf = { it.tag },
+        titleOf = { it.title },
+        effectiveTreeP = effectiveTreeP,
+        effectiveDetailP = effectiveDetailP,
+        isInteractive = isInteractive,
+        accent = accent,
+        onSelectSection = onSelectJarvisSection,
+      ) { section, innerReveal, innerEnabled ->
+        JarvisDetailCardContent(
+          section = section,
+          reveal = innerReveal,
+          enabled = innerEnabled,
+          uiState = jarvisState,
+          accent = accent,
+          onOpenJarvisDrawer = onOpenJarvisDrawer,
+        )
       }
-
-      // Right-hand Stage 3 Detail HUD Container + Staggered Option CompactHudCards
-      if (activeSection != null && effectiveDetailP > 0.06f) {
-        val innerReveal = hudEaseOutCubic(phase(effectiveDetailP, 0.16f, 0.86f))
-        Box(
-          modifier = Modifier
-            .padding(start = rightCardLeftDp, top = topRowDp)
-            .width(rightCardWDp)
-            .height(rightCardHDp)
-            .padding(10.dp),
-        ) {
-          LauncherDetailCardContent(
-            section = activeSection,
-            reveal = { innerReveal },
-            enabled = isInteractive && innerReveal > 0.35f,
-            settings = settings,
-            telemetry = telemetry,
-            liveWeather = liveWeather,
-            isDefaultLauncher = isDefaultLauncher,
-            hasNotificationAccess = hasNotificationAccess,
-            otaState = otaState,
-            accent = accent,
-            onAccentChange = {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              onAccentChange(it)
-            },
-            onFontChange = {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              onFontChange(it)
-            },
-            onFontScaleChange = {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              onFontScaleChange(it)
-            },
-            onUse24HourChange = {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              onUse24HourChange(it)
-            },
-            onRefreshRateSelect = {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              onRefreshRateSelect(it)
-            },
-            onRefreshWeather = {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              onRefreshWeather()
-            },
-            onOpenAlarms = {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              onOpenAlarms()
-            },
-            onOpenHomeSettings = {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              onOpenHomeSettings()
-            },
-            onOpenUsageSettings = {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              onOpenUsageSettings()
-            },
-            onOpenNotificationSettings = {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              onOpenNotificationSettings()
-            },
-            onCheckOta = {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              onCheckOta()
-            },
-          )
-        }
-      }
-    } else if (activeStage == SettingsStage.AGENT_PLACEHOLDER || activeStage == SettingsStage.SHIZUKU_PLACEHOLDER) {
-      // Branch 02 (JARVIS Baseplate) or Branch 03 (SHIZUKU standby): laser starts from exact sunken card top center
-      val isAgent = activeStage == SettingsStage.AGENT_PLACEHOLDER
-      val originIdx = if (isAgent) 1 else 2
-      val origin = geo.sunkenCardTopCenter(originIdx)
-
-      val cardWDp = if (isAgent) {
-        (geo.widthDp - 24.dp).coerceIn(280.dp, 420.dp)
-      } else {
-        (geo.widthDp - 56.dp).coerceIn(220.dp, 312.dp)
-      }
-      val cardTopDp = if (isAgent) 44.dp else 154.dp
-      val cardHDp = if (isAgent) {
-        val originYDp = with(density) { origin.y.toDp() }
-        (originYDp - cardTopDp - 18.dp).coerceIn(320.dp, 580.dp)
-      } else {
-        152.dp
-      }
+    } else if (activeStage == SettingsStage.SHIZUKU_PLACEHOLDER) {
+      // Standby Branch 03 (SHIZUKU): laser starts from exact sunken Card 03 top center
+      val origin = geo.sunkenCardTopCenter(2)
+      val cardWDp = (geo.widthDp - 56.dp).coerceIn(220.dp, 312.dp)
+      val cardHDp = 128.dp
       val cardLeftDp = (geo.widthDp - cardWDp) * 0.5f
+      val cardTopDp = 154.dp
 
       val cardLeftPx = with(density) { cardLeftDp.toPx() }
       val cardTopPx = with(density) { cardTopDp.toPx() }
@@ -950,16 +884,12 @@ fun HudSettingsOverlayLayer(
         val boxP = hudEaseOutCubic(phase(effectiveTreeP, 0.24f, 0.96f))
 
         if (stemP > 0.005f) {
-          val pts = if (abs(origin.x - cardCenterX) < 2f) {
-            listOf(origin, Offset(cardCenterX, cardBottomPx))
-          } else {
-            listOf(
-              origin,
-              Offset(origin.x, elbowY),
-              Offset(cardCenterX, elbowY),
-              Offset(cardCenterX, cardBottomPx),
-            )
-          }
+          val pts = listOf(
+            origin,
+            Offset(origin.x, elbowY),
+            Offset(cardCenterX, elbowY),
+            Offset(cardCenterX, cardBottomPx),
+          )
           val tip = drawOrthogonalPolyline(
             points = pts,
             progress = stemP,
@@ -990,54 +920,191 @@ fun HudSettingsOverlayLayer(
             .height(cardHDp)
             .padding(14.dp),
         ) {
-          if (isAgent) {
-            Box(
-              modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer { alpha = bodyReveal },
-            ) {
-              JarvisBaseplatePanel(
-                onClose = onBackStep,
-                closeLabel = "< BACK",
-                modifier = Modifier.fillMaxSize(),
-              )
-            }
-          } else {
-            Column(
-              modifier = Modifier.fillMaxSize(),
-              verticalArrangement = Arrangement.SpaceBetween,
-            ) {
-              Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                HudHeaderDecryptBlock(
-                  eyebrow = "SYS.03 // SHIZUKU BRIDGE",
-                  title = "STANDBY // OS MONET",
-                  reveal = { phase(bodyReveal, 0f, 0.72f) },
-                  accent = accent,
-                )
-                Text(
-                  text = "Reserved for OS-wide Monet palette & voice styling.",
-                  color = TextSilver.copy(alpha = phase(bodyReveal, 0.35f, 1.0f)),
-                  fontSize = 11.5.sp,
-                  lineHeight = 15.sp,
-                )
-              }
-              CompactHudCard(
-                title = "< BACK TO BRANCHES",
-                reveal = { phase(bodyReveal, 0.28f, 1.0f) },
-                accent = accent,
-                focused = true,
-                titleSizeSp = 10f,
-                centerText = true,
-                enabled = isInteractive && bodyReveal > 0.5f,
-                modifier = Modifier.fillMaxWidth().height(34.dp),
-                onClick = {
-                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                  onBackStep()
-                },
-              )
-            }
+          Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            HudHeaderDecryptBlock(
+              eyebrow = "SYS.03 // SHIZUKU BRIDGE",
+              title = "STANDBY // OS MONET",
+              reveal = { phase(bodyReveal, 0f, 0.72f) },
+              accent = accent,
+            )
+            Text(
+              text = "Reserved for OS-wide Monet palette & voice styling.",
+              color = TextSilver.copy(alpha = phase(bodyReveal, 0.35f, 1.0f)),
+              fontSize = 11.5.sp,
+              lineHeight = 15.sp,
+            )
           }
         }
+      }
+    }
+  }
+}
+
+/**
+ * Shared two-column orthogonal HUD tree stage used identically by Branch 01 (`LAUNCHER`) and
+ * Branch 02 (`JARVIS`), originating laser geometry from the sunken root card's top center into
+ * 5 left-rail [CompactHudCard]s and extending a 90-degree elbow into a dual-traced right panel.
+ */
+@Composable
+private fun <T> OrthogonalBranchTreeStage(
+  origin: Offset,
+  geo: SettingsTreeGeometry,
+  sections: List<T>,
+  activeSection: T?,
+  tagOf: (T) -> String,
+  titleOf: (T) -> String,
+  effectiveTreeP: Float,
+  effectiveDetailP: Float,
+  isInteractive: Boolean,
+  accent: Color,
+  onSelectSection: (T?) -> Unit,
+  detailContent: @Composable (section: T, reveal: () -> Float, enabled: Boolean) -> Unit,
+) {
+  val haptic = LocalHapticFeedback.current
+  val density = LocalDensity.current
+
+  val trunkXDp = 16.dp
+  val leftCardXDp = 28.dp
+  val leftCardWDp = 116.dp
+  val cardHeightDp = 52.dp
+  val cardGapDp = 10.dp
+  val topRowDp = 92.dp
+  val rightElbowXDp = leftCardXDp + leftCardWDp + 10.dp
+  val rightCardLeftDp = rightElbowXDp + 10.dp
+  val rightCardWDp = (geo.widthDp - rightCardLeftDp - 14.dp).coerceAtLeast(150.dp)
+  val rightCardHDp = cardHeightDp * sections.size + cardGapDp * (sections.size - 1).coerceAtLeast(0)
+
+  val trunkXPx = with(density) { trunkXDp.toPx() }
+  val leftCardXPx = with(density) { leftCardXDp.toPx() }
+  val leftCardRightPx = with(density) { (leftCardXDp + leftCardWDp).toPx() }
+  val cardHeightPx = with(density) { cardHeightDp.toPx() }
+  val cardGapPx = with(density) { cardGapDp.toPx() }
+  val topRowPx = with(density) { topRowDp.toPx() }
+  val elbowXPx = with(density) { rightElbowXDp.toPx() }
+  val rightCardLeftPx = with(density) { rightCardLeftDp.toPx() }
+  val rightCardWPx = with(density) { rightCardWDp.toPx() }
+  val rightCardHPx = with(density) { rightCardHDp.toPx() }
+
+  val rowMidY: (Int) -> Float = { idx -> topRowPx + idx * (cardHeightPx + cardGapPx) + cardHeightPx * 0.5f }
+  val lastRowIdx = (sections.size - 1).coerceAtLeast(0)
+  val rowBottomPx = topRowPx + sections.size * cardHeightPx + lastRowIdx * cardGapPx
+  val elbowTurnY = ((rowBottomPx + origin.y) * 0.5f)
+    .coerceAtMost(origin.y - with(density) { 10.dp.toPx() })
+    .coerceAtLeast(rowMidY(lastRowIdx) + with(density) { 8.dp.toPx() })
+
+  Box(modifier = Modifier.fillMaxSize()) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+      if (effectiveTreeP > 0.005f) {
+        val stemP = hudEaseOutCubic(phase(effectiveTreeP, 0.00f, 0.28f))
+        if (stemP > 0.005f) {
+          val tip = drawOrthogonalPolyline(
+            points = listOf(
+              origin,
+              Offset(origin.x, elbowTurnY),
+              Offset(trunkXPx, elbowTurnY),
+              Offset(trunkXPx, rowMidY(0)),
+            ),
+            progress = stemP,
+            color = accent.copy(alpha = 0.88f),
+            strokeWidth = 1.2f.dp.toPx(),
+          )
+          if (stemP < 0.97f) drawLaserTip(tip, accent)
+        }
+
+        sections.forEachIndexed { idx, section ->
+          val branchStart = 0.16f + idx * 0.09f
+          val branchP = hudEaseOutCubic(phase(effectiveTreeP, branchStart, (branchStart + 0.18f).coerceAtMost(1f)))
+          val midY = rowMidY(idx)
+          val isSelected = section == activeSection
+          if (branchP > 0.005f) {
+            val tip = drawOrthogonalPolyline(
+              points = listOf(
+                Offset(trunkXPx, midY),
+                Offset(leftCardXPx, midY),
+              ),
+              progress = branchP,
+              color = if (isSelected) accent else TreeRailColor.copy(alpha = 0.84f),
+              strokeWidth = 1.15f.dp.toPx(),
+            )
+            if (branchP < 0.96f) drawLaserTip(tip, accent)
+          }
+        }
+      }
+
+      val activeIdx = activeSection?.let { sections.indexOf(it) } ?: -1
+      if (activeIdx >= 0 && effectiveDetailP > 0.005f) {
+        val linkP = hudEaseOutCubic(phase(effectiveDetailP, 0.00f, 0.30f))
+        val boxP = hudEaseOutCubic(phase(effectiveDetailP, 0.14f, 0.96f))
+        val sourceY = rowMidY(activeIdx)
+        val targetY = topRowPx + 32.dp.toPx()
+
+        if (linkP > 0.005f) {
+          val tip = drawOrthogonalPolyline(
+            points = listOf(
+              Offset(leftCardRightPx, sourceY),
+              Offset(elbowXPx, sourceY),
+              Offset(elbowXPx, targetY),
+              Offset(rightCardLeftPx, targetY),
+            ),
+            progress = linkP,
+            color = accent.copy(alpha = 0.92f),
+            strokeWidth = 1.25f.dp.toPx(),
+          )
+          if (linkP < 0.97f) drawLaserTip(tip, accent)
+        }
+
+        if (boxP > 0.005f) {
+          drawHudContainerFrame(
+            left = rightCardLeftPx,
+            top = topRowPx,
+            width = rightCardWPx,
+            height = rightCardHPx,
+            progress = boxP,
+            accent = accent,
+          )
+        }
+      }
+    }
+
+    Column(
+      modifier = Modifier
+        .padding(start = leftCardXDp, top = topRowDp)
+        .width(leftCardWDp),
+      verticalArrangement = Arrangement.spacedBy(cardGapDp),
+    ) {
+      sections.forEachIndexed { idx, section ->
+        val cardReveal = hudEaseOutCubic(
+          phase(effectiveTreeP, 0.22f + idx * 0.09f, (0.76f + idx * 0.06f).coerceAtMost(1f)),
+        )
+        val isSelected = section == activeSection
+        CompactHudCard(
+          eyebrow = tagOf(section),
+          title = titleOf(section),
+          pipColor = if (isSelected) accent else TreeRailColor.copy(alpha = 0.55f),
+          focused = isSelected,
+          accent = accent,
+          titleSizeSp = 10.6f,
+          reveal = { cardReveal },
+          enabled = isInteractive && cardReveal > 0.30f,
+          modifier = Modifier.fillMaxWidth().height(cardHeightDp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onSelectSection(if (isSelected) null else section)
+          },
+        )
+      }
+    }
+
+    if (activeSection != null && effectiveDetailP > 0.06f) {
+      val innerReveal = hudEaseOutCubic(phase(effectiveDetailP, 0.16f, 0.86f))
+      Box(
+        modifier = Modifier
+          .padding(start = rightCardLeftDp, top = topRowDp)
+          .width(rightCardWDp)
+          .height(rightCardHDp)
+          .padding(10.dp),
+      ) {
+        detailContent(activeSection, { innerReveal }, isInteractive && innerReveal > 0.35f)
       }
     }
   }
@@ -1293,6 +1360,604 @@ private fun LauncherDetailCardContent(
           onClick = onCheckOta,
         )
       }
+    }
+  }
+}
+
+@Composable
+private fun JarvisDetailCardContent(
+  section: JarvisSettingsSection,
+  reveal: () -> Float,
+  enabled: Boolean,
+  uiState: com.nexwork.edith.jarvis.core.JarvisUiState,
+  accent: Color,
+  onOpenJarvisDrawer: () -> Unit,
+) {
+  val context = LocalContext.current
+  val haptic = LocalHapticFeedback.current
+  val focusManager = LocalFocusManager.current
+  val keyboardController = LocalSoftwareKeyboardController.current
+  val scrollState = rememberScrollState()
+  var apiKeyInput by remember { mutableStateOf("") }
+  var revealApiKey by remember { mutableStateOf(false) }
+
+  Column(
+    modifier = Modifier
+      .fillMaxSize()
+      .imePadding()
+      .verticalScroll(scrollState),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    HudHeaderDecryptBlock(
+      eyebrow = "SYS.02 // ${section.tag}",
+      title = section.title,
+      reveal = { staggeredReveal(reveal(), 0, 5, stagger = 0.14f) },
+      accent = accent,
+    )
+
+    val bannerText = when {
+      uiState.isProcessing -> "TRIAGING // 3.5-LITE"
+      !uiState.lastError.isNullOrBlank() -> uiState.lastError
+      !uiState.lastStatusBanner.isNullOrBlank() -> uiState.lastStatusBanner
+      else -> null
+    }
+    if (bannerText != null) {
+      val isErr = !uiState.isProcessing && !uiState.lastError.isNullOrBlank()
+      CompactHudCard(
+        eyebrow = if (isErr) "FAULT" else "STATUS",
+        title = bannerText.uppercase(),
+        badge = if (uiState.isProcessing) "RUN" else "CLR",
+        focused = true,
+        accent = if (isErr) CrimsonBright else accent,
+        pipColor = if (isErr) CrimsonBright else accent,
+        titleSizeSp = 9.4f,
+        reveal = { staggeredReveal(reveal(), 1, 5, stagger = 0.14f) },
+        enabled = enabled && !uiState.isProcessing,
+        modifier = Modifier.fillMaxWidth().height(42.dp),
+        onClick = {
+          haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+          JarvisRuntime.clearBanner()
+        },
+      )
+    }
+
+    when (section) {
+      JarvisSettingsSection.RUNTIME -> {
+        val totalSteps = 5
+        val fgsRunning = uiState.serviceStatus.isRunning
+        CompactHudCard(
+          eyebrow = "STICKY FGS",
+          title = if (fgsRunning) "ACTIVE · ${uiState.serviceStatus.processedCount}" else "STOPPED",
+          badge = if (fgsRunning) "ON" else "START",
+          pipColor = if (fgsRunning) accent else CrimsonBright,
+          focused = fgsRunning,
+          accent = if (fgsRunning) accent else CrimsonBright,
+          titleSizeSp = 10.2f,
+          reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.14f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(46.dp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.startServiceSafely(context)
+          },
+        )
+        CompactHudCard(
+          eyebrow = "REMOTEINPUT",
+          title = "${uiState.activeReplyHandleCount} HANDLES",
+          badge = if (uiState.activeReplyHandleCount > 0) "LIVE" else "IDLE",
+          pipColor = if (uiState.activeReplyHandleCount > 0) accent else TreeRailColor,
+          focused = uiState.activeReplyHandleCount > 0,
+          accent = accent,
+          titleSizeSp = 10.2f,
+          reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.14f) },
+          enabled = false,
+          modifier = Modifier.fillMaxWidth().height(44.dp),
+        )
+        CompactHudCard(
+          eyebrow = "READER MODEL",
+          title = if (uiState.isProcessing) "SCANNING..." else "STANDBY",
+          badge = "SYNC",
+          focused = uiState.isProcessing,
+          accent = accent,
+          titleSizeSp = 10.2f,
+          reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.14f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(44.dp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.refreshEnvironmentStatus(context)
+          },
+        )
+      }
+
+      JarvisSettingsSection.PERMISSIONS -> {
+        val totalSteps = 4
+        val listenerOk = uiState.notificationListenerEnabled && uiState.notificationListenerConnected
+        val listenerTag = when {
+          listenerOk -> "LIVE"
+          uiState.notificationListenerEnabled -> "BIND"
+          else -> "GRANT"
+        }
+        val listenerTint = when {
+          listenerOk -> accent
+          uiState.notificationListenerEnabled -> WarmSunAccent
+          else -> CrimsonBright
+        }
+        CompactHudCard(
+          eyebrow = "SBN STREAM",
+          title = "LISTENER",
+          badge = listenerTag,
+          pipColor = listenerTint,
+          focused = listenerOk,
+          accent = listenerTint,
+          titleSizeSp = 10.4f,
+          reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.14f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(46.dp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.openNotificationListenerSettings(context)
+          },
+        )
+        CompactHudCard(
+          eyebrow = "DOZE POLICY",
+          title = if (uiState.batteryUnrestricted) "UNRESTRICTED" else "OPTIMIZED",
+          badge = if (uiState.batteryUnrestricted) "OK" else "ALLOW",
+          pipColor = if (uiState.batteryUnrestricted) accent else WarmSunAccent,
+          focused = uiState.batteryUnrestricted,
+          accent = if (uiState.batteryUnrestricted) accent else WarmSunAccent,
+          titleSizeSp = 10.2f,
+          reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.14f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(46.dp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.requestBatteryUnrestricted(context)
+          },
+        )
+        CompactHudCard(
+          eyebrow = "HUD CONSOLE",
+          title = "FULL DRAWER",
+          badge = "!JARVIS",
+          focused = false,
+          accent = accent,
+          titleSizeSp = 10.0f,
+          reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.14f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(44.dp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onOpenJarvisDrawer()
+          },
+        )
+      }
+
+      JarvisSettingsSection.KEY_VAULT -> {
+        val totalSteps = 5
+        CompactHudCard(
+          eyebrow = "AES-256 VAULT",
+          title = if (uiState.hasApiKey) uiState.maskedApiKey else "UNCONFIGURED",
+          badge = if (uiState.hasApiKey) "SEALED" else "UNSET",
+          pipColor = if (uiState.hasApiKey) accent else WarmSunAccent,
+          focused = uiState.hasApiKey,
+          accent = if (uiState.hasApiKey) accent else WarmSunAccent,
+          titleSizeSp = 10.0f,
+          reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.14f) },
+          enabled = false,
+          modifier = Modifier.fillMaxWidth().height(46.dp),
+        )
+        HudMicroLabel(
+          text = if (uiState.hasApiKey) "REPLACE AIza... KEY" else "PASTE GEMINI KEY",
+          reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.14f) },
+        )
+        HudSharpTextInput(
+          value = apiKeyInput,
+          onValueChange = { apiKeyInput = it },
+          placeholder = if (uiState.hasApiKey) "Replace AIza... key" else "Paste API key",
+          reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.14f) },
+          accent = accent,
+          passwordMask = !revealApiKey,
+          onDone = {
+            if (apiKeyInput.isNotBlank()) {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              JarvisRuntime.saveApiKey(context, apiKeyInput)
+              apiKeyInput = ""
+              keyboardController?.hide()
+              focusManager.clearFocus()
+            }
+          },
+        )
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          CompactHudCard(
+            title = if (revealApiKey) "HIDE" else "SHOW",
+            focused = revealApiKey,
+            accent = accent,
+            titleSizeSp = 9.5f,
+            centerText = true,
+            reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.14f) },
+            enabled = enabled,
+            modifier = Modifier.weight(1f).height(36.dp),
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              revealApiKey = !revealApiKey
+            },
+          )
+          CompactHudCard(
+            title = "SAVE",
+            focused = apiKeyInput.isNotBlank(),
+            accent = accent,
+            titleSizeSp = 9.5f,
+            centerText = true,
+            reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.14f) },
+            enabled = enabled && apiKeyInput.isNotBlank(),
+            modifier = Modifier.weight(1f).height(36.dp),
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              JarvisRuntime.saveApiKey(context, apiKeyInput)
+              apiKeyInput = ""
+              keyboardController?.hide()
+              focusManager.clearFocus()
+            },
+          )
+          if (uiState.hasApiKey) {
+            CompactHudCard(
+              title = "CLR",
+              focused = false,
+              accent = CrimsonBright,
+              titleSizeSp = 9.5f,
+              centerText = true,
+              reveal = { staggeredReveal(reveal(), 4, totalSteps, stagger = 0.14f) },
+              enabled = enabled,
+              modifier = Modifier.weight(0.85f).height(36.dp),
+              onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                JarvisRuntime.clearApiKey(context)
+                apiKeyInput = ""
+              },
+            )
+          }
+        }
+      }
+
+      JarvisSettingsSection.EVENT_FEED -> {
+        val visibleEvents = uiState.events.take(12)
+        val totalSteps = (visibleEvents.size + 2).coerceAtLeast(3)
+        HudMicroLabel(
+          text = "EVENTS // ${uiState.events.size} LOGGED",
+          reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.12f) },
+        )
+        if (visibleEvents.isEmpty()) {
+          CompactHudCard(
+            eyebrow = "SQLITE WAL",
+            title = "NO EVENTS YET",
+            badge = "IDLE",
+            focused = false,
+            accent = accent,
+            titleSizeSp = 10.0f,
+            reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.14f) },
+            enabled = false,
+            modifier = Modifier.fillMaxWidth().height(46.dp),
+          )
+          CompactHudCard(
+            eyebrow = "FULL CONSOLE",
+            title = "OPEN !JARVIS",
+            badge = "UI",
+            focused = true,
+            accent = accent,
+            titleSizeSp = 10.0f,
+            reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.14f) },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              onOpenJarvisDrawer()
+            },
+          )
+        } else {
+          visibleEvents.forEachIndexed { idx, event ->
+            val cardReveal = { staggeredReveal(reveal(), (idx + 2).coerceAtMost(totalSteps - 1), totalSteps, stagger = 0.12f) }
+            HudJarvisEventCard(
+              event = event,
+              reveal = cardReveal,
+              enabled = enabled,
+              accent = accent,
+              onSendTestReply = { replyText ->
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                keyboardController?.hide()
+                focusManager.clearFocus()
+                JarvisRuntime.sendTestReply(context, event, replyText)
+              },
+            )
+          }
+        }
+      }
+
+      JarvisSettingsSection.RULEBOOK -> {
+        val visibleRules = uiState.rules.take(10)
+        val totalSteps = (visibleRules.size + 3).coerceAtLeast(4)
+        CompactHudCard(
+          eyebrow = "LOCAL GATEKEEPER",
+          title = "${uiState.rules.size} SQL RULES",
+          badge = "ACTIVE",
+          pipColor = accent,
+          focused = true,
+          accent = accent,
+          titleSizeSp = 10.2f,
+          reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.14f) },
+          enabled = false,
+          modifier = Modifier.fillMaxWidth().height(46.dp),
+        )
+        if (visibleRules.isEmpty()) {
+          CompactHudCard(
+            eyebrow = "BUILT-IN FILTER",
+            title = "NO CUSTOM RULES",
+            badge = "AUTO",
+            focused = false,
+            accent = accent,
+            titleSizeSp = 10.0f,
+            reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.14f) },
+            enabled = false,
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+          )
+        } else {
+          visibleRules.forEachIndexed { idx, rule ->
+            CompactHudCard(
+              eyebrow = rule.ruleType.uppercase(),
+              title = rule.pattern.uppercase(),
+              badge = if (rule.enabled) "ON" else "OFF",
+              focused = rule.enabled,
+              accent = accent,
+              titleSizeSp = 9.8f,
+              reveal = { staggeredReveal(reveal(), (idx + 2).coerceAtMost(totalSteps - 1), totalSteps, stagger = 0.12f) },
+              enabled = false,
+              modifier = Modifier.fillMaxWidth().height(42.dp),
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun HudSharpTextInput(
+  value: String,
+  onValueChange: (String) -> Unit,
+  placeholder: String,
+  reveal: () -> Float,
+  accent: Color,
+  passwordMask: Boolean = false,
+  onDone: (() -> Unit)? = null,
+) {
+  val p = reveal().coerceIn(0f, 1f)
+  if (p <= 0.01f) return
+  Box(
+    modifier = Modifier
+      .fillMaxWidth()
+      .graphicsLayer { alpha = phase(p, 0.08f, 0.45f) }
+      .background(ObsidianBgTop.copy(alpha = 0.90f))
+      .border(1.dp, accent.copy(alpha = 0.48f))
+      .drawWithCache {
+        val bar = 1.dp.toPx()
+        val halfPerim = (size.width + size.height).coerceAtLeast(1f)
+        val cornerAt = floatArrayOf(0f, size.width / halfPerim, 0f, size.width / halfPerim)
+        onDrawBehind {
+          drawCompactHudBrackets(
+            trace = p,
+            cornerAt = cornerAt,
+            barPx = bar,
+            scale = 0.42f,
+            tint = Color.White.copy(alpha = 0.72f),
+            trTint = accent.copy(alpha = 0.85f),
+            blTint = accent.copy(alpha = 0.55f),
+          )
+        }
+      }
+      .padding(horizontal = 8.dp, vertical = 7.dp),
+  ) {
+    if (value.isEmpty()) {
+      Text(
+        text = placeholder,
+        color = TextSilver.copy(alpha = 0.48f),
+        fontFamily = FontFamily.Monospace,
+        fontSize = 10.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+    BasicTextField(
+      value = value,
+      onValueChange = onValueChange,
+      singleLine = true,
+      textStyle = TextStyle(
+        color = TextPureWhite,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 10.5.sp,
+      ),
+      cursorBrush = SolidColor(accent),
+      visualTransformation = if (passwordMask) PasswordVisualTransformation() else VisualTransformation.None,
+      keyboardOptions = KeyboardOptions(
+        keyboardType = if (passwordMask) KeyboardType.Password else KeyboardType.Text,
+        imeAction = if (onDone != null) ImeAction.Done else ImeAction.Default,
+      ),
+      keyboardActions = KeyboardActions(
+        onDone = { onDone?.invoke() },
+      ),
+      modifier = Modifier.fillMaxWidth(),
+    )
+  }
+}
+
+@Composable
+private fun HudJarvisEventCard(
+  event: JarvisEventRecord,
+  reveal: () -> Float,
+  enabled: Boolean,
+  accent: Color,
+  onSendTestReply: (String) -> Unit,
+) {
+  val p = reveal().coerceIn(0f, 1f)
+  if (p <= 0.01f) return
+
+  val suggested = event.triage?.suggestedReply?.takeIf { it.isNotBlank() } ?: "Test reply from Jarvis"
+  var replyDraft by remember(event.id, suggested) { mutableStateOf(suggested) }
+
+  val urgencyLabel = when (event.triageStatus) {
+    TriageStatus.PENDING -> "PENDING"
+    TriageStatus.SKIPPED_NO_KEY -> "NO KEY"
+    TriageStatus.FAILED -> "FAULT"
+    TriageStatus.TRIAGED -> event.triage?.urgency?.uppercase() ?: "LOW"
+  }
+  val urgencyColor = when (urgencyLabel) {
+    "CRITICAL", "FAULT" -> CrimsonBright
+    "HIGH", "NO KEY" -> WarmSunAccent
+    "MEDIUM" -> accent
+    else -> TextSilver
+  }
+  val timeFormatted = remember(event.createdAtMs) {
+    DateFormat.format("HH:mm", Date(event.createdAtMs)).toString()
+  }
+  val senderName = event.triage?.sender?.ifBlank { event.sender } ?: event.sender
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .drawWithCache {
+        val stroke = 0.9f.dp.toPx()
+        val bar = 1.dp.toPx()
+        val halfPerim = (size.width + size.height).coerceAtLeast(1f)
+        val cornerAt = floatArrayOf(0f, size.width / halfPerim, 0f, size.width / halfPerim)
+        onDrawBehind {
+          val pr = reveal().coerceIn(0f, 1f)
+          if (pr <= 0.005f) return@onDrawBehind
+          val clip = hudEaseOutCubic(phase(pr, 0f, 0.30f))
+          if (clip < 0.999f) {
+            clipRect(right = size.width * clip) { drawRect(brush = UnfocusedPlateBrush) }
+          } else {
+            drawRect(brush = UnfocusedPlateBrush)
+          }
+          drawCompactHudBrackets(
+            trace = pr,
+            cornerAt = cornerAt,
+            barPx = bar,
+            scale = 0.45f,
+            tint = Color.White.copy(alpha = 0.50f),
+            trTint = urgencyColor.copy(alpha = 0.85f),
+            blTint = urgencyColor.copy(alpha = 0.45f),
+          )
+          drawDualTracedRect(
+            width = (size.width - stroke).coerceAtLeast(1f),
+            height = (size.height - stroke).coerceAtLeast(1f),
+            progress = pr,
+            strokeWidth = stroke,
+            color = urgencyColor.copy(alpha = 0.48f),
+            head = if (pr in 0.02f..0.98f) 1f else 0f,
+          )
+        }
+      }
+      .graphicsLayer { alpha = phase(p, 0.08f, 0.48f) }
+      .padding(8.dp),
+    verticalArrangement = Arrangement.spacedBy(4.dp),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        text = "[$urgencyLabel] ${event.appLabel}",
+        color = urgencyColor,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 8.5.sp,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.weight(1f),
+      )
+      Text(
+        text = timeFormatted,
+        color = TextSilver.copy(alpha = 0.72f),
+        fontFamily = FontFamily.Monospace,
+        fontSize = 8.5.sp,
+      )
+    }
+
+    Text(
+      text = senderName,
+      color = TextPureWhite,
+      fontFamily = FontFamily.Monospace,
+      fontSize = 10.sp,
+      fontWeight = FontWeight.Bold,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
+
+    if (event.body.isNotBlank()) {
+      Text(
+        text = event.body,
+        color = TextSilver,
+        fontSize = 10.sp,
+        lineHeight = 13.sp,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+
+    event.triage?.let { triage ->
+      Text(
+        text = "${triage.intent.uppercase()} · ${triage.suggestedReply.ifBlank { "(NONE)" }}",
+        color = accent.copy(alpha = 0.90f),
+        fontFamily = FontFamily.Monospace,
+        fontSize = 8.8.sp,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+
+    if (!event.errorMessage.isNullOrBlank()) {
+      Text(
+        text = event.errorMessage,
+        color = CrimsonBright,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 8.5.sp,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+
+    if (!event.replySent.isNullOrBlank()) {
+      Text(
+        text = "SENT: \"${event.replySent}\"",
+        color = accent,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 8.5.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+
+    if (event.canReplyNow) {
+      HudSharpTextInput(
+        value = replyDraft,
+        onValueChange = { replyDraft = it },
+        placeholder = "Draft reply",
+        reveal = reveal,
+        accent = accent,
+      )
+      CompactHudCard(
+        title = "SEND REPLY",
+        focused = true,
+        accent = accent,
+        titleSizeSp = 9.2f,
+        centerText = true,
+        reveal = reveal,
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth().height(30.dp),
+        onClick = { onSendTestReply(replyDraft) },
+      )
     }
   }
 }

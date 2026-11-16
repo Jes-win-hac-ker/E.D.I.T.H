@@ -1,6 +1,7 @@
 package com.nexwork.edith.ui.main
 
 import com.nexwork.edith.data.DataRepository
+import com.nexwork.edith.model.JarvisSettingsSection
 import com.nexwork.edith.model.LauncherAccentPreset
 import com.nexwork.edith.model.LauncherFontStyle
 import com.nexwork.edith.model.LauncherSettingsSection
@@ -290,9 +291,18 @@ class MainScreenViewModelTest {
     assertTrue(viewModel.handleBackPress())
     assertEquals(SettingsStage.ROOT_BRANCHES, viewModel.launcherState.value.settingsStage)
 
-    // Agent standby branch unwinds cleanly back to root
+    // Agent / Jarvis branch drills into JarvisSettingsSection and unwinds cleanly back to root
     viewModel.selectSettingsBranch(SettingsStage.AGENT_PLACEHOLDER)
     assertEquals(SettingsStage.AGENT_PLACEHOLDER, viewModel.launcherState.value.settingsStage)
+    assertNull(viewModel.launcherState.value.selectedJarvisSection)
+
+    viewModel.selectJarvisSetting(JarvisSettingsSection.KEY_VAULT)
+    assertEquals(JarvisSettingsSection.KEY_VAULT, viewModel.launcherState.value.selectedJarvisSection)
+
+    assertTrue(viewModel.handleBackPress())
+    assertNull(viewModel.launcherState.value.selectedJarvisSection)
+    assertEquals(SettingsStage.AGENT_PLACEHOLDER, viewModel.launcherState.value.settingsStage)
+
     assertTrue(viewModel.handleBackPress())
     assertEquals(SettingsStage.ROOT_BRANCHES, viewModel.launcherState.value.settingsStage)
 

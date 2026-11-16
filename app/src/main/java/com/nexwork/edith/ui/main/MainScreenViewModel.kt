@@ -17,6 +17,7 @@ import com.nexwork.edith.data.WeatherRepository
 import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.model.AppFootprint
 import com.nexwork.edith.model.DeviceTelemetry
+import com.nexwork.edith.model.JarvisSettingsSection
 import com.nexwork.edith.model.LauncherAccentPreset
 import com.nexwork.edith.model.LauncherFontStyle
 import com.nexwork.edith.model.LauncherSettingsConfig
@@ -75,6 +76,7 @@ data class LauncherHomeState(
   val monetUiState: MonetUiState = MonetUiState(),
   val settingsStage: SettingsStage = SettingsStage.CLOSED,
   val selectedSettingsSection: LauncherSettingsSection? = null,
+  val selectedJarvisSection: JarvisSettingsSection? = null,
   val launcherSettings: LauncherSettingsConfig = LauncherSettingsConfig(),
   val isJarvisSheetOpen: Boolean = false,
 )
@@ -755,6 +757,7 @@ class MainScreenViewModel(
       state.copy(
         settingsStage = SettingsStage.ROOT_BRANCHES,
         selectedSettingsSection = null,
+        selectedJarvisSection = null,
         isSpotlightSearchOpen = false,
         isAppBrowseOpen = false,
         browseGroup = null,
@@ -778,6 +781,7 @@ class MainScreenViewModel(
         isAmbientCentered = false,
         settingsStage = SettingsStage.CLOSED,
         selectedSettingsSection = null,
+        selectedJarvisSection = null,
       )
     }
   }
@@ -794,6 +798,7 @@ class MainScreenViewModel(
       else state.copy(
         settingsStage = stage,
         selectedSettingsSection = null,
+        selectedJarvisSection = null,
         isAmbientCentered = false,
       )
     }
@@ -806,11 +811,19 @@ class MainScreenViewModel(
     }
   }
 
+  fun selectJarvisSetting(section: JarvisSettingsSection?) {
+    _launcherState.update { state ->
+      if (state.settingsStage != SettingsStage.AGENT_PLACEHOLDER) state
+      else state.copy(selectedJarvisSection = section)
+    }
+  }
+
   fun dismissSettings() {
     _launcherState.update { state ->
       state.copy(
         settingsStage = SettingsStage.CLOSED,
         selectedSettingsSection = null,
+        selectedJarvisSection = null,
       )
     }
   }
@@ -993,8 +1006,15 @@ class MainScreenViewModel(
         }
         return true
       }
-      SettingsStage.AGENT_PLACEHOLDER,
-      SettingsStage.SHIZUKU_PLACEHOLDER, -> {
+      SettingsStage.AGENT_PLACEHOLDER -> {
+        if (current.selectedJarvisSection != null) {
+          selectJarvisSetting(null)
+        } else {
+          selectSettingsBranch(SettingsStage.ROOT_BRANCHES)
+        }
+        return true
+      }
+      SettingsStage.SHIZUKU_PLACEHOLDER -> {
         selectSettingsBranch(SettingsStage.ROOT_BRANCHES)
         return true
       }

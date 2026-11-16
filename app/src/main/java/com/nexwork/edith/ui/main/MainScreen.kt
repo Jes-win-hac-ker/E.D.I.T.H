@@ -583,6 +583,7 @@ fun MainScreen(
     HudSettingsOverlayLayer(
       stage = state.settingsStage,
       selectedSection = state.selectedSettingsSection,
+      selectedJarvisSection = state.selectedJarvisSection,
       settings = state.launcherSettings,
       telemetry = state.telemetry,
       liveWeather = state.liveWeather,
@@ -592,6 +593,8 @@ fun MainScreen(
       screenWidth = maxWidth,
       screenHeight = maxHeight,
       onSelectSection = viewModel::selectLauncherSetting,
+      onSelectJarvisSection = viewModel::selectJarvisSetting,
+      onOpenJarvisDrawer = viewModel::openJarvisSheet,
       onBackStep = { viewModel.handleBackPress() },
       onAccentChange = viewModel::updateLauncherAccent,
       onFontChange = viewModel::updateLauncherFont,
