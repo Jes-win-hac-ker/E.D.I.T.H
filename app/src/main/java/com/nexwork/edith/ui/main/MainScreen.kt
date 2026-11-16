@@ -392,7 +392,7 @@ fun MainScreen(
 
             while (true) {
               val elapsedHoldMs = System.currentTimeMillis() - downTimeMs
-              val remainingHoldMs = (1_000L - elapsedHoldMs).coerceAtLeast(1L)
+              val remainingHoldMs = (500L - elapsedHoldMs).coerceAtLeast(1L)
               val event = if (startedOnGlobe && !isDrag && !isPinch && !settingsTriggered) {
                 withTimeoutOrNull(remainingHoldMs) { awaitPointerEvent() }
               } else {
