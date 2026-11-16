@@ -41,7 +41,9 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.tan
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 private val OrbitalSlate = Color(0xFF64748B)
 
@@ -153,12 +155,16 @@ fun HudClock(
   LaunchedEffect(face, mounted, use24Hour) {
     if (!mounted) return@LaunchedEffect
     val initNow = System.currentTimeMillis()
-    face.syncStrings(initNow)
-    face.tick(initNow, use24HourState.value)
+    withContext(Dispatchers.Default) {
+      face.syncStrings(initNow)
+      face.tick(initNow, use24HourState.value)
+    }
     secondTick.intValue = (initNow / 1000L).toInt()
     while (true) {
       val now = System.currentTimeMillis()
-      face.tick(now, use24HourState.value)
+      withContext(Dispatchers.Default) {
+        face.tick(now, use24HourState.value)
+      }
       secondTick.intValue = (now / 1000L).toInt()
       delay(1000L - now % 1000L + 4L)
     }
@@ -167,7 +173,9 @@ fun HudClock(
     if (!mounted) return@LaunchedEffect
     while (true) {
       delay(20_000L - System.currentTimeMillis() % 20_000L)
-      face.syncStrings(System.currentTimeMillis())
+      withContext(Dispatchers.Default) {
+        face.syncStrings(System.currentTimeMillis())
+      }
     }
   }
 

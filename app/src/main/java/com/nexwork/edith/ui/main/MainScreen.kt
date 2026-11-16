@@ -7,6 +7,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.activity.compose.BackHandler
@@ -111,6 +112,8 @@ fun MainScreen(
   var clockRedrawSignal by remember { mutableIntStateOf(0) }
   var lastHapticRedrawSignal by remember { mutableIntStateOf(0) }
   var lastHomeWakeMs by remember { mutableLongStateOf(0L) }
+  var screenOffAtMs by remember { mutableLongStateOf(0L) }
+  var pendingEarthRegen by remember { mutableStateOf(false) }
   val homeResetSignal = LocalHomeResetSignal.current
 
   val triggerHomeWake: () -> Unit = {
@@ -125,7 +128,10 @@ fun MainScreen(
     if (now - lastHomeWakeMs > 600L) {
       lastHomeWakeMs = now
       clockRedrawSignal++
-      globeController.playStartupAnimation()
+      if (pendingEarthRegen) {
+        pendingEarthRegen = false
+        globeController.playStartupAnimation()
+      }
     }
   }
 
@@ -161,13 +167,30 @@ fun MainScreen(
     val receiver = object : BroadcastReceiver() {
       override fun onReceive(ctx: Context?, intent: Intent?) {
         when (intent?.action) {
-          Intent.ACTION_USER_PRESENT -> triggerHomeWake()
+          Intent.ACTION_SCREEN_OFF -> {
+            screenOffAtMs = SystemClock.elapsedRealtime()
+          }
+          Intent.ACTION_SCREEN_ON -> {
+            if (screenOffAtMs > 0L && SystemClock.elapsedRealtime() - screenOffAtMs >= 60_000L) {
+              pendingEarthRegen = true
+            }
+            screenOffAtMs = 0L
+          }
+          Intent.ACTION_USER_PRESENT -> {
+            if (screenOffAtMs > 0L && SystemClock.elapsedRealtime() - screenOffAtMs >= 60_000L) {
+              pendingEarthRegen = true
+            }
+            screenOffAtMs = 0L
+            triggerHomeWake()
+          }
           else -> viewModel.ensureMonetPersisted()
         }
       }
     }
     @Suppress("DEPRECATION")
     val filter = IntentFilter(Intent.ACTION_WALLPAPER_CHANGED).apply {
+      addAction(Intent.ACTION_SCREEN_OFF)
+      addAction(Intent.ACTION_SCREEN_ON)
       addAction(Intent.ACTION_USER_PRESENT)
     }
     ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_EXPORTED)

@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Color
 import android.location.LocationManager
 import android.view.Choreographer
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebSettings
@@ -225,6 +226,7 @@ fun InteractiveWireframeGlobe(
         ViewGroup.LayoutParams.MATCH_PARENT,
       )
       setBackgroundColor(Color.TRANSPARENT)
+      setLayerType(View.LAYER_TYPE_HARDWARE, null)
       isVerticalScrollBarEnabled = false
       isHorizontalScrollBarEnabled = false
       isClickable = false

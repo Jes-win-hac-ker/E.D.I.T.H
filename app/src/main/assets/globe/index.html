@@ -53,7 +53,7 @@
                 powerPreference: 'high-performance',
                 alpha: true
             });
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1.5, 1.75));
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1.25, 1.5));
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setClearColor(0x000000, 0);
             renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -480,7 +480,7 @@
                 if (solarTerminator && solarTerminator.group) solarTerminator.group.visible = true;
                 if (nodes && nodes.group) nodes.group.visible = true;
                 if (userLocation && userLocation.group) userLocation.group.visible = true;
-                wakeLoop(400);
+                wakeLoop(120);
                 notifyStartupComplete();
             }
 
