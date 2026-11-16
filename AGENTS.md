@@ -40,5 +40,14 @@ All UI/UX decisions, performance targets, and system integrations in this reposi
   - Retain `CATEGORY_HOME` and `CATEGORY_DEFAULT` intent filters, `launchMode="singleTask"`, `stateNotNeeded="true"`, `QUERY_ALL_PACKAGES`, and `PACKAGE_USAGE_STATS`.
 - **Back Navigation**:
   - Pressing Back when `FullAppListGlassOverlay` is open closes the overlay and clears search; pressing Back on the root home screen must never exit the launcher.
+- **Settings Tree Choreography & Styling Laws (`ui/hud/HudSettingsChoreography.kt` & `HudSettingsTree.kt`)**:
+  - Never separate root card styling from trunk laser rail styling: `ROOT_BRANCH_SPECS` is the single source of truth for `isBuilt` (`LAUNCHER` and `JARVIS` active accent rails; `SHIZUKU` standby dim rail).
+  - Never replace `HudSettingsChoreographyController` sequential gates with independent hardcoded `delay(...)` calls between root and overlay layers: `HudSettingsGateChecker.shouldPlaceRootAboveGlobe` must keep Stage 1 sunken behind the globe (`zIndex = 0f`) until Stage 2/3 detail cards and branch lasers finish retracing completely to `0f`.
 - **Verification**:
   - Run `./gradlew testDebugUnitTest assembleDebug` to verify compilation and unit tests after code changes.
+
+---
+
+## 4. Active Known Issues & Deferred Queue (Proactive Reminder)
+
+- **AI Hands / Rulebook Planner Hang (`PlannerClient` `gemini-4-hydrogen`)**: Running natural multi-step UI commands such as `"open YouTube and play jazz"` hands off from local playbooks to Gemini 4 Hydrogen and then stalls without completing until stopped via emergency abort. **Proactively remind NEX to investigate and fix this when the next session starts on AI Hands / Playbooks.**

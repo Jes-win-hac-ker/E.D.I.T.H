@@ -68,6 +68,7 @@ import com.nexwork.edith.jarvis.ui.JarvisDrawerSheet
 import com.nexwork.edith.jarvis.ui.JarvisEmergencyStopHudPill
 import com.nexwork.edith.model.SettingsStage
 import com.nexwork.edith.theme.EDITHTheme
+import com.nexwork.edith.ui.hud.BindHudSettingsChoreography
 import com.nexwork.edith.ui.hud.CrimeSceneFocusOverlay
 import com.nexwork.edith.ui.hud.HudCardDeck
 import com.nexwork.edith.ui.hud.HudClock
@@ -78,6 +79,7 @@ import com.nexwork.edith.ui.hud.HudSettingsRootLayer
 import com.nexwork.edith.ui.hud.GlobeController
 import com.nexwork.edith.ui.hud.InteractiveWireframeGlobe
 import com.nexwork.edith.ui.hud.groupApps
+import com.nexwork.edith.ui.hud.rememberHudSettingsChoreographer
 
 /**
  * Home screen — Stark HUD void with the flat search line.
@@ -115,10 +117,19 @@ fun MainScreen(
   val isHudMounted = isClockMounted || isOtaMounted || isAmbientPillMounted
   val proactiveSuggestion by JarvisRuntime.proactiveSuggestion.collectAsStateWithLifecycle()
   val jarvisUiState by JarvisRuntime.uiState.collectAsStateWithLifecycle()
-  var isSettingsRootMounted by remember { mutableStateOf(false) }
-  var isSettingsOverlayMounted by remember { mutableStateOf(false) }
-  val isSettingsMounted = isSettingsRootMounted || isSettingsOverlayMounted
-  var lastActiveSettingsStage by remember { mutableStateOf(SettingsStage.CLOSED) }
+  val settingsChoreographer = rememberHudSettingsChoreographer(state.settingsStage)
+  var isSettingsMounted by remember { mutableStateOf(state.settingsStage != SettingsStage.CLOSED) }
+  BindHudSettingsChoreography(
+    choreographer = settingsChoreographer,
+    stage = state.settingsStage,
+    selectedSection = state.selectedSettingsSection,
+    selectedJarvisSection = state.selectedJarvisSection,
+    onPrepareAgentStage = {
+      JarvisRuntime.ensureInitialized(context)
+      JarvisRuntime.refreshEnvironmentStatus(context)
+    },
+    onMountedChange = { isSettingsMounted = it },
+  )
   var clockRedrawSignal by remember { mutableIntStateOf(0) }
   var lastHapticRedrawSignal by remember { mutableIntStateOf(0) }
   var lastHomeWakeMs by remember { mutableLongStateOf(0L) }
@@ -152,13 +163,9 @@ fun MainScreen(
     }
   }
 
-  LaunchedEffect(state.settingsStage) {
-    if (state.settingsStage != SettingsStage.CLOSED) {
-      lastActiveSettingsStage = state.settingsStage
-    }
-    val behindGlobe = state.settingsStage != SettingsStage.CLOSED &&
-      state.settingsStage != SettingsStage.ROOT_BRANCHES
-    globeController.setSettingsBackdropActive(behindGlobe)
+  val settingsBehindGlobe = settingsChoreographer.mounted && !settingsChoreographer.isRootAboveGlobe
+  LaunchedEffect(settingsBehindGlobe) {
+    globeController.setSettingsBackdropActive(settingsBehindGlobe)
   }
 
   LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
@@ -510,20 +517,15 @@ fun MainScreen(
       }
     }
 
-    // Root settings branch sits above the globe (zIndex 2f) when active or unwinding from root,
-    // and sinks behind the transparent-background 3D globe (zIndex 0f < 1f) during Stage 2/3.
-    val rootLayerStage = if (state.settingsStage == SettingsStage.CLOSED) {
-      lastActiveSettingsStage
-    } else {
-      state.settingsStage
-    }
+    // Root settings branch lifts above the globe (zIndex 2f) ONLY after HudSettingsGateChecker
+    // confirms all Stage 2/3 overlay lasers have retraced back down behind the globe.
     HudSettingsRootLayer(
       stage = state.settingsStage,
       screenWidth = maxWidth,
       screenHeight = maxHeight,
       onSelectBranch = viewModel::selectSettingsBranch,
-      onMountedChange = { isSettingsRootMounted = it },
-      modifier = Modifier.zIndex(if (rootLayerStage == SettingsStage.ROOT_BRANCHES) 2f else 0f),
+      choreographer = settingsChoreographer,
+      modifier = Modifier.zIndex(if (settingsChoreographer.isRootAboveGlobe) 2f else 0f),
     )
 
     // Wireframe Earth backdrop with synchronized rack-focus dolly zoom and stepped blur
@@ -636,7 +638,7 @@ fun MainScreen(
       onOpenUsageSettings = viewModel::openUsageAccessSettings,
       onOpenNotificationSettings = viewModel::openNotificationAccessSettings,
       onCheckOta = { viewModel.checkForUpdates(force = true) },
-      onMountedChange = { isSettingsOverlayMounted = it },
+      choreographer = settingsChoreographer,
       modifier = Modifier.zIndex(3f),
     )
 

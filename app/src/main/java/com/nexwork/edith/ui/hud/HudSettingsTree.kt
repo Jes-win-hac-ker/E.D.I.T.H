@@ -34,7 +34,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -105,25 +104,11 @@ import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.tan
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 private val TreeRailColor = Color(0xFF64748B)
 private val FocusedPlateBrush = Brush.verticalGradient(listOf(Color(0xD9050505), Color(0xD9111111)))
 private val UnfocusedPlateBrush = Brush.verticalGradient(listOf(Color(0xB8050505), Color(0xB8111111)))
 private val ContainerPlateBrush = Brush.verticalGradient(listOf(Color(0xE0050505), Color(0xE0111111)))
-
-private const val ROOT_COLLAPSED_ALPHA = 0.46f
-private const val ROOT_COLLAPSED_SCALE = 0.94f
-private const val ROOT_ENTER_DURATION_MS = 1080
-private const val ROOT_RETURN_DURATION_MS = 560
-private const val ROOT_COLLAPSE_DURATION_MS = 420
-private const val BRANCH_ENTER_DURATION_MS = 920
-private const val BRANCH_EXIT_DURATION_MS = 560
-private const val DETAIL_ENTER_DURATION_MS = 760
-private const val DETAIL_EXIT_DURATION_MS = 540
-private const val EXIT_DURATION_MS = 640
 
 /**
  * Shared pixel-exact geometry derived from screen dimensions and the orbital globe horizon
@@ -260,12 +245,19 @@ fun HudSettingsTree(
   onOpenJarvisDrawer: () -> Unit = {},
   onMountedChange: (Boolean) -> Unit = {},
 ) {
-  var rootMounted by remember { mutableStateOf(false) }
-  var overlayMounted by remember { mutableStateOf(false) }
-  val currentOnMountedChange = rememberUpdatedState(onMountedChange)
-  LaunchedEffect(rootMounted, overlayMounted) {
-    currentOnMountedChange.value(rootMounted || overlayMounted)
-  }
+  val context = LocalContext.current
+  val choreographer = rememberHudSettingsChoreographer(stage)
+  BindHudSettingsChoreography(
+    choreographer = choreographer,
+    stage = stage,
+    selectedSection = selectedSection,
+    selectedJarvisSection = selectedJarvisSection,
+    onPrepareAgentStage = {
+      JarvisRuntime.ensureInitialized(context)
+      JarvisRuntime.refreshEnvironmentStatus(context)
+    },
+    onMountedChange = onMountedChange,
+  )
 
   BoxWithConstraints(modifier = modifier.fillMaxSize()) {
     HudSettingsRootLayer(
@@ -273,7 +265,7 @@ fun HudSettingsTree(
       screenWidth = maxWidth,
       screenHeight = maxHeight,
       onSelectBranch = onSelectBranch,
-      onMountedChange = { rootMounted = it },
+      choreographer = choreographer,
       modifier = Modifier.fillMaxSize(),
     )
     HudSettingsOverlayLayer(
@@ -303,17 +295,16 @@ fun HudSettingsTree(
       onOpenUsageSettings = onOpenUsageSettings,
       onOpenNotificationSettings = onOpenNotificationSettings,
       onCheckOta = onCheckOta,
-      onMountedChange = { overlayMounted = it },
+      choreographer = choreographer,
       modifier = Modifier.fillMaxSize(),
     )
   }
 }
 
 /**
- * Stage 1 settings root layer intended to sit below the transparent 3D WebGL globe (`zIndex = 0f`).
- * Sweeps bilateral orbital horizon arcs inward from both screen edges to dead center, shoots a
- * perpendicular stem straight up, splits orthogonally into 3 `CompactHudCard` branches, and sinks
- * smoothly behind the globe sphere at `0.46f` alpha / `0.94f` scale when entering Stage 2.
+ * Stage 1 settings root layer sitting below the transparent 3D WebGL globe (`zIndex = 0f`) while
+ * sunken or while overlay lasers retract, and above the globe (`zIndex = 2f`) only once
+ * [HudSettingsGateChecker.shouldPlaceRootAboveGlobe] confirms all overlay lines finished erasing.
  */
 @Composable
 fun HudSettingsRootLayer(
@@ -321,99 +312,25 @@ fun HudSettingsRootLayer(
   screenWidth: Dp,
   screenHeight: Dp,
   onSelectBranch: (SettingsStage) -> Unit,
-  onMountedChange: (Boolean) -> Unit,
+  choreographer: HudSettingsChoreographyController = rememberHudSettingsChoreographer(stage),
   modifier: Modifier = Modifier,
 ) {
   val accent = LocalLauncherStyle.current.accent
   val haptic = LocalHapticFeedback.current
   val geo = rememberSettingsGeometry(screenWidth, screenHeight)
-  val currentOnMountedChange = rememberUpdatedState(onMountedChange)
 
-  val rootAnim = remember { Animatable(0f) }
-  val collapseAnim = remember { Animatable(0f) }
-  val exitAnim = remember { Animatable(0f) }
-  var mounted by remember { mutableStateOf(stage != SettingsStage.CLOSED) }
+  if (!choreographer.mounted) return
 
-  LaunchedEffect(mounted) {
-    currentOnMountedChange.value(mounted)
-  }
-
-  LaunchedEffect(stage) {
-    if (stage == SettingsStage.CLOSED) {
-      if (!mounted) {
-        exitAnim.snapTo(0f)
-        rootAnim.snapTo(0f)
-        collapseAnim.snapTo(0f)
-        return@LaunchedEffect
-      }
-      val ms = (exitAnim.value.coerceIn(0f, 1f) * EXIT_DURATION_MS).roundToInt().coerceAtLeast(1)
-      exitAnim.animateTo(0f, tween(ms, easing = LinearEasing))
-      rootAnim.snapTo(0f)
-      collapseAnim.snapTo(0f)
-      mounted = false
-      return@LaunchedEffect
-    }
-
-    val wasUnmounted = !mounted
-    mounted = true
-    if (stage == SettingsStage.ROOT_BRANCHES) {
-      if (wasUnmounted) {
-        exitAnim.snapTo(1f)
-        collapseAnim.snapTo(0f)
-        delay(260L)
-        val remMs = ((1f - rootAnim.value).coerceIn(0f, 1f) * ROOT_ENTER_DURATION_MS)
-          .roundToInt()
-          .coerceAtLeast(1)
-        rootAnim.animateTo(1f, tween(remMs, easing = LinearEasing))
-      } else {
-        coroutineScope {
-          launch {
-            val eMs = ((1f - exitAnim.value).coerceIn(0f, 1f) * 200f).roundToInt().coerceAtLeast(1)
-            exitAnim.animateTo(1f, tween(eMs, easing = LinearEasing))
-          }
-          launch {
-            val cMs = (collapseAnim.value.coerceIn(0f, 1f) * ROOT_RETURN_DURATION_MS)
-              .roundToInt()
-              .coerceAtLeast(1)
-            collapseAnim.animateTo(0f, tween(cMs, easing = LinearEasing))
-          }
-          launch {
-            val remMs = ((1f - rootAnim.value).coerceIn(0f, 1f) * 520f).roundToInt().coerceAtLeast(1)
-            rootAnim.animateTo(1f, tween(remMs, easing = LinearEasing))
-          }
-        }
-      }
-    } else {
-      coroutineScope {
-        launch {
-          val eMs = ((1f - exitAnim.value).coerceIn(0f, 1f) * 180f).roundToInt().coerceAtLeast(1)
-          exitAnim.animateTo(1f, tween(eMs, easing = LinearEasing))
-        }
-        launch {
-          if (rootAnim.value < 0.99f) rootAnim.snapTo(1f)
-        }
-        launch {
-          val cMs = ((1f - collapseAnim.value).coerceIn(0f, 1f) * ROOT_COLLAPSE_DURATION_MS)
-            .roundToInt()
-            .coerceAtLeast(1)
-          collapseAnim.animateTo(1f, tween(cMs, easing = LinearEasing))
-        }
-      }
-    }
-  }
-
-  if (!mounted) return
-
-  val isClosing = stage == SettingsStage.CLOSED
-  val collapseP = hudEaseOutCubic(collapseAnim.value)
-  val exitP = exitAnim.value.coerceIn(0f, 1f)
+  val collapseP = hudEaseOutCubic(choreographer.collapseAnim.value.coerceIn(0f, 1f))
   val rootScale = 1f - (1f - ROOT_COLLAPSED_SCALE) * collapseP
   val rootDrop = geo.rootDropPx * collapseP
-  val exitAlpha = (exitP / 0.16f).coerceIn(0f, 1f)
-  val layerAlpha = (1f - (1f - ROOT_COLLAPSED_ALPHA) * collapseP) * exitAlpha
-  val effectiveP = if (isClosing) (rootAnim.value * exitP) else rootAnim.value
-  val cardsMaster = hudEaseOutCubic(phase(effectiveP, 0.50f, 1.00f))
-  val canClickRoot = stage == SettingsStage.ROOT_BRANCHES && exitP > 0.85f && effectiveP > 0.65f
+  val layerAlpha = 1f - (1f - ROOT_COLLAPSED_ALPHA) * collapseP
+  val effectiveP = choreographer.rootAnim.value.coerceIn(0f, 1f)
+  val cardsMaster = hudEaseOutCubic(phase(effectiveP, 0.54f, 1.00f))
+  val canClickRoot = stage == SettingsStage.ROOT_BRANCHES &&
+    choreographer.isRootAboveGlobe &&
+    effectiveP > 0.65f &&
+    collapseP < 0.05f
 
   Box(
     modifier = modifier
@@ -497,24 +414,39 @@ fun HudSettingsRootLayer(
         }
       }
 
-      // Phase 3 (0.40..0.58): split orthogonally into 3 branches to left / center / right cards
-      val splitP = hudEaseOutCubic(phase(p, 0.40f, 0.58f))
+      // Phase 3 (0.40..0.60): split orthogonally into all 3 cards; draw built red lines on top
+      val splitP = hudEaseOutCubic(phase(p, 0.40f, 0.60f))
       if (splitP > 0.005f) {
-        val strokeW = 1.1f.dp.toPx()
-        for (idx in 0 until 3) {
-          val tx = geo.rootCardCenterX(idx)
-          val tip = drawOrthogonalPolyline(
-            points = listOf(
-              Offset(geo.cx, geo.rootStemSplitY),
-              Offset(tx, geo.rootStemSplitY),
-              Offset(tx, geo.rootRowBottomY),
-            ),
-            progress = splitP,
-            color = if (idx == 0) accent.copy(alpha = 0.84f) else TreeRailColor.copy(alpha = 0.82f),
-            strokeWidth = strokeW,
+        val strokeW = 1.15f.dp.toPx()
+        val sideHorizPx = abs(geo.rootCardCenterX(0) - geo.cx)
+        val verticalPx = abs(geo.rootStemSplitY - geo.rootRowBottomY)
+        for (spec in ROOT_BRANCH_SPECS.sortedBy { it.isBuilt }) {
+          val tx = geo.rootCardCenterX(spec.index)
+          val branchP = HudSettingsGateChecker.computeRootBranchProgress(
+            splitP = splitP,
+            branchHorizontalPx = abs(tx - geo.cx),
+            sideHorizontalPx = sideHorizPx,
+            verticalPx = verticalPx,
           )
-          if (splitP < 0.97f) {
-            drawLaserTip(tip, accent)
+          if (branchP > 0.005f) {
+            val lineColor = if (spec.isBuilt) {
+              accent.copy(alpha = 0.86f)
+            } else {
+              TreeRailColor.copy(alpha = 0.72f)
+            }
+            val tip = drawOrthogonalPolyline(
+              points = listOf(
+                Offset(geo.cx, geo.rootStemSplitY),
+                Offset(tx, geo.rootStemSplitY),
+                Offset(tx, geo.rootRowBottomY),
+              ),
+              progress = branchP,
+              color = lineColor,
+              strokeWidth = strokeW,
+            )
+            if (branchP < 0.97f && spec.isBuilt) {
+              drawLaserTip(tip, accent)
+            }
           }
         }
       }
@@ -527,61 +459,33 @@ fun HudSettingsRootLayer(
           .fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(geo.boxGapDp),
       ) {
-        CompactHudCard(
-          eyebrow = "01 // HUD & UI",
-          title = "LAUNCHER",
-          pipColor = accent,
-          focused = true,
-          accent = accent,
-          titleSizeSp = 11.5f,
-          reveal = { staggeredReveal(cardsMaster, 0, 3, stagger = 0.14f) },
-          enabled = canClickRoot,
-          modifier = Modifier.width(geo.rootBoxWDp).height(geo.rootBoxHDp),
-          onClick = {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            onSelectBranch(SettingsStage.LAUNCHER_TREE)
-          },
-        )
-        CompactHudCard(
-          eyebrow = "02 // AI AGENT",
-          title = "JARVIS",
-          pipColor = accent,
-          focused = true,
-          accent = accent,
-          titleSizeSp = 11.5f,
-          reveal = { staggeredReveal(cardsMaster, 1, 3, stagger = 0.14f) },
-          enabled = canClickRoot,
-          modifier = Modifier.width(geo.rootBoxWDp).height(geo.rootBoxHDp),
-          onClick = {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            onSelectBranch(SettingsStage.AGENT_PLACEHOLDER)
-          },
-        )
-        CompactHudCard(
-          eyebrow = "03 // STANDBY",
-          title = "SHIZUKU",
-          pipColor = TreeRailColor.copy(alpha = 0.65f),
-          focused = false,
-          accent = accent,
-          titleSizeSp = 11.5f,
-          reveal = { staggeredReveal(cardsMaster, 2, 3, stagger = 0.14f) },
-          enabled = canClickRoot,
-          modifier = Modifier.width(geo.rootBoxWDp).height(geo.rootBoxHDp),
-          onClick = {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            onSelectBranch(SettingsStage.SHIZUKU_PLACEHOLDER)
-          },
-        )
+        for (spec in ROOT_BRANCH_SPECS) {
+          CompactHudCard(
+            eyebrow = spec.eyebrow,
+            title = spec.title,
+            pipColor = if (spec.isBuilt) accent else TreeRailColor.copy(alpha = 0.65f),
+            focused = spec.isBuilt,
+            accent = accent,
+            titleSizeSp = 11.5f,
+            reveal = { staggeredReveal(cardsMaster, spec.index, ROOT_BRANCH_SPECS.size, stagger = 0.14f) },
+            enabled = canClickRoot,
+            modifier = Modifier.width(geo.rootBoxWDp).height(geo.rootBoxHDp),
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              onSelectBranch(spec.stage)
+            },
+          )
+        }
       }
     }
   }
 }
 
 /**
- * Stage 2 & Stage 3 settings overlay layer intended to sit above the 3D WebGL globe (`zIndex = 2f`).
- * Originates laser lines directly from the sunken Stage 1 card's top center, branches orthogonally
- * into `CompactHudCard` sections on the left, expands into an orthogonal right-hand HUD container
- * with staggered `CompactHudCard` options, and exits cleanly in one parallel 240ms unwind.
+ * Stage 2 & Stage 3 settings overlay layer sitting above the 3D WebGL globe (`zIndex = 3f`).
+ * Originates laser lines directly from the sunken Stage 1 card's top center once
+ * [HudSettingsChoreographyController] confirms Stage 1 collapse completed, and unwinds Stage 3 ->
+ * Stage 2 beams strictly before Stage 1 cards rise back above the globe.
  */
 @Composable
 fun HudSettingsOverlayLayer(
@@ -608,168 +512,30 @@ fun HudSettingsOverlayLayer(
   onOpenUsageSettings: () -> Unit,
   onOpenNotificationSettings: () -> Unit,
   onCheckOta: () -> Unit,
-  onMountedChange: (Boolean) -> Unit,
+  choreographer: HudSettingsChoreographyController = rememberHudSettingsChoreographer(stage),
   modifier: Modifier = Modifier,
   selectedJarvisSection: JarvisSettingsSection? = null,
   onSelectJarvisSection: (JarvisSettingsSection?) -> Unit = {},
   onOpenJarvisDrawer: () -> Unit = {},
 ) {
-  val context = LocalContext.current
   val accent = LocalLauncherStyle.current.accent
   val haptic = LocalHapticFeedback.current
   val density = LocalDensity.current
   val geo = rememberSettingsGeometry(screenWidth, screenHeight)
-  val currentOnMountedChange = rememberUpdatedState(onMountedChange)
 
-  val masterExitAnim = remember { Animatable(0f) }
-  val branchTreeAnim = remember { Animatable(0f) }
-  val detailCardAnim = remember { Animatable(0f) }
+  val effectiveTreeP = choreographer.branchTreeAnim.value.coerceIn(0f, 1f)
+  val effectiveDetailP = choreographer.detailCardAnim.value.coerceIn(0f, 1f)
+  if (!choreographer.mounted || (effectiveTreeP <= 0.005f && effectiveDetailP <= 0.005f)) return
 
-  var mounted by remember { mutableStateOf(stage != SettingsStage.CLOSED) }
-  var retainedStage by remember { mutableStateOf(stage) }
-  var retainedSection by remember { mutableStateOf(selectedSection) }
-  var retainedJarvisSection by remember { mutableStateOf(selectedJarvisSection) }
+  val activeStage = choreographer.retainedOverlayStage
+  if (activeStage == SettingsStage.ROOT_BRANCHES || activeStage == SettingsStage.CLOSED) return
 
-  LaunchedEffect(mounted) {
-    currentOnMountedChange.value(mounted)
-  }
-
-  LaunchedEffect(stage) {
-    if (stage == SettingsStage.AGENT_PLACEHOLDER) {
-      JarvisRuntime.ensureInitialized(context)
-      JarvisRuntime.refreshEnvironmentStatus(context)
-    }
-    if (stage == SettingsStage.CLOSED) {
-      if (!mounted) {
-        masterExitAnim.snapTo(0f)
-        branchTreeAnim.snapTo(0f)
-        detailCardAnim.snapTo(0f)
-        retainedStage = SettingsStage.CLOSED
-        retainedSection = null
-        retainedJarvisSection = null
-        return@LaunchedEffect
-      }
-      val ms = (masterExitAnim.value.coerceIn(0f, 1f) * EXIT_DURATION_MS).roundToInt().coerceAtLeast(1)
-      masterExitAnim.animateTo(0f, tween(ms, easing = LinearEasing))
-      branchTreeAnim.snapTo(0f)
-      detailCardAnim.snapTo(0f)
-      retainedStage = SettingsStage.CLOSED
-      retainedSection = null
-      retainedJarvisSection = null
-      mounted = false
-      return@LaunchedEffect
-    }
-
-    val wasUnmounted = !mounted
-    mounted = true
-
-    if (stage == SettingsStage.ROOT_BRANCHES) {
-      if (wasUnmounted) {
-        retainedStage = SettingsStage.ROOT_BRANCHES
-        retainedSection = null
-        retainedJarvisSection = null
-        branchTreeAnim.snapTo(0f)
-        detailCardAnim.snapTo(0f)
-        masterExitAnim.animateTo(1f, tween(220, easing = LinearEasing))
-      } else {
-        coroutineScope {
-          launch {
-            val eMs = ((1f - masterExitAnim.value).coerceIn(0f, 1f) * 200f).roundToInt().coerceAtLeast(1)
-            masterExitAnim.animateTo(1f, tween(eMs, easing = LinearEasing))
-          }
-          launch {
-            coroutineScope {
-              if (detailCardAnim.value > 0f) {
-                launch {
-                  val dMs = (detailCardAnim.value.coerceIn(0f, 1f) * DETAIL_EXIT_DURATION_MS)
-                    .roundToInt()
-                    .coerceAtLeast(1)
-                  detailCardAnim.animateTo(0f, tween(dMs, easing = LinearEasing))
-                }
-                delay(120L)
-              }
-              if (branchTreeAnim.value > 0f) {
-                val bMs = (branchTreeAnim.value.coerceIn(0f, 1f) * BRANCH_EXIT_DURATION_MS)
-                  .roundToInt()
-                  .coerceAtLeast(1)
-                branchTreeAnim.animateTo(0f, tween(bMs, easing = LinearEasing))
-              }
-            }
-            retainedSection = null
-            retainedJarvisSection = null
-            retainedStage = SettingsStage.ROOT_BRANCHES
-          }
-        }
-      }
-    } else {
-      val switchedBranch = retainedStage != stage
-      retainedStage = stage
-      if (stage != SettingsStage.LAUNCHER_TREE) retainedSection = null
-      if (stage != SettingsStage.AGENT_PLACEHOLDER) retainedJarvisSection = null
-      masterExitAnim.snapTo(1f)
-      if (switchedBranch) {
-        branchTreeAnim.snapTo(0f)
-        detailCardAnim.snapTo(0f)
-        delay(180L)
-      }
-      val remMs = ((1f - branchTreeAnim.value).coerceIn(0f, 1f) * BRANCH_ENTER_DURATION_MS)
-        .roundToInt()
-        .coerceAtLeast(1)
-      branchTreeAnim.animateTo(1f, tween(remMs, easing = LinearEasing))
-    }
-  }
-
-  LaunchedEffect(stage, selectedSection, selectedJarvisSection) {
-    if (stage != SettingsStage.LAUNCHER_TREE && stage != SettingsStage.AGENT_PLACEHOLDER) {
-      return@LaunchedEffect
-    }
-    val nextLauncher = if (stage == SettingsStage.LAUNCHER_TREE) selectedSection else null
-    val nextJarvis = if (stage == SettingsStage.AGENT_PLACEHOLDER) selectedJarvisSection else null
-    val hasSelection = nextLauncher != null || nextJarvis != null
-    val switchedDetail = (nextLauncher != null && retainedSection != null && retainedSection != nextLauncher) ||
-      (nextJarvis != null && retainedJarvisSection != null && retainedJarvisSection != nextJarvis)
-
-    if (hasSelection) {
-      if (detailCardAnim.value > 0.01f && switchedDetail) {
-        val switchOutMs = (detailCardAnim.value.coerceIn(0f, 1f) * 280f).roundToInt().coerceAtLeast(1)
-        detailCardAnim.animateTo(0f, tween(switchOutMs, easing = LinearEasing))
-      }
-      retainedSection = nextLauncher
-      retainedJarvisSection = nextJarvis
-      if (branchTreeAnim.value < 0.35f) {
-        delay(180L)
-      }
-      detailCardAnim.snapTo(0f)
-      detailCardAnim.animateTo(1f, tween(DETAIL_ENTER_DURATION_MS, easing = LinearEasing))
-    } else if (detailCardAnim.value > 0f) {
-      val ms = (detailCardAnim.value.coerceIn(0f, 1f) * DETAIL_EXIT_DURATION_MS)
-        .roundToInt()
-        .coerceAtLeast(1)
-      detailCardAnim.animateTo(0f, tween(ms, easing = LinearEasing))
-      retainedSection = null
-      retainedJarvisSection = null
-    } else {
-      retainedSection = null
-      retainedJarvisSection = null
-    }
-  }
-
-  if (!mounted) return
-
-  val exitP = masterExitAnim.value.coerceIn(0f, 1f)
-  val isInteractive = stage != SettingsStage.CLOSED && exitP > 0.55f
-  val activeStage = retainedStage
-  val activeSection = if (activeStage == SettingsStage.LAUNCHER_TREE) retainedSection else null
-  val activeJarvisSection = if (activeStage == SettingsStage.AGENT_PLACEHOLDER) retainedJarvisSection else null
-  val effectiveTreeP = branchTreeAnim.value * exitP
-  val effectiveDetailP = detailCardAnim.value * exitP
+  val isInteractive = stage == activeStage && effectiveTreeP > 0.55f
+  val activeSection = if (activeStage == SettingsStage.LAUNCHER_TREE) choreographer.retainedLauncherSection else null
+  val activeJarvisSection = if (activeStage == SettingsStage.AGENT_PLACEHOLDER) choreographer.retainedJarvisSection else null
 
   Box(
-    modifier = modifier
-      .fillMaxSize()
-      .graphicsLayer {
-        alpha = (exitP / 0.16f).coerceIn(0f, 1f)
-      },
+    modifier = modifier.fillMaxSize(),
   ) {
     if (activeStage == SettingsStage.LAUNCHER_TREE) {
       // STAGE 2 & 3: Branch 01 LAUNCHER Deep Tree (Sunken Card 01 -> Left Tree -> Right Detail HUD)
