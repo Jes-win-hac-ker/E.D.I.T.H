@@ -76,6 +76,7 @@ import com.nexwork.edith.data.OtaState
 import com.nexwork.edith.jarvis.core.JarvisEventRecord
 import com.nexwork.edith.jarvis.core.JarvisRuntime
 import com.nexwork.edith.jarvis.core.TriageStatus
+import com.nexwork.edith.jarvis.security.BiometricPromptHelper
 import com.nexwork.edith.model.DeviceTelemetry
 import com.nexwork.edith.model.JarvisSettingsSection
 import com.nexwork.edith.model.LauncherAccentPreset
@@ -1380,6 +1381,8 @@ private fun JarvisDetailCardContent(
   val scrollState = rememberScrollState()
   var apiKeyInput by remember { mutableStateOf("") }
   var revealApiKey by remember { mutableStateOf(false) }
+  var commandDraft by remember { mutableStateOf("") }
+  var contactDraft by remember { mutableStateOf("") }
 
   Column(
     modifier = Modifier
@@ -1395,24 +1398,67 @@ private fun JarvisDetailCardContent(
       accent = accent,
     )
 
+    val pendingTier3 = uiState.pendingTier3Approval
+    if (pendingTier3 != null) {
+      CompactHudCard(
+        eyebrow = pendingTier3.actionTitle,
+        title = pendingTier3.actionSummary.uppercase(),
+        badge = "BIO",
+        pipColor = WarmSunAccent,
+        focused = true,
+        accent = WarmSunAccent,
+        titleSizeSp = 9.4f,
+        reveal = { staggeredReveal(reveal(), 1, 5, stagger = 0.14f) },
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth().height(46.dp),
+        onClick = {
+          haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+          BiometricPromptHelper.authenticate(
+            context = context,
+            title = pendingTier3.actionTitle,
+            subtitle = pendingTier3.actionSummary,
+            description = pendingTier3.reason,
+          ) { approved, _ ->
+            JarvisRuntime.resolveTier3Approval(pendingTier3.requestId, approved)
+          }
+        },
+      )
+      CompactHudCard(
+        title = "DENY TIER 3",
+        focused = false,
+        accent = CrimsonBright,
+        titleSizeSp = 9.2f,
+        centerText = true,
+        reveal = { staggeredReveal(reveal(), 1, 5, stagger = 0.14f) },
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth().height(34.dp),
+        onClick = {
+          haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+          JarvisRuntime.resolveTier3Approval(pendingTier3.requestId, false)
+        },
+      )
+    }
+
     val bannerText = when {
+      uiState.isExecutingCommand -> "EXECUTING // HYDROGEN"
       uiState.isProcessing -> "TRIAGING // 3.5-LITE"
       !uiState.lastError.isNullOrBlank() -> uiState.lastError
       !uiState.lastStatusBanner.isNullOrBlank() -> uiState.lastStatusBanner
       else -> null
     }
     if (bannerText != null) {
-      val isErr = !uiState.isProcessing && !uiState.lastError.isNullOrBlank()
+      val busy = uiState.isProcessing || uiState.isExecutingCommand
+      val isErr = !busy && !uiState.lastError.isNullOrBlank()
       CompactHudCard(
         eyebrow = if (isErr) "FAULT" else "STATUS",
         title = bannerText.uppercase(),
-        badge = if (uiState.isProcessing) "RUN" else "CLR",
+        badge = if (busy) "RUN" else "CLR",
         focused = true,
         accent = if (isErr) CrimsonBright else accent,
         pipColor = if (isErr) CrimsonBright else accent,
         titleSizeSp = 9.4f,
         reveal = { staggeredReveal(reveal(), 1, 5, stagger = 0.14f) },
-        enabled = enabled && !uiState.isProcessing,
+        enabled = enabled && !busy,
         modifier = Modifier.fillMaxWidth().height(42.dp),
         onClick = {
           haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -1423,7 +1469,7 @@ private fun JarvisDetailCardContent(
 
     when (section) {
       JarvisSettingsSection.RUNTIME -> {
-        val totalSteps = 5
+        val totalSteps = 6
         val fgsRunning = uiState.serviceStatus.isRunning
         CompactHudCard(
           eyebrow = "STICKY FGS",
@@ -1435,43 +1481,81 @@ private fun JarvisDetailCardContent(
           titleSizeSp = 10.2f,
           reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.14f) },
           enabled = enabled,
-          modifier = Modifier.fillMaxWidth().height(46.dp),
+          modifier = Modifier.fillMaxWidth().height(44.dp),
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             JarvisRuntime.startServiceSafely(context)
           },
         )
         CompactHudCard(
-          eyebrow = "REMOTEINPUT",
-          title = "${uiState.activeReplyHandleCount} HANDLES",
-          badge = if (uiState.activeReplyHandleCount > 0) "LIVE" else "IDLE",
-          pipColor = if (uiState.activeReplyHandleCount > 0) accent else TreeRailColor,
-          focused = uiState.activeReplyHandleCount > 0,
-          accent = accent,
-          titleSizeSp = 10.2f,
+          eyebrow = "TIER 3 GATE",
+          title = "BIOMETRIC CHECK",
+          badge = "TEST",
+          focused = uiState.pendingTier3Approval != null,
+          accent = WarmSunAccent,
+          titleSizeSp = 9.8f,
           reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.14f) },
-          enabled = false,
-          modifier = Modifier.fillMaxWidth().height(44.dp),
-        )
-        CompactHudCard(
-          eyebrow = "READER MODEL",
-          title = if (uiState.isProcessing) "SCANNING..." else "STANDBY",
-          badge = "SYNC",
-          focused = uiState.isProcessing,
-          accent = accent,
-          titleSizeSp = 10.2f,
-          reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.14f) },
           enabled = enabled,
-          modifier = Modifier.fillMaxWidth().height(44.dp),
+          modifier = Modifier.fillMaxWidth().height(42.dp),
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            JarvisRuntime.refreshEnvironmentStatus(context)
+            JarvisRuntime.triggerTier3BiometricTest(context)
           },
         )
+        HudMicroLabel(
+          text = "CMD // ${uiState.playbooks.size} PLAYBOOKS",
+          reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.14f) },
+        )
+        HudSharpTextInput(
+          value = commandDraft,
+          onValueChange = { commandDraft = it },
+          placeholder = "search app for ...",
+          reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.14f) },
+          accent = accent,
+          onDone = {
+            if (commandDraft.isNotBlank() && !uiState.isExecutingCommand) {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              val cmd = commandDraft
+              commandDraft = ""
+              keyboardController?.hide()
+              focusManager.clearFocus()
+              JarvisRuntime.executeUiCommand(context, cmd)
+            }
+          },
+        )
+        CompactHudCard(
+          title = if (uiState.isExecutingCommand) "RUNNING..." else "RUN UI COMMAND",
+          focused = commandDraft.isNotBlank(),
+          accent = accent,
+          titleSizeSp = 9.6f,
+          centerText = true,
+          reveal = { staggeredReveal(reveal(), 4, totalSteps, stagger = 0.14f) },
+          enabled = enabled && !uiState.isExecutingCommand && commandDraft.isNotBlank(),
+          modifier = Modifier.fillMaxWidth().height(36.dp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            val cmd = commandDraft
+            commandDraft = ""
+            keyboardController?.hide()
+            focusManager.clearFocus()
+            JarvisRuntime.executeUiCommand(context, cmd)
+          },
+        )
+        if (uiState.lastExecutionLog.isNotEmpty()) {
+          Text(
+            text = uiState.lastExecutionLog.takeLast(3).joinToString("\n"),
+            color = TextSilver,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 8.5.sp,
+            lineHeight = 11.sp,
+            maxLines = 4,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
       }
 
       JarvisSettingsSection.PERMISSIONS -> {
-        val totalSteps = 4
+        val totalSteps = 5
         val listenerOk = uiState.notificationListenerEnabled && uiState.notificationListenerConnected
         val listenerTag = when {
           listenerOk -> "LIVE"
@@ -1493,10 +1577,37 @@ private fun JarvisDetailCardContent(
           titleSizeSp = 10.4f,
           reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.14f) },
           enabled = enabled,
-          modifier = Modifier.fillMaxWidth().height(46.dp),
+          modifier = Modifier.fillMaxWidth().height(44.dp),
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             JarvisRuntime.openNotificationListenerSettings(context)
+          },
+        )
+        val a11yOk = uiState.accessibilityEnabled && uiState.accessibilityConnected
+        val a11yTag = when {
+          a11yOk -> "LIVE"
+          uiState.accessibilityEnabled -> "BIND"
+          else -> "GRANT"
+        }
+        val a11yTint = when {
+          a11yOk -> accent
+          uiState.accessibilityEnabled -> WarmSunAccent
+          else -> CrimsonBright
+        }
+        CompactHudCard(
+          eyebrow = "UI HANDS",
+          title = "ACCESSIBILITY",
+          badge = a11yTag,
+          pipColor = a11yTint,
+          focused = a11yOk,
+          accent = a11yTint,
+          titleSizeSp = 10.2f,
+          reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.14f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(44.dp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.openAccessibilitySettings(context)
           },
         )
         CompactHudCard(
@@ -1507,9 +1618,9 @@ private fun JarvisDetailCardContent(
           focused = uiState.batteryUnrestricted,
           accent = if (uiState.batteryUnrestricted) accent else WarmSunAccent,
           titleSizeSp = 10.2f,
-          reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.14f) },
+          reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.14f) },
           enabled = enabled,
-          modifier = Modifier.fillMaxWidth().height(46.dp),
+          modifier = Modifier.fillMaxWidth().height(44.dp),
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             JarvisRuntime.requestBatteryUnrestricted(context)
@@ -1522,9 +1633,9 @@ private fun JarvisDetailCardContent(
           focused = false,
           accent = accent,
           titleSizeSp = 10.0f,
-          reveal = { staggeredReveal(reveal(), 3, totalSteps, stagger = 0.14f) },
+          reveal = { staggeredReveal(reveal(), 4, totalSteps, stagger = 0.14f) },
           enabled = enabled,
-          modifier = Modifier.fillMaxWidth().height(44.dp),
+          modifier = Modifier.fillMaxWidth().height(42.dp),
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             onOpenJarvisDrawer()
@@ -1676,44 +1787,105 @@ private fun JarvisDetailCardContent(
       }
 
       JarvisSettingsSection.RULEBOOK -> {
-        val visibleRules = uiState.rules.take(10)
-        val totalSteps = (visibleRules.size + 3).coerceAtLeast(4)
-        CompactHudCard(
-          eyebrow = "LOCAL GATEKEEPER",
-          title = "${uiState.rules.size} SQL RULES",
-          badge = "ACTIVE",
-          pipColor = accent,
-          focused = true,
-          accent = accent,
-          titleSizeSp = 10.2f,
-          reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.14f) },
-          enabled = false,
-          modifier = Modifier.fillMaxWidth().height(46.dp),
+        val visibleContacts = uiState.trustedContacts.take(6)
+        val visiblePlaybooks = uiState.playbooks.take(6)
+        val totalSteps = (visibleContacts.size + visiblePlaybooks.size + 4).coerceAtLeast(5)
+        HudMicroLabel(
+          text = "TRUSTED CONTACTS (${uiState.trustedContacts.size})",
+          reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.12f) },
         )
-        if (visibleRules.isEmpty()) {
+        HudSharpTextInput(
+          value = contactDraft,
+          onValueChange = { contactDraft = it },
+          placeholder = "Add trusted contact",
+          reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.12f) },
+          accent = accent,
+          onDone = {
+            if (contactDraft.isNotBlank()) {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              JarvisRuntime.addOrUpdateTrustedContact(context, contactDraft)
+              contactDraft = ""
+              keyboardController?.hide()
+              focusManager.clearFocus()
+            }
+          },
+        )
+        if (contactDraft.isNotBlank()) {
           CompactHudCard(
-            eyebrow = "BUILT-IN FILTER",
-            title = "NO CUSTOM RULES",
-            badge = "AUTO",
+            title = "+ TRUST ${contactDraft.trim().uppercase()}",
+            focused = true,
+            accent = accent,
+            titleSizeSp = 9.5f,
+            centerText = true,
+            reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.12f) },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth().height(34.dp),
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              JarvisRuntime.addOrUpdateTrustedContact(context, contactDraft)
+              contactDraft = ""
+              keyboardController?.hide()
+              focusManager.clearFocus()
+            },
+          )
+        }
+        visibleContacts.forEachIndexed { idx, contact ->
+          CompactHudCard(
+            eyebrow = contact.packageName.substringAfterLast('.').ifBlank { "ANY APP" }.uppercase(),
+            title = contact.displayName.uppercase(),
+            badge = if (contact.autoReplyEnabled) "TRUST" else "OFF",
+            pipColor = if (contact.autoReplyEnabled) accent else WarmSunAccent,
+            focused = contact.autoReplyEnabled,
+            accent = if (contact.autoReplyEnabled) accent else WarmSunAccent,
+            titleSizeSp = 9.8f,
+            reveal = { staggeredReveal(reveal(), (idx + 2).coerceAtMost(totalSteps - 1), totalSteps, stagger = 0.12f) },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth().height(42.dp),
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              JarvisRuntime.toggleTrustedContact(context, contact.contactKey, !contact.autoReplyEnabled)
+            },
+          )
+        }
+        HudMicroLabel(
+          text = "UI PLAYBOOKS (${uiState.playbooks.size})",
+          reveal = { staggeredReveal(reveal(), (visibleContacts.size + 2).coerceAtMost(totalSteps - 1), totalSteps, stagger = 0.12f) },
+        )
+        if (visiblePlaybooks.isEmpty()) {
+          CompactHudCard(
+            eyebrow = "SQLITE SKILL STORE",
+            title = "NO PLAYBOOKS YET",
+            badge = "0",
             focused = false,
             accent = accent,
-            titleSizeSp = 10.0f,
-            reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.14f) },
+            titleSizeSp = 9.8f,
+            reveal = { staggeredReveal(reveal(), (visibleContacts.size + 3).coerceAtMost(totalSteps - 1), totalSteps, stagger = 0.12f) },
             enabled = false,
-            modifier = Modifier.fillMaxWidth().height(44.dp),
+            modifier = Modifier.fillMaxWidth().height(42.dp),
           )
         } else {
-          visibleRules.forEachIndexed { idx, rule ->
+          visiblePlaybooks.forEachIndexed { idx, pb ->
             CompactHudCard(
-              eyebrow = rule.ruleType.uppercase(),
-              title = rule.pattern.uppercase(),
-              badge = if (rule.enabled) "ON" else "OFF",
-              focused = rule.enabled,
+              eyebrow = "${pb.steps.size} STEPS · ${pb.targetPackage.substringAfterLast('.')}",
+              title = pb.triggerIntent.uppercase(),
+              badge = "${pb.successCount}X",
+              focused = pb.successCount > 0,
               accent = accent,
-              titleSizeSp = 9.8f,
-              reveal = { staggeredReveal(reveal(), (idx + 2).coerceAtMost(totalSteps - 1), totalSteps, stagger = 0.12f) },
-              enabled = false,
+              titleSizeSp = 9.6f,
+              reveal = {
+                staggeredReveal(
+                  reveal(),
+                  (visibleContacts.size + idx + 3).coerceAtMost(totalSteps - 1),
+                  totalSteps,
+                  stagger = 0.10f,
+                )
+              },
+              enabled = enabled,
               modifier = Modifier.fillMaxWidth().height(42.dp),
+              onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                JarvisRuntime.executeUiCommand(context, pb.triggerIntent)
+              },
             )
           }
         }

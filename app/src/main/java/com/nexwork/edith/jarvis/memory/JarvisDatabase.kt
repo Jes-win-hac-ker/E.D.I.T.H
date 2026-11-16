@@ -8,8 +8,11 @@ import com.nexwork.edith.jarvis.core.CapturedNotification
 import com.nexwork.edith.jarvis.core.JarvisEventRecord
 import com.nexwork.edith.jarvis.core.JarvisRule
 import com.nexwork.edith.jarvis.core.NotificationTriage
+import com.nexwork.edith.jarvis.core.PlaybookStep
 import com.nexwork.edith.jarvis.core.ThreadMessage
 import com.nexwork.edith.jarvis.core.TriageStatus
+import com.nexwork.edith.jarvis.core.TrustedContact
+import com.nexwork.edith.jarvis.core.UiPlaybook
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -88,10 +91,50 @@ class JarvisDatabase(
     db.execSQL(
       "CREATE INDEX IF NOT EXISTS idx_rulebook_enabled ON $TABLE_USER_RULEBOOK($COL_ENABLED)"
     )
+    createV2Tables(db)
   }
 
   override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-    // Milestone 1 starts at v1; future schema changes will perform additive migrations.
+    if (oldVersion < 2) {
+      createV2Tables(db)
+    }
+  }
+
+  private fun createV2Tables(db: SQLiteDatabase) {
+    db.execSQL(
+      """
+      CREATE TABLE IF NOT EXISTS $TABLE_UI_PLAYBOOKS (
+        $COL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+        $COL_SKILL_ID TEXT NOT NULL UNIQUE,
+        $COL_TRIGGER_INTENT TEXT NOT NULL,
+        $COL_TARGET_PACKAGE TEXT NOT NULL,
+        $COL_STEPS_JSON TEXT NOT NULL,
+        $COL_SUCCESS_COUNT INTEGER NOT NULL DEFAULT 0,
+        $COL_CREATED_AT_MS INTEGER NOT NULL,
+        $COL_UPDATED_AT_MS INTEGER NOT NULL
+      )
+      """.trimIndent()
+    )
+    db.execSQL(
+      "CREATE INDEX IF NOT EXISTS idx_playbooks_intent ON $TABLE_UI_PLAYBOOKS($COL_TRIGGER_INTENT, $COL_SUCCESS_COUNT DESC)"
+    )
+    db.execSQL(
+      """
+      CREATE TABLE IF NOT EXISTS $TABLE_TRUSTED_CONTACTS (
+        $COL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+        $COL_CONTACT_KEY TEXT NOT NULL UNIQUE,
+        $COL_DISPLAY_NAME TEXT NOT NULL,
+        $COL_PACKAGE_NAME TEXT NOT NULL DEFAULT '',
+        $COL_AUTO_REPLY_ENABLED INTEGER NOT NULL DEFAULT 1,
+        $COL_MAX_TIER INTEGER NOT NULL DEFAULT 2,
+        $COL_CREATED_AT_MS INTEGER NOT NULL,
+        $COL_UPDATED_AT_MS INTEGER NOT NULL
+      )
+      """.trimIndent()
+    )
+    db.execSQL(
+      "CREATE INDEX IF NOT EXISTS idx_trusted_contacts_name ON $TABLE_TRUSTED_CONTACTS($COL_DISPLAY_NAME)"
+    )
   }
 
   /** Verifies whether SQLite is operating in Write-Ahead Logging mode. */
@@ -336,6 +379,225 @@ class JarvisDatabase(
     return writableDatabase.delete(TABLE_USER_RULEBOOK, "$COL_ID = ?", arrayOf(ruleId.toString()))
   }
 
+  fun upsertPlaybook(
+    skillId: String,
+    triggerIntent: String,
+    targetPackage: String,
+    steps: List<PlaybookStep>,
+    incrementSuccess: Boolean = false,
+    nowMs: Long = System.currentTimeMillis(),
+  ): Long {
+    val db = writableDatabase
+    val encodedSteps = json.encodeToString(steps)
+    val values = ContentValues().apply {
+      put(COL_SKILL_ID, skillId)
+      put(COL_TRIGGER_INTENT, normalizeKey(triggerIntent))
+      put(COL_TARGET_PACKAGE, targetPackage.trim())
+      put(COL_STEPS_JSON, encodedSteps)
+      put(COL_UPDATED_AT_MS, nowMs)
+    }
+
+    val updated = db.update(TABLE_UI_PLAYBOOKS, values, "$COL_SKILL_ID = ?", arrayOf(skillId))
+    if (updated > 0) {
+      if (incrementSuccess) {
+        incrementPlaybookSuccess(skillId, nowMs)
+      }
+      db.query(
+        TABLE_UI_PLAYBOOKS,
+        arrayOf(COL_ID),
+        "$COL_SKILL_ID = ?",
+        arrayOf(skillId),
+        null,
+        null,
+        null,
+      ).use { c -> if (c.moveToFirst()) return c.getLong(0) }
+    }
+
+    values.put(COL_SUCCESS_COUNT, if (incrementSuccess) 1 else 0)
+    values.put(COL_CREATED_AT_MS, nowMs)
+    return db.insertOrThrow(TABLE_UI_PLAYBOOKS, null, values)
+  }
+
+  fun incrementPlaybookSuccess(skillId: String, nowMs: Long = System.currentTimeMillis()) {
+    writableDatabase.execSQL(
+      "UPDATE $TABLE_UI_PLAYBOOKS SET $COL_SUCCESS_COUNT = $COL_SUCCESS_COUNT + 1, $COL_UPDATED_AT_MS = ? WHERE $COL_SKILL_ID = ?",
+      arrayOf<Any>(nowMs, skillId),
+    )
+  }
+
+  fun findPlaybooksForIntent(
+    triggerIntent: String,
+    targetPackage: String? = null,
+  ): List<UiPlaybook> {
+    val normalized = normalizeKey(triggerIntent)
+    if (normalized.isEmpty()) return emptyList()
+    val all = getAllPlaybooks()
+    return all.filter { pb ->
+      val pkgMatches = targetPackage.isNullOrBlank() ||
+        pb.targetPackage.equals(targetPackage, ignoreCase = true)
+      val intentMatches = pb.triggerIntent == normalized ||
+        normalized.contains(pb.triggerIntent) ||
+        pb.triggerIntent.contains(normalized)
+      pkgMatches && intentMatches
+    }.sortedWith(
+      compareByDescending<UiPlaybook> { it.triggerIntent == normalized }
+        .thenByDescending { it.successCount }
+        .thenByDescending { it.updatedAtMs }
+    )
+  }
+
+  fun getAllPlaybooks(limit: Int = 50): List<UiPlaybook> {
+    val list = mutableListOf<UiPlaybook>()
+    readableDatabase.query(
+      TABLE_UI_PLAYBOOKS,
+      null,
+      null,
+      null,
+      null,
+      null,
+      "$COL_SUCCESS_COUNT DESC, $COL_UPDATED_AT_MS DESC",
+      limit.coerceIn(1, 200).toString(),
+    ).use { c ->
+      val idxId = c.getColumnIndexOrThrow(COL_ID)
+      val idxSkill = c.getColumnIndexOrThrow(COL_SKILL_ID)
+      val idxIntent = c.getColumnIndexOrThrow(COL_TRIGGER_INTENT)
+      val idxPkg = c.getColumnIndexOrThrow(COL_TARGET_PACKAGE)
+      val idxSteps = c.getColumnIndexOrThrow(COL_STEPS_JSON)
+      val idxCount = c.getColumnIndexOrThrow(COL_SUCCESS_COUNT)
+      val idxCreated = c.getColumnIndexOrThrow(COL_CREATED_AT_MS)
+      val idxUpdated = c.getColumnIndexOrThrow(COL_UPDATED_AT_MS)
+      while (c.moveToNext()) {
+        val rawSteps = c.getString(idxSteps)
+        val steps = runCatching { json.decodeFromString<List<PlaybookStep>>(rawSteps) }.getOrDefault(emptyList())
+        list.add(
+          UiPlaybook(
+            id = c.getLong(idxId),
+            skillId = c.getString(idxSkill),
+            triggerIntent = c.getString(idxIntent),
+            targetPackage = c.getString(idxPkg),
+            steps = steps,
+            stepsJson = rawSteps,
+            successCount = c.getInt(idxCount),
+            createdAtMs = c.getLong(idxCreated),
+            updatedAtMs = c.getLong(idxUpdated),
+          )
+        )
+      }
+    }
+    return list
+  }
+
+  fun deletePlaybook(skillId: String): Int {
+    return writableDatabase.delete(TABLE_UI_PLAYBOOKS, "$COL_SKILL_ID = ?", arrayOf(skillId))
+  }
+
+  fun upsertTrustedContact(
+    displayName: String,
+    packageName: String = "",
+    autoReplyEnabled: Boolean = true,
+    maxTier: Int = 2,
+    nowMs: Long = System.currentTimeMillis(),
+  ): Long {
+    val cleanName = displayName.trim()
+    val cleanPkg = packageName.trim().lowercase()
+    val contactKey = buildContactKey(cleanName, cleanPkg)
+    val values = ContentValues().apply {
+      put(COL_CONTACT_KEY, contactKey)
+      put(COL_DISPLAY_NAME, cleanName)
+      put(COL_PACKAGE_NAME, cleanPkg)
+      put(COL_AUTO_REPLY_ENABLED, if (autoReplyEnabled) 1 else 0)
+      put(COL_MAX_TIER, maxTier.coerceIn(0, 3))
+      put(COL_UPDATED_AT_MS, nowMs)
+    }
+    val db = writableDatabase
+    val updated = db.update(TABLE_TRUSTED_CONTACTS, values, "$COL_CONTACT_KEY = ?", arrayOf(contactKey))
+    if (updated > 0) {
+      db.query(
+        TABLE_TRUSTED_CONTACTS,
+        arrayOf(COL_ID),
+        "$COL_CONTACT_KEY = ?",
+        arrayOf(contactKey),
+        null,
+        null,
+        null,
+      ).use { c -> if (c.moveToFirst()) return c.getLong(0) }
+    }
+    values.put(COL_CREATED_AT_MS, nowMs)
+    return db.insertOrThrow(TABLE_TRUSTED_CONTACTS, null, values)
+  }
+
+  fun setTrustedContactEnabled(
+    contactKey: String,
+    enabled: Boolean,
+    nowMs: Long = System.currentTimeMillis(),
+  ): Int {
+    val values = ContentValues().apply {
+      put(COL_AUTO_REPLY_ENABLED, if (enabled) 1 else 0)
+      put(COL_UPDATED_AT_MS, nowMs)
+    }
+    return writableDatabase.update(TABLE_TRUSTED_CONTACTS, values, "$COL_CONTACT_KEY = ?", arrayOf(contactKey))
+  }
+
+  fun isContactTrusted(displayName: String, packageName: String = ""): Boolean {
+    val cleanName = displayName.trim().lowercase()
+    if (cleanName.isEmpty()) return false
+    val cleanPkg = packageName.trim().lowercase()
+    val exactKey = buildContactKey(cleanName, cleanPkg)
+    val wildcardKey = buildContactKey(cleanName, "")
+    readableDatabase.query(
+      TABLE_TRUSTED_CONTACTS,
+      arrayOf(COL_ID),
+      "$COL_AUTO_REPLY_ENABLED = 1 AND ($COL_CONTACT_KEY = ? OR $COL_CONTACT_KEY = ?)",
+      arrayOf(exactKey, wildcardKey),
+      null,
+      null,
+      null,
+      "1",
+    ).use { c -> return c.moveToFirst() }
+  }
+
+  fun getTrustedContacts(limit: Int = 50): List<TrustedContact> {
+    val list = mutableListOf<TrustedContact>()
+    readableDatabase.query(
+      TABLE_TRUSTED_CONTACTS,
+      null,
+      null,
+      null,
+      null,
+      null,
+      "$COL_AUTO_REPLY_ENABLED DESC, $COL_UPDATED_AT_MS DESC",
+      limit.coerceIn(1, 200).toString(),
+    ).use { c ->
+      val idxId = c.getColumnIndexOrThrow(COL_ID)
+      val idxKey = c.getColumnIndexOrThrow(COL_CONTACT_KEY)
+      val idxName = c.getColumnIndexOrThrow(COL_DISPLAY_NAME)
+      val idxPkg = c.getColumnIndexOrThrow(COL_PACKAGE_NAME)
+      val idxEnabled = c.getColumnIndexOrThrow(COL_AUTO_REPLY_ENABLED)
+      val idxTier = c.getColumnIndexOrThrow(COL_MAX_TIER)
+      val idxCreated = c.getColumnIndexOrThrow(COL_CREATED_AT_MS)
+      val idxUpdated = c.getColumnIndexOrThrow(COL_UPDATED_AT_MS)
+      while (c.moveToNext()) {
+        list.add(
+          TrustedContact(
+            id = c.getLong(idxId),
+            contactKey = c.getString(idxKey),
+            displayName = c.getString(idxName),
+            packageName = c.getString(idxPkg),
+            autoReplyEnabled = c.getInt(idxEnabled) == 1,
+            maxTier = c.getInt(idxTier),
+            createdAtMs = c.getLong(idxCreated),
+            updatedAtMs = c.getLong(idxUpdated),
+          )
+        )
+      }
+    }
+    return list
+  }
+
+  fun deleteTrustedContact(contactKey: String): Int {
+    return writableDatabase.delete(TABLE_TRUSTED_CONTACTS, "$COL_CONTACT_KEY = ?", arrayOf(contactKey))
+  }
+
   private fun pruneOldEvents(db: SQLiteDatabase) {
     db.execSQL(
       """
@@ -351,12 +613,14 @@ class JarvisDatabase(
 
   companion object {
     const val DB_NAME = "jarvis_memory.db"
-    const val DB_VERSION = 1
+    const val DB_VERSION = 2
     private const val DEFAULT_FEED_LIMIT = 50
     private const val MAX_EVENT_ROWS = 500
 
     const val TABLE_EVENT_LOG = "event_log"
     const val TABLE_USER_RULEBOOK = "user_rulebook"
+    const val TABLE_UI_PLAYBOOKS = "ui_playbooks"
+    const val TABLE_TRUSTED_CONTACTS = "trusted_contacts"
 
     private const val COL_ID = "id"
     private const val COL_SBN_KEY = "sbn_key"
@@ -385,5 +649,25 @@ class JarvisDatabase(
     private const val COL_INSTRUCTION = "instruction"
     private const val COL_ENABLED = "enabled"
     private const val COL_UPDATED_AT_MS = "updated_at_ms"
+
+    private const val COL_SKILL_ID = "skill_id"
+    private const val COL_TRIGGER_INTENT = "trigger_intent"
+    private const val COL_TARGET_PACKAGE = "target_package"
+    private const val COL_STEPS_JSON = "steps_json"
+    private const val COL_SUCCESS_COUNT = "success_count"
+
+    private const val COL_CONTACT_KEY = "contact_key"
+    private const val COL_DISPLAY_NAME = "display_name"
+    private const val COL_AUTO_REPLY_ENABLED = "auto_reply_enabled"
+    private const val COL_MAX_TIER = "max_tier"
+
+    internal fun buildContactKey(displayName: String, packageName: String): String {
+      val name = displayName.trim().lowercase().replace(Regex("""\s+"""), " ")
+      val pkg = packageName.trim().lowercase()
+      return "$pkg|$name"
+    }
+
+    internal fun normalizeKey(raw: String): String =
+      raw.trim().lowercase().replace(Regex("""\s+"""), " ")
   }
 }

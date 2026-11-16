@@ -58,7 +58,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nexwork.edith.jarvis.core.JarvisEventRecord
 import com.nexwork.edith.jarvis.core.JarvisRuntime
 import com.nexwork.edith.jarvis.core.JarvisUiState
+import com.nexwork.edith.jarvis.core.Tier3ApprovalRequest
 import com.nexwork.edith.jarvis.core.TriageStatus
+import com.nexwork.edith.jarvis.core.TrustedContact
+import com.nexwork.edith.jarvis.security.BiometricPromptHelper
 import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.GlassSurface
 import com.nexwork.edith.theme.GlassSurfaceElevated
@@ -132,10 +135,12 @@ fun JarvisBaseplatePanel(
 
   var apiKeyInput by remember { mutableStateOf("") }
   var revealApiKey by remember { mutableStateOf(false) }
+  var commandDraft by remember { mutableStateOf("") }
+  var contactDraft by remember { mutableStateOf("") }
 
   Column(
     modifier = modifier.imePadding(),
-    verticalArrangement = Arrangement.spacedBy(10.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     // Header row
     Row(
@@ -153,10 +158,10 @@ fun JarvisBaseplatePanel(
           letterSpacing = 1.2.sp,
         )
         Text(
-          text = "QUARANTINED READER · ${uiState.activeReplyHandleCount} REPLY HANDLES",
+          text = "${uiState.playbooks.size} PLAYBOOKS · ${uiState.activeReplyHandleCount} REPLY HANDLES",
           color = TextPureWhite,
           fontFamily = FontFamily.Monospace,
-          fontSize = 12.sp,
+          fontSize = 11.5.sp,
           fontWeight = FontWeight.Bold,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
@@ -188,171 +193,278 @@ fun JarvisBaseplatePanel(
       }
     }
 
-    // 3 Live Status Pills: Foreground Service, Notification Listener, Battery Unrestricted
-    FlowRow(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.spacedBy(6.dp),
-      verticalArrangement = Arrangement.spacedBy(6.dp),
+    LazyColumn(
+      modifier = Modifier
+        .fillMaxWidth()
+        .weight(1f),
+      verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-      StatusPill(
-        label = "FGS",
-        value = if (uiState.serviceStatus.isRunning) {
-          "ACTIVE (${uiState.serviceStatus.processedCount})"
-        } else {
-          "STOPPED"
-        },
-        state = if (uiState.serviceStatus.isRunning) PillState.OK else PillState.FAULT,
-        accent = accent,
-        onClick = {
-          haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-          JarvisRuntime.startServiceSafely(context)
-        },
-      )
+      // Live Status Pills: FGS, LISTENER, ACCESSIBILITY HANDS, BATTERY
+      item(key = "status_pills") {
+        FlowRow(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          StatusPill(
+            label = "FGS",
+            value = if (uiState.serviceStatus.isRunning) {
+              "ACTIVE (${uiState.serviceStatus.processedCount})"
+            } else {
+              "STOPPED"
+            },
+            state = if (uiState.serviceStatus.isRunning) PillState.OK else PillState.FAULT,
+            accent = accent,
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              JarvisRuntime.startServiceSafely(context)
+            },
+          )
 
-      val listenerState = when {
-        uiState.notificationListenerEnabled && uiState.notificationListenerConnected -> PillState.OK
-        uiState.notificationListenerEnabled -> PillState.WARN
-        else -> PillState.FAULT
-      }
-      val listenerValue = when {
-        uiState.notificationListenerEnabled && uiState.notificationListenerConnected -> "LIVE"
-        uiState.notificationListenerEnabled -> "BINDING"
-        else -> "GRANT"
-      }
-      StatusPill(
-        label = "LISTENER",
-        value = listenerValue,
-        state = listenerState,
-        accent = accent,
-        onClick = {
-          haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-          JarvisRuntime.openNotificationListenerSettings(context)
-        },
-      )
+          val listenerState = when {
+            uiState.notificationListenerEnabled && uiState.notificationListenerConnected -> PillState.OK
+            uiState.notificationListenerEnabled -> PillState.WARN
+            else -> PillState.FAULT
+          }
+          val listenerValue = when {
+            uiState.notificationListenerEnabled && uiState.notificationListenerConnected -> "LIVE"
+            uiState.notificationListenerEnabled -> "BINDING"
+            else -> "GRANT"
+          }
+          StatusPill(
+            label = "LISTENER",
+            value = listenerValue,
+            state = listenerState,
+            accent = accent,
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              JarvisRuntime.openNotificationListenerSettings(context)
+            },
+          )
 
-      StatusPill(
-        label = "BATTERY",
-        value = if (uiState.batteryUnrestricted) "UNRESTRICTED" else "OPTIMIZED",
-        state = if (uiState.batteryUnrestricted) PillState.OK else PillState.WARN,
-        accent = accent,
-        onClick = {
-          haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-          JarvisRuntime.requestBatteryUnrestricted(context)
-        },
-      )
-    }
+          val a11yState = when {
+            uiState.accessibilityEnabled && uiState.accessibilityConnected -> PillState.OK
+            uiState.accessibilityEnabled -> PillState.WARN
+            else -> PillState.FAULT
+          }
+          val a11yValue = when {
+            uiState.accessibilityEnabled && uiState.accessibilityConnected -> "LIVE"
+            uiState.accessibilityEnabled -> "BINDING"
+            else -> "GRANT"
+          }
+          StatusPill(
+            label = "A11Y HANDS",
+            value = a11yValue,
+            state = a11yState,
+            accent = accent,
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              JarvisRuntime.openAccessibilitySettings(context)
+            },
+          )
 
-    // Encrypted KeyVault API Key Input
-    ApiKeyVaultCard(
-      uiState = uiState,
-      draftKey = apiKeyInput,
-      revealKey = revealApiKey,
-      accent = accent,
-      onDraftChange = { apiKeyInput = it },
-      onToggleReveal = { revealApiKey = !revealApiKey },
-      onSave = {
-        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        JarvisRuntime.saveApiKey(context, apiKeyInput)
-        apiKeyInput = ""
-        keyboardController?.hide()
-        focusManager.clearFocus()
-      },
-      onClear = {
-        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        JarvisRuntime.clearApiKey(context)
-        apiKeyInput = ""
-      },
-    )
-
-    // Optional live processing / feedback banner
-    val bannerText = when {
-      uiState.isProcessing -> "TRIAGING VIA GEMINI 3.5 FLASH-LITE..."
-      !uiState.lastError.isNullOrBlank() -> uiState.lastError
-      !uiState.lastStatusBanner.isNullOrBlank() -> uiState.lastStatusBanner
-      else -> null
-    }
-    if (bannerText != null) {
-      val isErr = !uiState.isProcessing && !uiState.lastError.isNullOrBlank()
-      val bannerColor = if (isErr) CrimsonBright else accent
-      Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(8.dp))
-          .background(bannerColor.copy(alpha = 0.12f))
-          .border(0.8.dp, bannerColor.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
-          .clickable { JarvisRuntime.clearBanner() }
-          .padding(horizontal = 10.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Text(
-          text = bannerText,
-          color = if (isErr) CrimsonBright else TextPureWhite,
-          fontFamily = FontFamily.Monospace,
-          fontSize = 10.sp,
-          maxLines = 2,
-          overflow = TextOverflow.Ellipsis,
-          modifier = Modifier.weight(1f),
-        )
-        if (!uiState.isProcessing) {
-          Text(
-            text = "DISMISS",
-            color = TextSilver,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 9.sp,
-            modifier = Modifier.padding(start = 8.dp),
+          StatusPill(
+            label = "BATTERY",
+            value = if (uiState.batteryUnrestricted) "UNRESTRICTED" else "OPTIMIZED",
+            state = if (uiState.batteryUnrestricted) PillState.OK else PillState.WARN,
+            accent = accent,
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              JarvisRuntime.requestBatteryUnrestricted(context)
+            },
           )
         }
       }
-    }
 
-    // Live scrolling feed of triaged notifications
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Text(
-        text = "TRIAGED EVENT FEED (${uiState.events.size})",
-        color = TextSilver,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.SemiBold,
-        letterSpacing = 0.8.sp,
-      )
-      Text(
-        text = "SQLITE WAL",
-        color = accent.copy(alpha = 0.8f),
-        fontFamily = FontFamily.Monospace,
-        fontSize = 9.sp,
-      )
-    }
-
-    if (uiState.events.isEmpty()) {
-      Box(
-        modifier = Modifier
-          .fillMaxWidth()
-          .weight(1f)
-          .clip(RoundedCornerShape(10.dp))
-          .background(GlassSurface.copy(alpha = 0.55f))
-          .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
-          .padding(14.dp),
-        contentAlignment = Alignment.Center,
-      ) {
-        Text(
-          text = "No notifications logged yet.\nEnable LISTENER above, save your Google AI Studio API key, and incoming messages will appear here with inline Send Test Reply controls.",
-          color = TextSilver,
-          fontSize = 11.sp,
-          lineHeight = 16.sp,
+      // Interactive Tier-3 Biometric Approval Card (BiometricPrompt)
+      item(key = "tier3_biometric_card") {
+        Tier3BiometricApprovalCard(
+          pending = uiState.pendingTier3Approval,
+          accent = accent,
+          onApprove = { req ->
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            BiometricPromptHelper.authenticate(
+              context = context,
+              title = req.actionTitle,
+              subtitle = req.actionSummary,
+              description = req.reason,
+            ) { approved, detail ->
+              if (!approved && !detail.isNullOrBlank()) {
+                JarvisRuntime.resolveTier3Approval(req.requestId, false)
+              } else {
+                JarvisRuntime.resolveTier3Approval(req.requestId, approved)
+              }
+            }
+          },
+          onDeny = { req ->
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.resolveTier3Approval(req.requestId, false)
+          },
+          onTriggerTest = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.triggerTier3BiometricTest(context)
+          },
         )
       }
-    } else {
-      LazyColumn(
-        modifier = Modifier
-          .fillMaxWidth()
-          .weight(1f),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
+
+      // Command Test Bar for end-to-end Playbook Replay & gemini-4-hydrogen Planner Execution
+      item(key = "command_test_bar") {
+        CommandTestBarCard(
+          draftCommand = commandDraft,
+          isExecuting = uiState.isExecutingCommand,
+          playbooksCount = uiState.playbooks.size,
+          traceLog = uiState.lastExecutionLog,
+          accent = accent,
+          onDraftChange = { commandDraft = it },
+          onRun = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            val cmd = commandDraft
+            commandDraft = ""
+            keyboardController?.hide()
+            focusManager.clearFocus()
+            JarvisRuntime.executeUiCommand(context, cmd)
+          },
+        )
+      }
+
+      // Trusted Contacts Toggle List
+      item(key = "trusted_contacts") {
+        TrustedContactsCard(
+          contacts = uiState.trustedContacts,
+          draftContact = contactDraft,
+          accent = accent,
+          onDraftChange = { contactDraft = it },
+          onAdd = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.addOrUpdateTrustedContact(context, contactDraft)
+            contactDraft = ""
+            keyboardController?.hide()
+            focusManager.clearFocus()
+          },
+          onToggle = { contact, enabled ->
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.toggleTrustedContact(context, contact.contactKey, enabled)
+          },
+          onDelete = { contact ->
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.deleteTrustedContact(context, contact.contactKey)
+          },
+        )
+      }
+
+      // Encrypted KeyVault API Key Input
+      item(key = "api_key_vault") {
+        ApiKeyVaultCard(
+          uiState = uiState,
+          draftKey = apiKeyInput,
+          revealKey = revealApiKey,
+          accent = accent,
+          onDraftChange = { apiKeyInput = it },
+          onToggleReveal = { revealApiKey = !revealApiKey },
+          onSave = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.saveApiKey(context, apiKeyInput)
+            apiKeyInput = ""
+            keyboardController?.hide()
+            focusManager.clearFocus()
+          },
+          onClear = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            JarvisRuntime.clearApiKey(context)
+            apiKeyInput = ""
+          },
+        )
+      }
+
+      // Optional live processing / feedback banner
+      val bannerText = when {
+        uiState.isExecutingCommand -> "EXECUTING UI PLAN..."
+        uiState.isProcessing -> "TRIAGING VIA GEMINI 3.5 FLASH-LITE..."
+        !uiState.lastError.isNullOrBlank() -> uiState.lastError
+        !uiState.lastStatusBanner.isNullOrBlank() -> uiState.lastStatusBanner
+        else -> null
+      }
+      if (bannerText != null) {
+        item(key = "status_banner") {
+          val busy = uiState.isProcessing || uiState.isExecutingCommand
+          val isErr = !busy && !uiState.lastError.isNullOrBlank()
+          val bannerColor = if (isErr) CrimsonBright else accent
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(8.dp))
+              .background(bannerColor.copy(alpha = 0.12f))
+              .border(0.8.dp, bannerColor.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+              .clickable { JarvisRuntime.clearBanner() }
+              .padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Text(
+              text = bannerText,
+              color = if (isErr) CrimsonBright else TextPureWhite,
+              fontFamily = FontFamily.Monospace,
+              fontSize = 10.sp,
+              maxLines = 2,
+              overflow = TextOverflow.Ellipsis,
+              modifier = Modifier.weight(1f),
+            )
+            if (!busy) {
+              Text(
+                text = "DISMISS",
+                color = TextSilver,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 9.sp,
+                modifier = Modifier.padding(start = 8.dp),
+              )
+            }
+          }
+        }
+      }
+
+      item(key = "event_feed_header") {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text(
+            text = "TRIAGED EVENT FEED (${uiState.events.size})",
+            color = TextSilver,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.8.sp,
+          )
+          Text(
+            text = "SQLITE WAL",
+            color = accent.copy(alpha = 0.8f),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 9.sp,
+          )
+        }
+      }
+
+      if (uiState.events.isEmpty()) {
+        item(key = "empty_events") {
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(10.dp))
+              .background(GlassSurface.copy(alpha = 0.55f))
+              .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+              .padding(14.dp),
+            contentAlignment = Alignment.Center,
+          ) {
+            Text(
+              text = "No notifications logged yet.\nEnable LISTENER & A11Y HANDS above, save your Gemini API key, and run commands or receive messages.",
+              color = TextSilver,
+              fontSize = 11.sp,
+              lineHeight = 16.sp,
+            )
+          }
+        }
+      } else {
         items(items = uiState.events, key = { it.id }) { event ->
           JarvisEventCard(
             event = event,
@@ -364,6 +476,294 @@ fun JarvisBaseplatePanel(
               JarvisRuntime.sendTestReply(context, event, replyText)
             },
           )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun Tier3BiometricApprovalCard(
+  pending: Tier3ApprovalRequest?,
+  accent: Color,
+  onApprove: (Tier3ApprovalRequest) -> Unit,
+  onDeny: (Tier3ApprovalRequest) -> Unit,
+  onTriggerTest: () -> Unit,
+) {
+  val borderTint = if (pending != null) WarmSunAccent else accent.copy(alpha = 0.40f)
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(10.dp))
+      .background(if (pending != null) WarmSunAccent.copy(alpha = 0.10f) else GlassSurface.copy(alpha = 0.68f))
+      .border(0.9.dp, borderTint, RoundedCornerShape(10.dp))
+      .padding(10.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        text = pending?.actionTitle ?: "TIER 3 // BIOMETRIC GATE",
+        color = if (pending != null) WarmSunAccent else TextSilver,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 9.5.sp,
+        fontWeight = FontWeight.Bold,
+      )
+      if (pending == null) {
+        ActionChip(
+          text = "TEST BIOMETRIC",
+          tint = accent,
+          enabled = true,
+          onClick = onTriggerTest,
+        )
+      }
+    }
+
+    if (pending != null) {
+      Text(
+        text = pending.actionSummary,
+        color = TextPureWhite,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+      )
+      Text(
+        text = pending.reason,
+        color = TextSilver,
+        fontSize = 10.sp,
+        lineHeight = 14.sp,
+      )
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        ActionChip(
+          text = "APPROVE (BIOMETRIC)",
+          tint = accent,
+          enabled = true,
+          onClick = { onApprove(pending) },
+        )
+        ActionChip(
+          text = "DENY",
+          tint = CrimsonBright,
+          enabled = true,
+          onClick = { onDeny(pending) },
+        )
+      }
+    } else {
+      Text(
+        text = "High-risk clicks and untrusted replies suspend here for hardware BiometricPrompt confirmation.",
+        color = TextSilver.copy(alpha = 0.80f),
+        fontSize = 10.sp,
+        lineHeight = 13.sp,
+      )
+    }
+  }
+}
+
+@Composable
+private fun CommandTestBarCard(
+  draftCommand: String,
+  isExecuting: Boolean,
+  playbooksCount: Int,
+  traceLog: List<String>,
+  accent: Color,
+  onDraftChange: (String) -> Unit,
+  onRun: () -> Unit,
+) {
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(10.dp))
+      .background(GlassSurface.copy(alpha = 0.72f))
+      .border(0.8.dp, accent.copy(alpha = 0.28f), RoundedCornerShape(10.dp))
+      .padding(10.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        text = "COMMAND TEST BAR (PLAYBOOKS -> HYDROGEN)",
+        color = TextSilver,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 9.5.sp,
+        fontWeight = FontWeight.SemiBold,
+      )
+      Text(
+        text = "$playbooksCount SAVED",
+        color = accent,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 9.sp,
+        fontWeight = FontWeight.Bold,
+      )
+    }
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+      Box(
+        modifier = Modifier
+          .weight(1f)
+          .clip(RoundedCornerShape(7.dp))
+          .background(ObsidianBgTop.copy(alpha = 0.85f))
+          .border(0.8.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(7.dp))
+          .padding(horizontal = 9.dp, vertical = 7.dp),
+      ) {
+        if (draftCommand.isEmpty()) {
+          Text(
+            text = "e.g. search youtube for jazz",
+            color = TextSilver.copy(alpha = 0.50f),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.5.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+        BasicTextField(
+          value = draftCommand,
+          onValueChange = onDraftChange,
+          singleLine = true,
+          textStyle = TextStyle(
+            color = TextPureWhite,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.5.sp,
+          ),
+          cursorBrush = SolidColor(accent),
+          keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+          keyboardActions = KeyboardActions(onGo = { if (draftCommand.isNotBlank() && !isExecuting) onRun() }),
+          modifier = Modifier.fillMaxWidth(),
+        )
+      }
+      ActionChip(
+        text = if (isExecuting) "RUN..." else "RUN",
+        tint = accent,
+        enabled = !isExecuting && draftCommand.isNotBlank(),
+        onClick = onRun,
+      )
+    }
+    if (traceLog.isNotEmpty()) {
+      Text(
+        text = traceLog.takeLast(4).joinToString("\n"),
+        color = TextSilver.copy(alpha = 0.88f),
+        fontFamily = FontFamily.Monospace,
+        fontSize = 9.sp,
+        lineHeight = 12.sp,
+        maxLines = 5,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+  }
+}
+
+@Composable
+private fun TrustedContactsCard(
+  contacts: List<TrustedContact>,
+  draftContact: String,
+  accent: Color,
+  onDraftChange: (String) -> Unit,
+  onAdd: () -> Unit,
+  onToggle: (TrustedContact, Boolean) -> Unit,
+  onDelete: (TrustedContact) -> Unit,
+) {
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(10.dp))
+      .background(GlassSurface.copy(alpha = 0.72f))
+      .border(0.8.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+      .padding(10.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
+  ) {
+    Text(
+      text = "TRUSTED CONTACTS (${contacts.size})",
+      color = TextSilver,
+      fontFamily = FontFamily.Monospace,
+      fontSize = 9.5.sp,
+      fontWeight = FontWeight.SemiBold,
+    )
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+      Box(
+        modifier = Modifier
+          .weight(1f)
+          .clip(RoundedCornerShape(7.dp))
+          .background(ObsidianBgTop.copy(alpha = 0.85f))
+          .border(0.8.dp, accent.copy(alpha = 0.30f), RoundedCornerShape(7.dp))
+          .padding(horizontal = 9.dp, vertical = 7.dp),
+      ) {
+        if (draftContact.isEmpty()) {
+          Text(
+            text = "Contact name (Tier 2 auto-reply)",
+            color = TextSilver.copy(alpha = 0.50f),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+        BasicTextField(
+          value = draftContact,
+          onValueChange = onDraftChange,
+          singleLine = true,
+          textStyle = TextStyle(
+            color = TextPureWhite,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.5.sp,
+          ),
+          cursorBrush = SolidColor(accent),
+          keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+          keyboardActions = KeyboardActions(onDone = { if (draftContact.isNotBlank()) onAdd() }),
+          modifier = Modifier.fillMaxWidth(),
+        )
+      }
+      ActionChip(
+        text = "+ TRUST",
+        tint = accent,
+        enabled = draftContact.isNotBlank(),
+        onClick = onAdd,
+      )
+    }
+
+    if (contacts.isNotEmpty()) {
+      contacts.forEach { contact ->
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text(
+            text = contact.displayName + if (contact.packageName.isNotBlank()) " (${contact.packageName.substringAfterLast('.')})" else "",
+            color = TextPureWhite,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+          )
+          Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            ActionChip(
+              text = if (contact.autoReplyEnabled) "TRUSTED" else "OFF",
+              tint = if (contact.autoReplyEnabled) accent else WarmSunAccent,
+              enabled = true,
+              onClick = { onToggle(contact, !contact.autoReplyEnabled) },
+            )
+            ActionChip(
+              text = "DEL",
+              tint = CrimsonBright,
+              enabled = true,
+              onClick = { onDelete(contact) },
+            )
+          }
         }
       }
     }

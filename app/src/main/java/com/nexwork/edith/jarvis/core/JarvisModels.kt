@@ -92,6 +92,95 @@ data class JarvisRule(
 )
 
 /**
+ * Filtered UI node captured on-demand by [com.nexwork.edith.jarvis.senses.JarvisAccessibilityService].
+ */
+data class CompactUiNode(
+  val id: Int,
+  val className: String,
+  val viewId: String = "",
+  val text: String = "",
+  val contentDesc: String = "",
+  val clickable: Boolean = false,
+  val editable: Boolean = false,
+  val scrollable: Boolean = false,
+  val left: Int = 0,
+  val top: Int = 0,
+  val right: Int = 0,
+  val bottom: Int = 0,
+) {
+  val centerX: Int get() = (left + right) / 2
+  val centerY: Int get() = (top + bottom) / 2
+}
+
+/**
+ * Compact active-window snapshot handed to [com.nexwork.edith.jarvis.reflex.PlaybookExecutor]
+ * and [com.nexwork.edith.jarvis.brain.PlannerClient].
+ */
+data class CompactUiTree(
+  val packageName: String,
+  val windowTitle: String = "",
+  val nodes: List<CompactUiNode> = emptyList(),
+  val formattedText: String = "",
+  val blockedReason: String? = null,
+)
+
+/**
+ * Parameterized step persisted in SQLite `ui_playbooks` for zero-LLM local replay.
+ */
+@Serializable
+data class PlaybookStep(
+  val action: String,
+  val targetText: String? = null,
+  val targetDesc: String? = null,
+  val viewId: String? = null,
+  val inputTemplate: String? = null,
+  val scrollForward: Boolean = true,
+  val packageName: String? = null,
+)
+
+/**
+ * Saved UI automation workflow stored in `ui_playbooks`.
+ */
+data class UiPlaybook(
+  val id: Long = 0L,
+  val skillId: String,
+  val triggerIntent: String,
+  val targetPackage: String,
+  val steps: List<PlaybookStep>,
+  val stepsJson: String,
+  val successCount: Int = 0,
+  val createdAtMs: Long = 0L,
+  val updatedAtMs: Long = 0L,
+)
+
+/**
+ * Per-contact auto-reply allowlist record stored in `trusted_contacts`.
+ */
+data class TrustedContact(
+  val id: Long = 0L,
+  val contactKey: String,
+  val displayName: String,
+  val packageName: String = "",
+  val autoReplyEnabled: Boolean = true,
+  val maxTier: Int = 2,
+  val createdAtMs: Long = 0L,
+  val updatedAtMs: Long = 0L,
+)
+
+/**
+ * Pending Tier-3 action suspended awaiting explicit hardware BiometricPrompt confirmation.
+ */
+data class Tier3ApprovalRequest(
+  val requestId: String,
+  val actionTitle: String,
+  val actionSummary: String,
+  val reason: String,
+  val targetPackage: String = "",
+  val contactName: String = "",
+  val createdAtMs: Long = System.currentTimeMillis(),
+)
+
+/**
  * Live sticky foreground service state exposed via StateFlow.
  */
 data class JarvisServiceStatus(
@@ -111,13 +200,20 @@ data class JarvisUiState(
   val serviceStatus: JarvisServiceStatus = JarvisServiceStatus(),
   val notificationListenerEnabled: Boolean = false,
   val notificationListenerConnected: Boolean = false,
+  val accessibilityEnabled: Boolean = false,
+  val accessibilityConnected: Boolean = false,
   val batteryUnrestricted: Boolean = false,
   val hasApiKey: Boolean = false,
   val maskedApiKey: String = "",
   val activeReplyHandleCount: Int = 0,
   val isProcessing: Boolean = false,
+  val isExecutingCommand: Boolean = false,
   val lastStatusBanner: String? = null,
   val lastError: String? = null,
+  val lastExecutionLog: List<String> = emptyList(),
+  val pendingTier3Approval: Tier3ApprovalRequest? = null,
   val events: List<JarvisEventRecord> = emptyList(),
   val rules: List<JarvisRule> = emptyList(),
+  val playbooks: List<UiPlaybook> = emptyList(),
+  val trustedContacts: List<TrustedContact> = emptyList(),
 )

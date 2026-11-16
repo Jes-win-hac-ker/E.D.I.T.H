@@ -10,15 +10,28 @@ import android.provider.Settings
 import android.view.Choreographer
 import androidx.activity.ComponentActivity
 import com.nexwork.edith.jarvis.brain.GeminiClient
+import com.nexwork.edith.jarvis.brain.PlannerClient
 import com.nexwork.edith.jarvis.memory.JarvisDatabase
+import com.nexwork.edith.jarvis.reflex.CommandExecutionResult
 import com.nexwork.edith.jarvis.reflex.GatekeeperCandidate
 import com.nexwork.edith.jarvis.reflex.GatekeeperDecision
 import com.nexwork.edith.jarvis.reflex.LocalGatekeeper
+import com.nexwork.edith.jarvis.reflex.PlaybookEnvironment
+import com.nexwork.edith.jarvis.reflex.PlaybookExecutor
+import com.nexwork.edith.jarvis.reflex.PlaybookStore
+import com.nexwork.edith.jarvis.security.DenyCode
+import com.nexwork.edith.jarvis.security.JarvisActionType
+import com.nexwork.edith.jarvis.security.SecurityActionRequest
+import com.nexwork.edith.jarvis.security.SecurityGateway
+import com.nexwork.edith.jarvis.security.SecurityVerdict
 import com.nexwork.edith.jarvis.senses.ExtractedNotification
+import com.nexwork.edith.jarvis.senses.JarvisAccessibilityService
 import com.nexwork.edith.jarvis.senses.JarvisNotificationService
 import com.nexwork.edith.jarvis.senses.RemoteInputCache
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +41,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Isolated Milestone 1 Jarvis coordinator.
@@ -64,6 +78,18 @@ object JarvisRuntime {
 
   @Volatile
   private var geminiClient: GeminiClient? = null
+
+  @Volatile
+  private var securityGateway: SecurityGateway? = null
+
+  @Volatile
+  private var plannerClient: PlannerClient? = null
+
+  @Volatile
+  private var playbookExecutor: PlaybookExecutor? = null
+
+  private val approvalLock = Any()
+  private var pendingApprovalPair: Pair<String, CompletableDeferred<Boolean>>? = null
 
   private val _uiState = MutableStateFlow(JarvisUiState())
   val uiState: StateFlow<JarvisUiState> = _uiState.asStateFlow()
@@ -245,12 +271,51 @@ object JarvisRuntime {
     }
     scope.launch {
       ensureComponentsLocked(appCtx)
+      val gateway = securityGateway
+      val db = database
+      val trusted = db?.isContactTrusted(event.sender, event.packageName) ?: false
+      if (gateway != null) {
+        val verdict = gateway.evaluateAndConsume(
+          SecurityActionRequest(
+            actionType = JarvisActionType.REPLY_NOTIFICATION,
+            activePackage = event.packageName,
+            targetPackage = event.packageName,
+            outboundText = resolvedText,
+            contactName = event.sender,
+            isTrustedContact = trusted,
+          ),
+        )
+        when (verdict) {
+          is SecurityVerdict.Deny -> {
+            _uiState.update { it.copy(lastError = verdict.reason, lastStatusBanner = verdict.reason) }
+            return@launch
+          }
+          is SecurityVerdict.RequireBiometric -> {
+            val approved = awaitTier3Approval(
+              actionTitle = "UNTRUSTED REPLY",
+              actionSummary = "Send '$resolvedText' to ${event.sender}",
+              reason = verdict.reason,
+              targetPackage = event.packageName,
+              contactName = event.sender,
+            )
+            if (!approved) {
+              _uiState.update { it.copy(lastError = "Reply blocked: Tier 3 biometric denied") }
+              return@launch
+            }
+          }
+          is SecurityVerdict.Allow -> Unit
+        }
+      }
+
       val result = remoteInputCache.sendReply(appCtx, event.sbnKey, resolvedText)
       result
         .onSuccess {
-          database?.let { db ->
-            db.markReplySent(event.id, resolvedText)
-            syncEventsSnapshot(db)
+          if (trusted) {
+            gateway?.recordTrustedAutoReply(event.packageName, event.sender)
+          }
+          db?.let { store ->
+            store.markReplySent(event.id, resolvedText)
+            syncEventsSnapshot(store)
           }
           _uiState.update {
             it.copy(
@@ -262,7 +327,7 @@ object JarvisRuntime {
         }
         .onFailure { err ->
           val msg = err.message ?: "RemoteInput dispatch failed"
-          database?.let { syncEventsSnapshot(it) }
+          db?.let { syncEventsSnapshot(it) }
           _uiState.update {
             it.copy(
               activeReplyHandleCount = remoteInputCache.activeCount(),
@@ -272,6 +337,167 @@ object JarvisRuntime {
           }
         }
     }
+  }
+
+  fun openAccessibilitySettings(context: Context) {
+    JarvisAccessibilityService.openAccessibilitySettings(context)
+  }
+
+  fun addOrUpdateTrustedContact(
+    context: Context,
+    displayName: String,
+    packageName: String = "",
+    autoReplyEnabled: Boolean = true,
+  ) {
+    val cleanName = displayName.trim()
+    if (cleanName.isEmpty()) return
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      val db = database ?: return@launch
+      db.upsertTrustedContact(cleanName, packageName, autoReplyEnabled)
+      syncPlaybooksAndContacts(db)
+      _uiState.update {
+        it.copy(
+          lastError = null,
+          lastStatusBanner = "Trusted contact updated: $cleanName",
+        )
+      }
+    }
+  }
+
+  fun toggleTrustedContact(context: Context, contactKey: String, enabled: Boolean) {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      val db = database ?: return@launch
+      db.setTrustedContactEnabled(contactKey, enabled)
+      syncPlaybooksAndContacts(db)
+    }
+  }
+
+  fun deleteTrustedContact(context: Context, contactKey: String) {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      val db = database ?: return@launch
+      db.deleteTrustedContact(contactKey)
+      syncPlaybooksAndContacts(db)
+    }
+  }
+
+  fun executeUiCommand(context: Context, rawCommand: String) {
+    val trimmed = rawCommand.trim()
+    if (trimmed.isEmpty()) return
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      val executor = playbookExecutor ?: return@launch
+      val apiKey = keyVault?.getApiKey()
+      _uiState.update {
+        it.copy(
+          isExecutingCommand = true,
+          lastError = null,
+          lastStatusBanner = "Executing: $trimmed",
+        )
+      }
+      try {
+        val result: CommandExecutionResult = executor.executeCommand(
+          commandText = trimmed,
+          apiKey = apiKey,
+        )
+        database?.let { syncPlaybooksAndContacts(it) }
+        _uiState.update {
+          it.copy(
+            isExecutingCommand = false,
+            lastExecutionLog = result.traceLog,
+            lastError = if (result.ok) null else result.summary,
+            lastStatusBanner = if (result.ok) result.summary else null,
+          )
+        }
+        JarvisForegroundService.recordProcessed("CMD: ${result.summary.take(64)}")
+      } finally {
+        _uiState.update { it.copy(isExecutingCommand = false) }
+      }
+    }
+  }
+
+  fun triggerTier3BiometricTest(context: Context, actionLabel: String = "Authorize Tier 3 Sensitive Action") {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      val approved = awaitTier3Approval(
+        actionTitle = "TIER 3 // BIOMETRIC GATE",
+        actionSummary = actionLabel,
+        reason = "Requires explicit BiometricPrompt verification before execution",
+      )
+      _uiState.update {
+        it.copy(
+          lastError = if (approved) null else "Tier 3 confirmation denied/cancelled",
+          lastStatusBanner = if (approved) "Tier 3 Biometric approved: $actionLabel" else null,
+        )
+      }
+    }
+  }
+
+  fun resolveTier3Approval(requestId: String, approved: Boolean) {
+    val deferred = synchronized(approvalLock) {
+      val current = pendingApprovalPair
+      if (current != null && current.first == requestId) {
+        pendingApprovalPair = null
+        current.second
+      } else {
+        null
+      }
+    }
+    _uiState.update { state ->
+      if (state.pendingTier3Approval?.requestId == requestId) {
+        state.copy(pendingTier3Approval = null)
+      } else {
+        state
+      }
+    }
+    if (deferred != null && !deferred.isCompleted) {
+      deferred.complete(approved)
+    }
+  }
+
+  private suspend fun awaitTier3Approval(
+    actionTitle: String,
+    actionSummary: String,
+    reason: String,
+    targetPackage: String = "",
+    contactName: String = "",
+  ): Boolean {
+    val reqId = UUID.randomUUID().toString()
+    val deferred = CompletableDeferred<Boolean>()
+    val previousToCancel: CompletableDeferred<Boolean>? = synchronized(approvalLock) {
+      val prev = pendingApprovalPair?.second
+      pendingApprovalPair = reqId to deferred
+      prev
+    }
+    previousToCancel?.takeIf { !it.isCompleted }?.complete(false)
+
+    val req = Tier3ApprovalRequest(
+      requestId = reqId,
+      actionTitle = actionTitle,
+      actionSummary = actionSummary,
+      reason = reason,
+      targetPackage = targetPackage,
+      contactName = contactName,
+    )
+    _uiState.update { it.copy(pendingTier3Approval = req) }
+
+    val approved = withTimeoutOrNull(60_000L) { deferred.await() } ?: false
+    synchronized(approvalLock) {
+      if (pendingApprovalPair?.first == reqId) {
+        pendingApprovalPair = null
+      }
+    }
+    _uiState.update { state ->
+      if (state.pendingTier3Approval?.requestId == reqId) state.copy(pendingTier3Approval = null) else state
+    }
+    return approved
   }
 
   fun clearBanner() {
@@ -340,6 +566,11 @@ object JarvisRuntime {
         _uiState.update { it.copy(notificationListenerConnected = connected) }
       }
     }
+    scope.launch {
+      JarvisAccessibilityService.isConnected.collect { connected ->
+        _uiState.update { it.copy(accessibilityConnected = connected) }
+      }
+    }
   }
 
   private fun ensureComponentsLocked(appCtx: Context) {
@@ -348,6 +579,85 @@ object JarvisRuntime {
       if (database == null) database = JarvisDatabase(appCtx)
       if (gatekeeper == null) gatekeeper = LocalGatekeeper(appCtx.packageName)
       if (geminiClient == null) geminiClient = GeminiClient()
+      if (securityGateway == null) securityGateway = SecurityGateway(selfPackageName = appCtx.packageName)
+      if (plannerClient == null) plannerClient = PlannerClient()
+      if (playbookExecutor == null) {
+        val db = database!!
+        val gw = securityGateway!!
+        val pc = plannerClient!!
+        val store = object : PlaybookStore {
+          override fun findPlaybooksForIntent(triggerIntent: String, targetPackage: String?): List<UiPlaybook> =
+            db.findPlaybooksForIntent(triggerIntent, targetPackage)
+
+          override fun upsertPlaybook(
+            skillId: String,
+            triggerIntent: String,
+            targetPackage: String,
+            steps: List<PlaybookStep>,
+            incrementSuccess: Boolean,
+          ): Long = db.upsertPlaybook(skillId, triggerIntent, targetPackage, steps, incrementSuccess)
+
+          override fun incrementPlaybookSuccess(skillId: String) = db.incrementPlaybookSuccess(skillId)
+        }
+        val env = object : PlaybookEnvironment {
+          override fun currentForegroundPackage(): String =
+            JarvisAccessibilityService.instance()?.currentForegroundPackage().orEmpty()
+
+          override fun dumpCompactUiTree(): CompactUiTree {
+            val svc = JarvisAccessibilityService.instance()
+              ?: return CompactUiTree("", blockedReason = "Accessibility service not connected")
+            return svc.dumpCompactUiTree()
+          }
+
+          override suspend fun clickNode(id: Int): Result<String> {
+            val svc = JarvisAccessibilityService.instance()
+              ?: return Result.failure(IllegalStateException("Accessibility service not connected"))
+            return svc.clickNode(id)
+          }
+
+          override fun inputText(id: Int, text: String): Result<String> {
+            val svc = JarvisAccessibilityService.instance()
+              ?: return Result.failure(IllegalStateException("Accessibility service not connected"))
+            return svc.inputText(id, text)
+          }
+
+          override suspend fun scrollNode(id: Int?, forward: Boolean): Result<String> {
+            val svc = JarvisAccessibilityService.instance()
+              ?: return Result.failure(IllegalStateException("Accessibility service not connected"))
+            return svc.scrollNode(id, forward)
+          }
+
+          override fun openApp(packageName: String): Result<String> {
+            val cleanPkg = packageName.trim()
+            if (SecurityGateway.isRestrictedPackage(cleanPkg, appCtx.packageName)) {
+              return Result.failure(SecurityException("Blocked restricted package: $cleanPkg"))
+            }
+            val launchIntent = appCtx.packageManager.getLaunchIntentForPackage(cleanPkg)
+              ?: return Result.failure(IllegalArgumentException("No launch intent found for package: $cleanPkg"))
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            return runCatching {
+              appCtx.startActivity(launchIntent)
+              "Launched $cleanPkg"
+            }
+          }
+
+          override fun sendNotificationReply(sbnKey: String, replyText: String): Result<String> {
+            return remoteInputCache.sendReply(appCtx, sbnKey, replyText).map { "Sent notification reply" }
+          }
+
+          override fun isContactTrusted(contactName: String, packageName: String): Boolean =
+            db.isContactTrusted(contactName, packageName)
+
+          override suspend fun requestTier3BiometricApproval(
+            actionTitle: String,
+            actionSummary: String,
+            reason: String,
+            targetPackage: String,
+            contactName: String,
+          ): Boolean = awaitTier3Approval(actionTitle, actionSummary, reason, targetPackage, contactName)
+        }
+        playbookExecutor = PlaybookExecutor(env = env, store = store, security = gw, planner = pc)
+      }
     }
   }
 
@@ -358,6 +668,8 @@ object JarvisRuntime {
       db.getRecentEvents(canReplyChecker = remoteInputCache::hasHandle)
     }.getOrDefault(emptyList())
     val rules = runCatching { db.getActiveRules() }.getOrDefault(emptyList())
+    val playbooks = runCatching { db.getAllPlaybooks() }.getOrDefault(emptyList())
+    val contacts = runCatching { db.getTrustedContacts() }.getOrDefault(emptyList())
 
     _uiState.update { current ->
       current.copy(
@@ -365,12 +677,16 @@ object JarvisRuntime {
         serviceStatus = JarvisForegroundService.status.value,
         notificationListenerEnabled = JarvisNotificationService.isAccessGranted(appCtx),
         notificationListenerConnected = JarvisNotificationService.isConnected.value,
+        accessibilityEnabled = JarvisAccessibilityService.isEnabledInSettings(appCtx),
+        accessibilityConnected = JarvisAccessibilityService.isConnected.value,
         batteryUnrestricted = isBatteryUnrestricted(appCtx),
         hasApiKey = vault?.hasApiKey?.value ?: false,
         maskedApiKey = vault?.maskedKeyPreview?.value.orEmpty(),
         activeReplyHandleCount = remoteInputCache.activeCount(),
         events = events,
         rules = rules,
+        playbooks = playbooks,
+        trustedContacts = contacts,
       )
     }
   }
@@ -382,12 +698,20 @@ object JarvisRuntime {
         serviceStatus = JarvisForegroundService.status.value,
         notificationListenerEnabled = JarvisNotificationService.isAccessGranted(appCtx),
         notificationListenerConnected = JarvisNotificationService.isConnected.value,
+        accessibilityEnabled = JarvisAccessibilityService.isEnabledInSettings(appCtx),
+        accessibilityConnected = JarvisAccessibilityService.isConnected.value,
         batteryUnrestricted = isBatteryUnrestricted(appCtx),
         hasApiKey = vault?.hasApiKey?.value ?: current.hasApiKey,
         maskedApiKey = vault?.maskedKeyPreview?.value ?: current.maskedApiKey,
         activeReplyHandleCount = remoteInputCache.activeCount(),
       )
     }
+  }
+
+  private fun syncPlaybooksAndContacts(db: JarvisDatabase) {
+    val playbooks = runCatching { db.getAllPlaybooks() }.getOrDefault(emptyList())
+    val contacts = runCatching { db.getTrustedContacts() }.getOrDefault(emptyList())
+    _uiState.update { it.copy(playbooks = playbooks, trustedContacts = contacts) }
   }
 
   private fun syncEventsSnapshot(db: JarvisDatabase) {

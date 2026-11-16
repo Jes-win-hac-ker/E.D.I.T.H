@@ -2,4 +2,6 @@
     <string name="app_name">E.D.I.T.H</string>
     <string name="jarvis_listener_label">E.D.I.T.H Jarvis</string>
     <string name="jarvis_fgs_channel_name">Jarvis Baseplate</string>
+    <string name="jarvis_accessibility_label">E.D.I.T.H Jarvis Hands</string>
+    <string name="jarvis_accessibility_description">On-demand UI inspection and gesture execution for Jarvis automation playbooks (idle until invoked; blocked on financial &amp; installer apps).</string>
 </resources>
