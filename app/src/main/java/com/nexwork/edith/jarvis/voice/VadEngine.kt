@@ -30,6 +30,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** One 32 ms (512-sample) mono 16 kHz frame plus its Silero speech probability. */
 class VadFrame(
@@ -63,6 +65,7 @@ class VadEngine(
   private var session: OrtSession? = null
   private val state = FloatArray(STATE_SIZE)
   private val context64 = FloatArray(CONTEXT_SAMPLES)
+  private val captureMutex = Mutex()
 
   private val proximityListener = object : SensorEventListener {
     override fun onSensorChanged(event: SensorEvent) {
@@ -130,86 +133,88 @@ class VadEngine(
    */
   @SuppressLint("MissingPermission")
   fun frames(): Flow<VadFrame> = flow {
-    check(hasMicPermission()) { "RECORD_AUDIO not granted" }
-    ensureSession()
-    val proximity = sensorManager?.getDefaultSensor(Sensor.TYPE_PROXIMITY)
-    if (proximity != null && sensorManager != null) {
-      sensorManager.registerListener(proximityListener, proximity, SensorManager.SENSOR_DELAY_NORMAL)
-    }
-    var record: AudioRecord? = null
-    var aec: AcousticEchoCanceler? = null
-    var ns: NoiseSuppressor? = null
-    var speaking = false
-    var silentFrames = 0
-    var zeroFrames = 0
-    val buf = ShortArray(FRAME_SAMPLES)
-    try {
-      while (currentCoroutineContext().isActive) {
-        val reason = computePauseReason()
-        _pauseReason.value = reason
-        if (reason != null) {
-          if (record != null) {
-            runCatching { record.stop() }
-            record.release()
-            aec?.release(); ns?.release()
-            record = null; aec = null; ns = null
-            speaking = false
+    captureMutex.withLock {
+      check(hasMicPermission()) { "RECORD_AUDIO not granted" }
+      ensureSession()
+      val proximity = sensorManager?.getDefaultSensor(Sensor.TYPE_PROXIMITY)
+      if (proximity != null && sensorManager != null) {
+        sensorManager.registerListener(proximityListener, proximity, SensorManager.SENSOR_DELAY_NORMAL)
+      }
+      var record: AudioRecord? = null
+      var aec: AcousticEchoCanceler? = null
+      var ns: NoiseSuppressor? = null
+      var speaking = false
+      var silentFrames = 0
+      var zeroFrames = 0
+      val buf = ShortArray(FRAME_SAMPLES)
+      try {
+        while (currentCoroutineContext().isActive) {
+          val reason = computePauseReason()
+          _pauseReason.value = reason
+          if (reason != null) {
+            if (record != null) {
+              runCatching { record.stop() }
+              record.release()
+              aec?.release(); ns?.release()
+              record = null; aec = null; ns = null
+              speaking = false
+              resetState()
+            }
+            delay(PAUSE_POLL_MS)
+            continue
+          }
+          if (record == null) {
+            val minBuf = AudioRecord.getMinBufferSize(
+              AudioDsp.SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+            )
+            val r = AudioRecord(
+              MediaRecorder.AudioSource.VOICE_RECOGNITION,
+              AudioDsp.SAMPLE_RATE,
+              AudioFormat.CHANNEL_IN_MONO,
+              AudioFormat.ENCODING_PCM_16BIT,
+              maxOf(minBuf, FRAME_SAMPLES * 2 * 8),
+            )
+            check(r.state == AudioRecord.STATE_INITIALIZED) { "AudioRecord init failed" }
+            router.preferredInputDevice()?.let { r.preferredDevice = it }
+            if (AcousticEchoCanceler.isAvailable()) aec = AcousticEchoCanceler.create(r.audioSessionId)?.apply { enabled = true }
+            if (NoiseSuppressor.isAvailable()) ns = NoiseSuppressor.create(r.audioSessionId)?.apply { enabled = true }
+            r.startRecording()
+            // Strict isolation: if earbuds are connected, refuse frames from any non-headset mic.
+            router.assertInputIsolation(r)
+            record = r
             resetState()
           }
-          delay(PAUSE_POLL_MS)
-          continue
-        }
-        if (record == null) {
-          val minBuf = AudioRecord.getMinBufferSize(
-            AudioDsp.SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
-          )
-          val r = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            AudioDsp.SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            maxOf(minBuf, FRAME_SAMPLES * 2 * 8),
-          )
-          check(r.state == AudioRecord.STATE_INITIALIZED) { "AudioRecord init failed" }
-          router.preferredInputDevice()?.let { r.preferredDevice = it }
-          if (AcousticEchoCanceler.isAvailable()) aec = AcousticEchoCanceler.create(r.audioSessionId)?.apply { enabled = true }
-          if (NoiseSuppressor.isAvailable()) ns = NoiseSuppressor.create(r.audioSessionId)?.apply { enabled = true }
-          r.startRecording()
-          // Strict isolation: if earbuds are connected, refuse frames from any non-headset mic.
-          router.assertInputIsolation(r)
-          record = r
-          resetState()
-        }
-        var read = 0
-        while (read < FRAME_SAMPLES) {
-          val n = record.read(buf, read, FRAME_SAMPLES - read)
-          if (n <= 0) error("AudioRecord read failed ($n)")
-          read += n
-        }
-        val allZero = buf.all { it == 0.toShort() }
-        if (allZero) {
-          zeroFrames++
-          if (zeroFrames >= MAX_ZERO_FRAMES) {
-            error("Audio input silent (0s) via ${router.routeLabel} — check mic / SCO state")
+          var read = 0
+          while (read < FRAME_SAMPLES) {
+            val n = record.read(buf, read, FRAME_SAMPLES - read)
+            if (n <= 0) error("AudioRecord read failed ($n)")
+            read += n
           }
-        } else {
-          zeroFrames = 0
+          val allZero = buf.all { it == 0.toShort() }
+          if (allZero) {
+            zeroFrames++
+            if (zeroFrames >= MAX_ZERO_FRAMES) {
+              error("Audio input silent (0s) via ${router.routeLabel} — check mic / SCO state")
+            }
+          } else {
+            zeroFrames = 0
+          }
+          val prob = probability(buf)
+          if (prob >= START_THRESHOLD) {
+            speaking = true
+            silentFrames = 0
+          } else if (speaking && prob < END_THRESHOLD) {
+            silentFrames++
+            if (silentFrames >= MIN_SILENCE_FRAMES) speaking = false
+          }
+          emit(VadFrame(buf.copyOf(), prob, speaking))
         }
-        val prob = probability(buf)
-        if (prob >= START_THRESHOLD) {
-          speaking = true
-          silentFrames = 0
-        } else if (speaking && prob < END_THRESHOLD) {
-          silentFrames++
-          if (silentFrames >= MIN_SILENCE_FRAMES) speaking = false
-        }
-        emit(VadFrame(buf.copyOf(), prob, speaking))
+      } finally {
+        record?.let { runCatching { it.stop() }; it.release() }
+        aec?.release(); ns?.release()
+        sensorManager?.unregisterListener(proximityListener)
+        _pauseReason.value = null
       }
-    } finally {
-      record?.let { runCatching { it.stop() }; it.release() }
-      aec?.release(); ns?.release()
-      sensorManager?.unregisterListener(proximityListener)
-      _pauseReason.value = null
     }
   }.flowOn(Dispatchers.IO)
 

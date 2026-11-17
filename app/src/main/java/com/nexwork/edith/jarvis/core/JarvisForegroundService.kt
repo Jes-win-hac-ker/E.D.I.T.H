@@ -51,7 +51,18 @@ class JarvisForegroundService : Service() {
     }
 
     ensureChannel()
-    enterForeground(includeMicrophone = intent?.action == ACTION_PROMOTE_MIC)
+    val includeMic = when (intent?.action) {
+      ACTION_PROMOTE_MIC -> {
+        micPromoted = true
+        true
+      }
+      ACTION_DEMOTE_MIC -> {
+        micPromoted = false
+        false
+      }
+      else -> micPromoted
+    }
+    enterForeground(includeMicrophone = includeMic)
 
     val now = System.currentTimeMillis()
     _status.update { current ->
@@ -176,8 +187,12 @@ class JarvisForegroundService : Service() {
 
     const val ACTION_START = "com.nexwork.edith.jarvis.action.START"
     const val ACTION_PROMOTE_MIC = "com.nexwork.edith.jarvis.action.PROMOTE_MIC"
+    const val ACTION_DEMOTE_MIC = "com.nexwork.edith.jarvis.action.DEMOTE_MIC"
     const val ACTION_STOP = "com.nexwork.edith.jarvis.action.STOP"
     const val ACTION_EMERGENCY_ABORT = "com.nexwork.edith.jarvis.action.EMERGENCY_ABORT"
+
+    @Volatile
+    private var micPromoted: Boolean = false
 
     private val _status = MutableStateFlow(JarvisServiceStatus())
     val status: StateFlow<JarvisServiceStatus> = _status.asStateFlow()
@@ -200,6 +215,15 @@ class JarvisForegroundService : Service() {
         action = ACTION_PROMOTE_MIC
       }
       runCatching { ContextCompat.startForegroundService(appCtx, intent) }
+    }
+
+    fun demoteMicrophone(context: Context) {
+      if (!micPromoted && !_status.value.isRunning) return
+      val appCtx = context.applicationContext
+      val intent = Intent(appCtx, JarvisForegroundService::class.java).apply {
+        action = ACTION_DEMOTE_MIC
+      }
+      runCatching { appCtx.startService(intent) }
     }
 
     fun stop(context: Context) {

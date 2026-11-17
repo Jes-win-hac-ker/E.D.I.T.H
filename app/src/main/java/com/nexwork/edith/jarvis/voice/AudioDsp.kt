@@ -59,7 +59,12 @@ object AudioDsp {
    * @param normalizeSamples true -> samples scaled to [-1, 1]; false -> raw int16 magnitudes.
    * @param subtractMean applies per-dimension mean normalisation over time ("global-mean").
    */
-  fun fbank(pcm: ShortArray, normalizeSamples: Boolean = true, subtractMean: Boolean = true): Array<FloatArray> {
+  fun fbank(
+    pcm: ShortArray,
+    normalizeSamples: Boolean = true,
+    subtractMean: Boolean = true,
+    filterSilentFrames: Boolean = true,
+  ): Array<FloatArray> {
     if (pcm.size < FRAME_LEN) return emptyArray()
     val numFrames = 1 + (pcm.size - FRAME_LEN) / FRAME_SHIFT
     val scale = if (normalizeSamples) 1f / 32768f else 1f
@@ -101,13 +106,38 @@ object AudioDsp {
       }
     }
 
-    if (subtractMean && numFrames > 0) {
-      val means = FloatArray(NUM_MEL)
-      for (row in out) for (b in 0 until NUM_MEL) means[b] += row[b]
-      for (b in 0 until NUM_MEL) means[b] /= numFrames
-      for (row in out) for (b in 0 until NUM_MEL) row[b] -= means[b]
+    // Filter out silent / hangover frames before Cepstral Mean Normalization (CMN) so trailing
+    // or intra-utterance silence (-15.9 log-energy) cannot skew the per-bin cepstral mean.
+    val activeRows: Array<FloatArray> = if (filterSilentFrames && numFrames >= 24) {
+      val framePeakEnergies = FloatArray(numFrames) { f ->
+        val r = out[f]
+        var maxBin = -16f
+        // Use voiceband bins (0..59, < 4 kHz) so 8 kHz Bluetooth SCO and 16 kHz wideband behave identically.
+        for (b in 0 until 60) {
+          if (r[b] > maxBin) maxBin = r[b]
+        }
+        maxBin
+      }
+      val utterancePeak = framePeakEnergies.maxOrNull() ?: -16f
+      val threshold = utterancePeak - 5.5f
+      val voiced = ArrayList<FloatArray>(numFrames)
+      for (f in 0 until numFrames) {
+        if (framePeakEnergies[f] >= threshold) {
+          voiced.add(out[f])
+        }
+      }
+      if (voiced.size >= 16) voiced.toTypedArray() else out
+    } else {
+      out
     }
-    return out
+
+    if (subtractMean && activeRows.isNotEmpty()) {
+      val means = FloatArray(NUM_MEL)
+      for (row in activeRows) for (b in 0 until NUM_MEL) means[b] += row[b]
+      for (b in 0 until NUM_MEL) means[b] /= activeRows.size
+      for (row in activeRows) for (b in 0 until NUM_MEL) row[b] -= means[b]
+    }
+    return activeRows
   }
 
   /** Iterative radix-2 Cooley-Tukey FFT; size must be a power of two. */

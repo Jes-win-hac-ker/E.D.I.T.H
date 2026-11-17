@@ -61,4 +61,15 @@ class AudioDspTest {
     assertEquals(0xFE.toByte(), bytes[2])
     assertEquals(0xFF.toByte(), bytes[3])
   }
+
+  @Test
+  fun fbank_filterSilentFrames_stripsTrailingSilenceFromCmn() {
+    val voiced = twoTone(n = 8000) // ~50 frames
+    val withSilence = ShortArray(16000) { idx -> if (idx < voiced.size) voiced[idx] else 0 }
+    val featsClean = AudioDsp.fbank(voiced, subtractMean = true, filterSilentFrames = true)
+    val featsFiltered = AudioDsp.fbank(withSilence, subtractMean = true, filterSilentFrames = true)
+    // Silent half should be stripped so frame count stays close to the voiced-only clip
+    assertTrue("Expected silent frames to be filtered, got ${featsFiltered.size}", featsFiltered.size in 45..55)
+    assertEquals(featsClean[10][10], featsFiltered[10][10], 0.15f)
+  }
 }

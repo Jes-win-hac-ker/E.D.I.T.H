@@ -43,6 +43,9 @@ class GeminiLiveClientTest {
     assertEquals("audio/pcm;rate=16000", chunk["mimeType"]!!.jsonPrimitive.content)
     val decoded = Base64.getDecoder().decode(chunk["data"]!!.jsonPrimitive.content)
     assertArrayEquals(raw, decoded)
+
+    val streamEnd = GeminiLiveClient.buildAudioStreamEndFrame()
+    assertTrue(streamEnd["realtimeInput"]!!.jsonObject["audioStreamEnd"]!!.jsonPrimitive.content.toBoolean())
   }
 
   @Test

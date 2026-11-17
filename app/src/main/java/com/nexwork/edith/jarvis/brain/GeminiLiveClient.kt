@@ -59,7 +59,7 @@ interface LiveSessionCallbacks {
 class GeminiLiveClient(
   private val okHttpClient: OkHttpClient = defaultWebSocketClient(),
   private val primaryModel: String = PRIMARY_MODEL,
-  private val fallbackModels: List<String> = listOf(FALLBACK_MODEL),
+  private val fallbackModels: List<String> = DEFAULT_FALLBACK_MODELS,
   private val postTurnSilenceTimeoutMs: Long = DEFAULT_SILENCE_CLOSE_MS,
 ) {
 
@@ -106,6 +106,11 @@ class GeminiLiveClient(
   fun sendAudioChunk(pcm16kLe: ByteArray) {
     val session = synchronized(lock) { activeSession } ?: return
     session.sendAudioChunk(pcm16kLe)
+  }
+
+  fun sendAudioStreamEnd() {
+    val session = synchronized(lock) { activeSession } ?: return
+    session.sendAudioStreamEnd()
   }
 
   fun sendTextTurn(promptText: String) {
@@ -184,6 +189,7 @@ class GeminiLiveClient(
     private val onSelfClosed: (LiveSession) -> Unit,
   ) {
     private val closed = AtomicBoolean(false)
+    private val setupEstablished = AtomicBoolean(false)
     private val setupDeferred = CompletableDeferred<Result<Unit>>()
     private val audioOutQueue = Channel<ByteArray>(capacity = Channel.UNLIMITED)
     private val runningToolJobs = mutableMapOf<String, Job>()
@@ -215,6 +221,12 @@ class GeminiLiveClient(
       webSocket?.send(frame)
     }
 
+    fun sendAudioStreamEnd() {
+      if (closed.get()) return
+      val frame = buildAudioStreamEndFrame().toString()
+      webSocket?.send(frame)
+    }
+
     fun sendTextTurn(text: String) {
       if (closed.get() || text.isBlank()) return
       cancelSilenceTimer()
@@ -242,8 +254,9 @@ class GeminiLiveClient(
       silenceTimerJob = null
     }
 
-    fun close(reason: String = "Session ended") {
+    fun close(reason: String = "Session ended", notifyCallback: Boolean = true) {
       if (!closed.compareAndSet(false, true)) return
+      val wasEstablished = setupEstablished.get()
       onSelfClosed(this)
       cancelSilenceTimer()
       playbackJob?.cancel()
@@ -257,7 +270,9 @@ class GeminiLiveClient(
       if (!setupDeferred.isCompleted) {
         setupDeferred.complete(Result.failure(IllegalStateException(reason)))
       }
-      callbacks.onClosed(reason)
+      if (notifyCallback && wasEstablished) {
+        callbacks.onClosed(reason)
+      }
     }
 
     internal fun listener(setupPayload: String): WebSocketListener = object : WebSocketListener() {
@@ -285,11 +300,14 @@ class GeminiLiveClient(
         val httpDetail = response?.let { "HTTP ${it.code}" } ?: ""
         val msg = listOfNotNull(t.message, httpDetail.takeIf { it.isNotBlank() }).joinToString(" · ")
           .ifBlank { t::class.java.simpleName }
+        val wasEstablished = setupEstablished.get()
         if (!setupDeferred.isCompleted) {
           setupDeferred.complete(Result.failure(IllegalStateException(msg, t)))
         }
-        callbacks.onError(msg)
-        close("Socket failure: $msg")
+        if (wasEstablished) {
+          callbacks.onError(msg)
+        }
+        close("Socket failure: $msg", notifyCallback = wasEstablished)
       }
     }
 
@@ -301,6 +319,7 @@ class GeminiLiveClient(
         }
 
       if (event.setupComplete && !setupDeferred.isCompleted) {
+        setupEstablished.set(true)
         setupDeferred.complete(Result.success(Unit))
       }
 
@@ -386,8 +405,15 @@ class GeminiLiveClient(
   companion object {
     const val PRIMARY_MODEL = "gemini-3.8-live"
     const val FALLBACK_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
+    const val SECONDARY_FALLBACK_MODEL = "gemini-2.0-flash-live-001"
+    const val TERTIARY_FALLBACK_MODEL = "gemini-2.0-flash-exp"
+    val DEFAULT_FALLBACK_MODELS = listOf(
+      FALLBACK_MODEL,
+      SECONDARY_FALLBACK_MODEL,
+      TERTIARY_FALLBACK_MODEL,
+    )
     const val DEFAULT_SILENCE_CLOSE_MS = 5_000L
-    private const val SETUP_TIMEOUT_MS = 10_000L
+    private const val SETUP_TIMEOUT_MS = 6_000L
 
     fun defaultWebSocketClient(): OkHttpClient = OkHttpClient.Builder()
       .connectTimeout(10, TimeUnit.SECONDS)
@@ -522,6 +548,12 @@ class GeminiLiveClient(
           })
         })
       }
+    }
+
+    internal fun buildAudioStreamEndFrame(): JsonObject = buildJsonObject {
+      put("realtimeInput", buildJsonObject {
+        put("audioStreamEnd", true)
+      })
     }
 
     internal fun buildClientContentFrame(text: String): JsonObject = buildJsonObject {
