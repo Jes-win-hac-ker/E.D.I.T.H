@@ -1188,6 +1188,21 @@ private fun JarvisDetailCardContent(
   var commandDraft by remember { mutableStateOf("") }
   var contactDraft by remember { mutableStateOf("") }
 
+  val audioPermLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestPermission(),
+  ) { granted ->
+    JarvisRuntime.setOpusVoiceReaderEnabled(context, granted)
+  }
+  val onToggleOpusVoice: () -> Unit = {
+    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    if (uiState.opusVoiceReaderEnabled) {
+      JarvisRuntime.setOpusVoiceReaderEnabled(context, false)
+    } else if (JarvisRuntime.hasMediaAudioPermission(context)) {
+      JarvisRuntime.setOpusVoiceReaderEnabled(context, true)
+    } else {
+      audioPermLauncher.launch(JarvisRuntime.audioReadPermission())
+    }
+  }
   val bgLocLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.RequestPermission(),
   ) { granted ->
@@ -1462,7 +1477,7 @@ private fun JarvisDetailCardContent(
       }
 
       JarvisSettingsSection.PERMISSIONS -> {
-        val totalSteps = 6
+        val totalSteps = 7
         val listenerOk = uiState.notificationListenerEnabled && uiState.notificationListenerConnected
         val listenerTag = when {
           listenerOk -> "LIVE"
@@ -1561,6 +1576,24 @@ private fun JarvisDetailCardContent(
             JarvisRuntime.requestBatteryUnrestricted(context)
           },
         )
+        val opusOk = uiState.opusVoiceReaderEnabled && uiState.hasMediaAudioPermission
+        CompactHudCard(
+          eyebrow = "WHATSAPP · TG AUDIO",
+          title = "OPUS VOICE READER",
+          badge = when {
+            opusOk -> "LIVE"
+            uiState.opusVoiceReaderEnabled -> "PERM"
+            else -> "OFF"
+          },
+          pipColor = if (opusOk) accent else warnAccent,
+          focused = opusOk,
+          accent = if (opusOk) accent else warnAccent,
+          titleSizeSp = 9.8f,
+          reveal = { staggeredReveal(reveal(), 5, totalSteps, stagger = 0.14f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(42.dp),
+          onClick = onToggleOpusVoice,
+        )
         CompactHudCard(
           eyebrow = "HUD CONSOLE",
           title = "FULL DRAWER",
@@ -1568,7 +1601,7 @@ private fun JarvisDetailCardContent(
           focused = false,
           accent = accent,
           titleSizeSp = 10.0f,
-          reveal = { staggeredReveal(reveal(), 5, totalSteps, stagger = 0.14f) },
+          reveal = { staggeredReveal(reveal(), 6, totalSteps, stagger = 0.14f) },
           enabled = enabled,
           modifier = Modifier.fillMaxWidth().height(42.dp),
           onClick = {

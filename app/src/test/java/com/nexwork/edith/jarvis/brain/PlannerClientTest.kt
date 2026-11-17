@@ -192,4 +192,40 @@ class PlannerClientTest {
     assertTrue(caughtCancel)
     assertTrue(observedCanceledFlag.get())
   }
+
+  @Test
+  fun runPlan_includesManglishRulebookAndContactPersonaNoteInPrompt() = runTest {
+    var capturedBody = ""
+    val client = OkHttpClient.Builder()
+      .addInterceptor(Interceptor { chain ->
+        val req = chain.request()
+        val sink = Buffer()
+        req.body?.writeTo(sink)
+        capturedBody = sink.readUtf8()
+        val okJson = """{"candidates":[{"content":{"parts":[{"text":"Replied in Manglish."}]}}]}"""
+        Response.Builder()
+          .request(req)
+          .protocol(Protocol.HTTP_1_1)
+          .code(200)
+          .message("OK")
+          .body(okJson.toResponseBody("application/json".toMediaType()))
+          .build()
+      })
+      .build()
+
+    val planner = PlannerClient(httpClient = client)
+    val bridge = object : PlannerToolBridge {
+      override suspend fun executeTool(name: String, args: JsonObject) = error("unused")
+    }
+    val personaNote = "<contact_persona>\nrelationship_tag: friend\nsent_samples: \"aa da\"\n</contact_persona>"
+    val res = planner.runPlan(
+      apiKey = "AIzaTestKey123456",
+      goalPrompt = "Reply to Arjun in WhatsApp",
+      bridge = bridge,
+      personaContextNote = personaNote,
+    )
+    assertTrue(res.isSuccess)
+    assertTrue(capturedBody.contains("manglish_rulebook"))
+    assertTrue(capturedBody.contains("aa da"))
+  }
 }

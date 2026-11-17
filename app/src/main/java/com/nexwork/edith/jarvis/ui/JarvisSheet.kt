@@ -168,6 +168,21 @@ fun JarvisBaseplatePanel(
       bgLocLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
     }
   }
+  val audioPermLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestPermission(),
+  ) { granted ->
+    JarvisRuntime.setOpusVoiceReaderEnabled(context, granted)
+  }
+  val onToggleOpusVoice: () -> Unit = {
+    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    if (uiState.opusVoiceReaderEnabled) {
+      JarvisRuntime.setOpusVoiceReaderEnabled(context, false)
+    } else if (JarvisRuntime.hasMediaAudioPermission(context)) {
+      JarvisRuntime.setOpusVoiceReaderEnabled(context, true)
+    } else {
+      audioPermLauncher.launch(JarvisRuntime.audioReadPermission())
+    }
+  }
   val requestAmbientPermissions: () -> Unit = {
     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     if (!uiState.hasLocationPermission || !uiState.hasActivityRecognitionPermission || !uiState.hasBluetoothConnectPermission) {
@@ -374,6 +389,22 @@ fun JarvisBaseplatePanel(
             },
             accent = accent,
             onClick = requestAmbientPermissions,
+          )
+
+          StatusPill(
+            label = "OPUS VOICE",
+            value = when {
+              uiState.opusVoiceReaderEnabled && uiState.hasMediaAudioPermission -> "LIVE"
+              uiState.opusVoiceReaderEnabled -> "PERM"
+              else -> "OFF"
+            },
+            state = when {
+              uiState.opusVoiceReaderEnabled && uiState.hasMediaAudioPermission -> PillState.OK
+              uiState.opusVoiceReaderEnabled -> PillState.WARN
+              else -> PillState.WARN
+            },
+            accent = accent,
+            onClick = onToggleOpusVoice,
           )
 
           if (uiState.serviceStatus.isRunning) {
@@ -1371,7 +1402,7 @@ private fun SavedPlacesContextDebugCard(
         overflow = TextOverflow.Ellipsis,
       )
       Text(
-        text = "AWAY DWELL: ${awayMins?.let { "${it}m" } ?: "none"} · 24H DESTINATIONS: ${uiState.upcomingDestinations.size}",
+        text = "AWAY DWELL: ${awayMins?.let { "${it}m" } ?: "none"} · DESTS: ${uiState.upcomingDestinations.size} · PERSONAS: ${uiState.personaCount} · MUTED GRP: ${uiState.suppressedGroupCount}",
         color = accent.copy(alpha = 0.9f),
         fontFamily = FontFamily.Monospace,
         fontSize = 9.sp,

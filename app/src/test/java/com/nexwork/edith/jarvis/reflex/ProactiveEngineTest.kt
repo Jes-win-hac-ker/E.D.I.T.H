@@ -185,4 +185,41 @@ class ProactiveEngineTest {
     assertNull(engine.suggestion.value)
     assertEquals(0, verifierCalls)
   }
+
+  @Test
+  fun temporalWindow_suppressesFutureDestinationBeforeValidFromAndFiresInsideWindow() = runTest {
+    val nov17Ms = 1_794_898_359_000L
+    val nov22ValidFrom = nov17Ms + (5L * 24L * 3_600_000L)
+    val nov22ValidUntil = nov22ValidFrom + (8L * 3_600_000L)
+    var nowMs = nov17Ms
+
+    val store = FakeDestinationStore(
+      mutableListOf(
+        UpcomingDestination(
+          id = 88L,
+          placeName = "Kochi Convention Centre",
+          sourceSummary = "Conference on Nov 22",
+          expiresAtMs = nov22ValidUntil,
+          validFromEpochMs = nov22ValidFrom,
+          validUntilEpochMs = nov22ValidUntil,
+        )
+      )
+    )
+    val engine = ProactiveEngine(
+      destinationStore = store,
+      locationVerifier = OneShotLocationVerifier { null },
+      clockMs = { nowMs },
+    )
+
+    val unlockAway = AmbientContext(motionState = MotionState.STILL, placeTag = PlaceTag.NONE)
+    engine.onSignal(ContextSignal.ScreenUnlocked(unlockAway, nowMs))
+    assertNull(engine.suggestion.value)
+
+    // Advance inside valid_from_epoch..valid_until_epoch (Nov 22, within 4h window)
+    nowMs = nov22ValidFrom + 30L * 60_000L
+    engine.onSignal(ContextSignal.ScreenUnlocked(unlockAway, nowMs))
+    val emitted = engine.suggestion.value
+    assertTrue(emitted is ProactiveSuggestion.OpenMaps)
+    assertEquals("Kochi Convention Centre", (emitted as ProactiveSuggestion.OpenMaps).placeName)
+  }
 }

@@ -45,6 +45,8 @@ object NotificationExtractor {
       .orEmpty()
 
     val threadMessages = extractThreadMessages(messagingStyle)
+    val selfDisplayName = messagingStyle?.user?.name?.toString()?.trim().orEmpty()
+    val selfSentSamples = extractSelfSentSamples(messagingStyle)
     val conversationTitle = messagingStyle?.conversationTitle?.toString()?.trim().orEmpty()
 
     val sender = resolveSender(
@@ -52,6 +54,7 @@ object NotificationExtractor {
       conversationTitle = conversationTitle,
       rawTitle = rawTitle,
       appLabel = appLabel,
+      selfDisplayName = selfDisplayName,
     )
 
     val title = conversationTitle.ifBlank { rawTitle.ifBlank { appLabel } }
@@ -63,6 +66,12 @@ object NotificationExtractor {
       rawText = rawText,
       rawLines = rawLines,
     )
+
+    val isGroup = extras?.getBoolean(NotificationCompat.EXTRA_IS_GROUP_CONVERSATION, false) == true ||
+      (conversationTitle.isNotBlank() &&
+        !conversationTitle.equals(sender, ignoreCase = true) &&
+        !isGenericSelfName(sender, selfDisplayName))
+    val userMentioned = detectUserMention(selfDisplayName = selfDisplayName, text = "$rawText\n$body")
 
     val replyHandle = extractReplyHandle(
       sbnKey = sbn.key,
@@ -83,6 +92,9 @@ object NotificationExtractor {
       isOngoing = sbn.isOngoing,
       hasMessagingStyle = messagingStyle != null && threadMessages.isNotEmpty(),
       hasRemoteInput = replyHandle != null,
+      isGroupConversation = isGroup,
+      isUserMentioned = userMentioned,
+      selfSentSamples = selfSentSamples,
     )
 
     return ExtractedNotification(
@@ -109,17 +121,73 @@ object NotificationExtractor {
       }
   }
 
+  internal fun extractSelfSentSamples(
+    messagingStyle: NotificationCompat.MessagingStyle?,
+  ): List<String> {
+    if (messagingStyle == null) return emptyList()
+    val selfName = messagingStyle.user?.name?.toString()?.trim().orEmpty()
+    val selfKey = messagingStyle.user?.key?.trim()
+    return messagingStyle.messages
+      .mapNotNull { msg ->
+        val text = msg.text?.toString()?.trim().orEmpty()
+        if (text.isEmpty()) return@mapNotNull null
+        val person = msg.person
+        val pName = person?.name?.toString()?.trim().orEmpty()
+        val pKey = person?.key?.trim()
+        val isSelf = person == null ||
+          (!selfKey.isNullOrEmpty() && pKey == selfKey) ||
+          (selfName.isNotEmpty() && pName.equals(selfName, ignoreCase = true)) ||
+          pName.equals("You", ignoreCase = true) ||
+          pName.equals("Me", ignoreCase = true)
+        if (isSelf) text else null
+      }
+      .takeLast(4)
+  }
+
   internal fun resolveSender(
     threadMessages: List<ThreadMessage>,
     conversationTitle: String,
     rawTitle: String,
     appLabel: String,
+    selfDisplayName: String = "",
   ): String {
-    val lastSender = threadMessages.lastOrNull()?.sender?.takeIf { it.isNotBlank() }
+    val lastExternalSender = threadMessages
+      .lastOrNull { msg -> msg.sender.isNotBlank() && !isGenericSelfName(msg.sender, selfDisplayName) }
+      ?.sender
+    val lastSender = lastExternalSender ?: threadMessages.lastOrNull()?.sender?.takeIf { it.isNotBlank() }
     return lastSender
       ?: rawTitle.takeIf { it.isNotBlank() }
       ?: conversationTitle.takeIf { it.isNotBlank() }
       ?: appLabel
+  }
+
+  internal fun detectUserMention(selfDisplayName: String, text: String): Boolean {
+    if (text.isBlank()) return false
+    val lowerText = text.lowercase()
+    if (lowerText.contains("@all") || lowerText.contains("@everyone")) return true
+    val cleanSelf = selfDisplayName.trim()
+    if (cleanSelf.isEmpty() ||
+      cleanSelf.equals("you", ignoreCase = true) ||
+      cleanSelf.equals("me", ignoreCase = true) ||
+      cleanSelf.equals("user", ignoreCase = true)
+    ) {
+      return false
+    }
+    val tokens = listOf(cleanSelf, cleanSelf.substringBefore(' '))
+      .map { it.trim() }
+      .filter { it.length >= 3 }
+      .distinct()
+    return tokens.any { token ->
+      val escaped = Regex.escape(token)
+      Regex("""(?:^|[^a-zA-Z0-9_])@?$escaped(?=$|[^a-zA-Z0-9_])""", RegexOption.IGNORE_CASE)
+        .containsMatchIn(text)
+    }
+  }
+
+  private fun isGenericSelfName(sender: String, selfDisplayName: String): Boolean {
+    val clean = sender.trim()
+    if (clean.equals("You", ignoreCase = true) || clean.equals("Me", ignoreCase = true)) return true
+    return selfDisplayName.isNotBlank() && clean.equals(selfDisplayName.trim(), ignoreCase = true)
   }
 
   internal fun buildBodyText(

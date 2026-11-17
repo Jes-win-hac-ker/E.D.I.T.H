@@ -4,7 +4,10 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.nexwork.edith.jarvis.brain.JarvisLanguagePrompt
 import com.nexwork.edith.jarvis.core.CapturedNotification
+import com.nexwork.edith.jarvis.core.ContactPersona
+import com.nexwork.edith.jarvis.core.GroupEngagementRecord
 import com.nexwork.edith.jarvis.core.JarvisEventRecord
 import com.nexwork.edith.jarvis.core.JarvisRule
 import com.nexwork.edith.jarvis.core.NotificationTriage
@@ -16,6 +19,7 @@ import com.nexwork.edith.jarvis.core.TriageStatus
 import com.nexwork.edith.jarvis.core.TrustedContact
 import com.nexwork.edith.jarvis.core.UiPlaybook
 import com.nexwork.edith.jarvis.core.UpcomingDestination
+import com.nexwork.edith.jarvis.security.SecurityGateway
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -96,6 +100,7 @@ class JarvisDatabase(
     )
     createV2Tables(db)
     createV3Tables(db)
+    createV4Tables(db)
   }
 
   override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -104,6 +109,9 @@ class JarvisDatabase(
     }
     if (oldVersion < 3) {
       createV3Tables(db)
+    }
+    if (oldVersion < 4) {
+      upgradeToV4(db)
     }
   }
 
@@ -152,13 +160,15 @@ class JarvisDatabase(
         $COL_PLACE_NAME TEXT NOT NULL,
         $COL_SOURCE_SUMMARY TEXT NOT NULL,
         $COL_EXPIRES_AT INTEGER NOT NULL,
+        $COL_VALID_FROM_EPOCH INTEGER NOT NULL DEFAULT 0,
+        $COL_VALID_UNTIL_EPOCH INTEGER NOT NULL DEFAULT 0,
         $COL_USED INTEGER NOT NULL DEFAULT 0,
         $COL_CREATED_AT_MS INTEGER NOT NULL
       )
       """.trimIndent()
     )
     db.execSQL(
-      "CREATE INDEX IF NOT EXISTS idx_destinations_active ON $TABLE_UPCOMING_DESTINATIONS($COL_USED, $COL_EXPIRES_AT DESC)"
+      "CREATE INDEX IF NOT EXISTS idx_destinations_active ON $TABLE_UPCOMING_DESTINATIONS($COL_USED, $COL_VALID_FROM_EPOCH, $COL_VALID_UNTIL_EPOCH DESC, $COL_EXPIRES_AT DESC)"
     )
     db.execSQL(
       """
@@ -169,6 +179,55 @@ class JarvisDatabase(
         $COL_PLACE_TYPE TEXT NOT NULL,
         $COL_AUTO_FOCUS_QUIET INTEGER NOT NULL DEFAULT 1,
         $COL_UPDATED_AT_MS INTEGER NOT NULL
+      )
+      """.trimIndent()
+    )
+  }
+
+  private fun upgradeToV4(db: SQLiteDatabase) {
+    runCatching {
+      db.execSQL("ALTER TABLE $TABLE_UPCOMING_DESTINATIONS ADD COLUMN $COL_VALID_FROM_EPOCH INTEGER NOT NULL DEFAULT 0")
+    }
+    runCatching {
+      db.execSQL("ALTER TABLE $TABLE_UPCOMING_DESTINATIONS ADD COLUMN $COL_VALID_UNTIL_EPOCH INTEGER NOT NULL DEFAULT 0")
+    }
+    db.execSQL(
+      "UPDATE $TABLE_UPCOMING_DESTINATIONS SET $COL_VALID_UNTIL_EPOCH = $COL_EXPIRES_AT WHERE $COL_VALID_UNTIL_EPOCH = 0"
+    )
+    db.execSQL(
+      "CREATE INDEX IF NOT EXISTS idx_destinations_window ON $TABLE_UPCOMING_DESTINATIONS($COL_USED, $COL_VALID_FROM_EPOCH, $COL_VALID_UNTIL_EPOCH DESC)"
+    )
+    createV4Tables(db)
+  }
+
+  private fun createV4Tables(db: SQLiteDatabase) {
+    db.execSQL(
+      """
+      CREATE TABLE IF NOT EXISTS $TABLE_CONTACT_PERSONAS (
+        $COL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+        $COL_CONTACT_KEY TEXT NOT NULL UNIQUE,
+        $COL_DISPLAY_NAME TEXT NOT NULL,
+        $COL_PACKAGE_NAME TEXT NOT NULL DEFAULT '',
+        $COL_RELATIONSHIP_TAG TEXT NOT NULL DEFAULT 'general',
+        $COL_SENT_SAMPLES_JSON TEXT NOT NULL DEFAULT '[]',
+        $COL_UPDATED_AT_MS INTEGER NOT NULL
+      )
+      """.trimIndent()
+    )
+    db.execSQL(
+      "CREATE INDEX IF NOT EXISTS idx_personas_name ON $TABLE_CONTACT_PERSONAS($COL_DISPLAY_NAME)"
+    )
+    db.execSQL(
+      """
+      CREATE TABLE IF NOT EXISTS $TABLE_GROUP_ENGAGEMENT (
+        $COL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+        $COL_GROUP_KEY TEXT NOT NULL UNIQUE,
+        $COL_PACKAGE_NAME TEXT NOT NULL,
+        $COL_GROUP_NAME TEXT NOT NULL,
+        $COL_RECEIVED_COUNT INTEGER NOT NULL DEFAULT 0,
+        $COL_USER_REPLIED_COUNT INTEGER NOT NULL DEFAULT 0,
+        $COL_LAST_RECEIVED_AT_MS INTEGER NOT NULL DEFAULT 0,
+        $COL_LAST_REPLIED_AT_MS INTEGER NOT NULL DEFAULT 0
       )
       """.trimIndent()
     )
@@ -639,17 +698,30 @@ class JarvisDatabase(
     placeName: String,
     sourceSummary: String,
     nowMs: Long = System.currentTimeMillis(),
+    validFromEpochMs: Long = 0L,
+    validUntilEpochMs: Long = 0L,
     ttlMs: Long = DESTINATION_TTL_24H_MS,
   ): Long {
     val cleanPlace = placeName.trim()
     if (cleanPlace.isEmpty()) return -1L
     val db = writableDatabase
-    db.delete(TABLE_UPCOMING_DESTINATIONS, "$COL_EXPIRES_AT <= ?", arrayOf(nowMs.toString()))
-    val expiresAt = nowMs + ttlMs
+    db.delete(
+      TABLE_UPCOMING_DESTINATIONS,
+      "COALESCE(NULLIF($COL_VALID_UNTIL_EPOCH, 0), $COL_EXPIRES_AT) <= ?",
+      arrayOf(nowMs.toString()),
+    )
+    val resolvedFrom = if (validFromEpochMs > 0L) validFromEpochMs else nowMs
+    val resolvedUntil = when {
+      validUntilEpochMs > resolvedFrom -> validUntilEpochMs
+      validFromEpochMs > 0L -> validFromEpochMs + FUTURE_EVENT_DEFAULT_WINDOW_MS
+      else -> nowMs + ttlMs
+    }
     val values = ContentValues().apply {
       put(COL_PLACE_NAME, cleanPlace)
       put(COL_SOURCE_SUMMARY, sourceSummary.trim())
-      put(COL_EXPIRES_AT, expiresAt)
+      put(COL_EXPIRES_AT, resolvedUntil)
+      put(COL_VALID_FROM_EPOCH, resolvedFrom)
+      put(COL_VALID_UNTIL_EPOCH, resolvedUntil)
       put(COL_USED, 0)
       put(COL_CREATED_AT_MS, nowMs)
     }
@@ -660,37 +732,253 @@ class JarvisDatabase(
     nowMs: Long = System.currentTimeMillis(),
     limit: Int = 20,
   ): List<UpcomingDestination> {
+    return queryDestinations(
+      selection = "$COL_USED = 0 AND $COL_VALID_FROM_EPOCH <= ? AND COALESCE(NULLIF($COL_VALID_UNTIL_EPOCH, 0), $COL_EXPIRES_AT) > ?",
+      args = arrayOf(nowMs.toString(), nowMs.toString()),
+      orderBy = "$COL_VALID_FROM_EPOCH ASC, $COL_CREATED_AT_MS DESC, $COL_ID DESC",
+      limit = limit,
+    )
+  }
+
+  fun getAllUnexpiredDestinations(
+    nowMs: Long = System.currentTimeMillis(),
+    limit: Int = 20,
+  ): List<UpcomingDestination> {
+    return queryDestinations(
+      selection = "$COL_USED = 0 AND COALESCE(NULLIF($COL_VALID_UNTIL_EPOCH, 0), $COL_EXPIRES_AT) > ?",
+      args = arrayOf(nowMs.toString()),
+      orderBy = "$COL_VALID_FROM_EPOCH ASC, $COL_CREATED_AT_MS DESC, $COL_ID DESC",
+      limit = limit,
+    )
+  }
+
+  private fun queryDestinations(
+    selection: String,
+    args: Array<String>,
+    orderBy: String,
+    limit: Int,
+  ): List<UpcomingDestination> {
     val list = mutableListOf<UpcomingDestination>()
     readableDatabase.query(
       TABLE_UPCOMING_DESTINATIONS,
       null,
-      "$COL_USED = 0 AND $COL_EXPIRES_AT > ?",
-      arrayOf(nowMs.toString()),
+      selection,
+      args,
       null,
       null,
-      "$COL_CREATED_AT_MS DESC, $COL_ID DESC",
+      orderBy,
       limit.coerceIn(1, 50).toString(),
     ).use { c ->
       val idxId = c.getColumnIndexOrThrow(COL_ID)
       val idxPlace = c.getColumnIndexOrThrow(COL_PLACE_NAME)
       val idxSource = c.getColumnIndexOrThrow(COL_SOURCE_SUMMARY)
       val idxExp = c.getColumnIndexOrThrow(COL_EXPIRES_AT)
+      val idxFrom = c.getColumnIndex(COL_VALID_FROM_EPOCH)
+      val idxUntil = c.getColumnIndex(COL_VALID_UNTIL_EPOCH)
       val idxUsed = c.getColumnIndexOrThrow(COL_USED)
       val idxCreated = c.getColumnIndexOrThrow(COL_CREATED_AT_MS)
       while (c.moveToNext()) {
+        val exp = c.getLong(idxExp)
+        val validFrom = if (idxFrom >= 0) c.getLong(idxFrom) else 0L
+        val rawUntil = if (idxUntil >= 0) c.getLong(idxUntil) else 0L
+        val validUntil = if (rawUntil > 0L) rawUntil else exp
         list.add(
           UpcomingDestination(
             id = c.getLong(idxId),
             placeName = c.getString(idxPlace),
             sourceSummary = c.getString(idxSource),
-            expiresAtMs = c.getLong(idxExp),
+            expiresAtMs = validUntil,
             used = c.getInt(idxUsed) == 1,
             createdAtMs = c.getLong(idxCreated),
+            validFromEpochMs = validFrom,
+            validUntilEpochMs = validUntil,
           )
         )
       }
     }
     return list
+  }
+
+  fun recordOutgoingReplySample(
+    displayName: String,
+    packageName: String = "",
+    sampleText: String,
+    relationshipTag: String? = null,
+    nowMs: Long = System.currentTimeMillis(),
+  ): Boolean {
+    val cleanName = displayName.trim()
+    val cleanSample = sampleText.trim().take(MAX_PERSONA_SAMPLE_CHARS)
+    if (cleanName.isEmpty() || cleanSample.isEmpty()) return false
+    if (SecurityGateway.inspectOutboundText(cleanSample) != null) return false
+
+    val cleanPkg = packageName.trim().lowercase()
+    val contactKey = buildContactKey(cleanName, cleanPkg)
+    val existing = getPersonaByKey(contactKey)
+
+    val mergedSamples = buildList {
+      existing?.sentSamples?.forEach { prev ->
+        if (!prev.equals(cleanSample, ignoreCase = false)) add(prev)
+      }
+      add(cleanSample)
+    }.takeLast(MAX_PERSONA_SAMPLES)
+
+    val resolvedTag = when {
+      !relationshipTag.isNullOrBlank() -> relationshipTag.trim().lowercase()
+      existing != null && existing.relationshipTag != "general" -> existing.relationshipTag
+      else -> JarvisLanguagePrompt.inferRelationshipTag(cleanName, cleanSample)
+    }
+
+    val values = ContentValues().apply {
+      put(COL_CONTACT_KEY, contactKey)
+      put(COL_DISPLAY_NAME, cleanName)
+      put(COL_PACKAGE_NAME, cleanPkg)
+      put(COL_RELATIONSHIP_TAG, resolvedTag)
+      put(COL_SENT_SAMPLES_JSON, json.encodeToString(mergedSamples))
+      put(COL_UPDATED_AT_MS, nowMs)
+    }
+    val db = writableDatabase
+    val updated = db.update(TABLE_CONTACT_PERSONAS, values, "$COL_CONTACT_KEY = ?", arrayOf(contactKey))
+    if (updated == 0) {
+      db.insertOrThrow(TABLE_CONTACT_PERSONAS, null, values)
+    }
+    return true
+  }
+
+  fun getContactPersona(displayName: String, packageName: String = ""): ContactPersona? {
+    val cleanName = displayName.trim()
+    if (cleanName.isEmpty()) return null
+    val cleanPkg = packageName.trim().lowercase()
+    return getPersonaByKey(buildContactKey(cleanName, cleanPkg))
+      ?: getPersonaByKey(buildContactKey(cleanName, ""))
+      ?: getPersonaByDisplayName(cleanName)
+  }
+
+  fun getContactPersonaCount(): Int {
+    return readableDatabase.rawQuery("SELECT COUNT(*) FROM $TABLE_CONTACT_PERSONAS", null).use { c ->
+      if (c.moveToFirst()) c.getInt(0) else 0
+    }
+  }
+
+  private fun getPersonaByKey(contactKey: String): ContactPersona? {
+    readableDatabase.query(
+      TABLE_CONTACT_PERSONAS,
+      null,
+      "$COL_CONTACT_KEY = ?",
+      arrayOf(contactKey),
+      null,
+      null,
+      null,
+      "1",
+    ).use { c ->
+      return if (c.moveToFirst()) readPersonaRow(c) else null
+    }
+  }
+
+  private fun getPersonaByDisplayName(displayName: String): ContactPersona? {
+    readableDatabase.query(
+      TABLE_CONTACT_PERSONAS,
+      null,
+      "LOWER($COL_DISPLAY_NAME) = ?",
+      arrayOf(displayName.trim().lowercase()),
+      null,
+      null,
+      "$COL_UPDATED_AT_MS DESC",
+      "1",
+    ).use { c ->
+      return if (c.moveToFirst()) readPersonaRow(c) else null
+    }
+  }
+
+  private fun readPersonaRow(c: android.database.Cursor): ContactPersona {
+    val rawSamples = c.getString(c.getColumnIndexOrThrow(COL_SENT_SAMPLES_JSON))
+    val samples = runCatching { json.decodeFromString<List<String>>(rawSamples) }.getOrDefault(emptyList())
+    return ContactPersona(
+      id = c.getLong(c.getColumnIndexOrThrow(COL_ID)),
+      contactKey = c.getString(c.getColumnIndexOrThrow(COL_CONTACT_KEY)),
+      displayName = c.getString(c.getColumnIndexOrThrow(COL_DISPLAY_NAME)),
+      packageName = c.getString(c.getColumnIndexOrThrow(COL_PACKAGE_NAME)),
+      relationshipTag = c.getString(c.getColumnIndexOrThrow(COL_RELATIONSHIP_TAG)),
+      sentSamples = samples,
+      updatedAtMs = c.getLong(c.getColumnIndexOrThrow(COL_UPDATED_AT_MS)),
+    )
+  }
+
+  fun recordGroupMessageReceived(
+    groupName: String,
+    packageName: String,
+    nowMs: Long = System.currentTimeMillis(),
+  ): GroupEngagementRecord? {
+    val cleanGroup = groupName.trim()
+    val cleanPkg = packageName.trim().lowercase()
+    if (cleanGroup.isEmpty() || cleanPkg.isEmpty()) return null
+    val groupKey = buildContactKey(cleanGroup, cleanPkg)
+    val db = writableDatabase
+    db.execSQL(
+      """
+      INSERT INTO $TABLE_GROUP_ENGAGEMENT (
+        $COL_GROUP_KEY, $COL_PACKAGE_NAME, $COL_GROUP_NAME,
+        $COL_RECEIVED_COUNT, $COL_USER_REPLIED_COUNT, $COL_LAST_RECEIVED_AT_MS, $COL_LAST_REPLIED_AT_MS
+      ) VALUES (?, ?, ?, 1, 0, ?, 0)
+      ON CONFLICT($COL_GROUP_KEY) DO UPDATE SET
+        $COL_GROUP_NAME = excluded.$COL_GROUP_NAME,
+        $COL_RECEIVED_COUNT = $COL_RECEIVED_COUNT + 1,
+        $COL_LAST_RECEIVED_AT_MS = excluded.$COL_LAST_RECEIVED_AT_MS
+      """.trimIndent(),
+      arrayOf<Any>(groupKey, cleanPkg, cleanGroup, nowMs),
+    )
+    return getGroupEngagement(cleanGroup, cleanPkg)
+  }
+
+  fun recordGroupUserReply(
+    groupName: String,
+    packageName: String,
+    nowMs: Long = System.currentTimeMillis(),
+  ) {
+    val cleanGroup = groupName.trim()
+    val cleanPkg = packageName.trim().lowercase()
+    if (cleanGroup.isEmpty() || cleanPkg.isEmpty()) return
+    val groupKey = buildContactKey(cleanGroup, cleanPkg)
+    writableDatabase.execSQL(
+      """
+      INSERT INTO $TABLE_GROUP_ENGAGEMENT (
+        $COL_GROUP_KEY, $COL_PACKAGE_NAME, $COL_GROUP_NAME,
+        $COL_RECEIVED_COUNT, $COL_USER_REPLIED_COUNT, $COL_LAST_RECEIVED_AT_MS, $COL_LAST_REPLIED_AT_MS
+      ) VALUES (?, ?, ?, 0, 1, 0, ?)
+      ON CONFLICT($COL_GROUP_KEY) DO UPDATE SET
+        $COL_USER_REPLIED_COUNT = $COL_USER_REPLIED_COUNT + 1,
+        $COL_LAST_REPLIED_AT_MS = excluded.$COL_LAST_REPLIED_AT_MS
+      """.trimIndent(),
+      arrayOf<Any>(groupKey, cleanPkg, cleanGroup, nowMs),
+    )
+  }
+
+  fun getGroupEngagement(groupName: String, packageName: String): GroupEngagementRecord? {
+    val cleanGroup = groupName.trim()
+    val cleanPkg = packageName.trim().lowercase()
+    if (cleanGroup.isEmpty() || cleanPkg.isEmpty()) return null
+    val groupKey = buildContactKey(cleanGroup, cleanPkg)
+    readableDatabase.query(
+      TABLE_GROUP_ENGAGEMENT,
+      null,
+      "$COL_GROUP_KEY = ?",
+      arrayOf(groupKey),
+      null,
+      null,
+      null,
+      "1",
+    ).use { c ->
+      if (!c.moveToFirst()) return null
+      return GroupEngagementRecord(
+        id = c.getLong(c.getColumnIndexOrThrow(COL_ID)),
+        groupKey = c.getString(c.getColumnIndexOrThrow(COL_GROUP_KEY)),
+        packageName = c.getString(c.getColumnIndexOrThrow(COL_PACKAGE_NAME)),
+        groupName = c.getString(c.getColumnIndexOrThrow(COL_GROUP_NAME)),
+        receivedCount = c.getInt(c.getColumnIndexOrThrow(COL_RECEIVED_COUNT)),
+        userRepliedCount = c.getInt(c.getColumnIndexOrThrow(COL_USER_REPLIED_COUNT)),
+        lastReceivedAtMs = c.getLong(c.getColumnIndexOrThrow(COL_LAST_RECEIVED_AT_MS)),
+        lastRepliedAtMs = c.getLong(c.getColumnIndexOrThrow(COL_LAST_REPLIED_AT_MS)),
+      )
+    }
   }
 
   fun markDestinationUsed(id: Long): Int {
@@ -787,10 +1075,13 @@ class JarvisDatabase(
 
   companion object {
     const val DB_NAME = "jarvis_memory.db"
-    const val DB_VERSION = 3
+    const val DB_VERSION = 4
     const val DESTINATION_TTL_24H_MS = 24L * 60L * 60L * 1000L
+    const val FUTURE_EVENT_DEFAULT_WINDOW_MS = 6L * 60L * 60L * 1000L
     private const val DEFAULT_FEED_LIMIT = 50
     private const val MAX_EVENT_ROWS = 500
+    private const val MAX_PERSONA_SAMPLES = 8
+    private const val MAX_PERSONA_SAMPLE_CHARS = 160
 
     const val TABLE_EVENT_LOG = "event_log"
     const val TABLE_USER_RULEBOOK = "user_rulebook"
@@ -798,6 +1089,8 @@ class JarvisDatabase(
     const val TABLE_TRUSTED_CONTACTS = "trusted_contacts"
     const val TABLE_UPCOMING_DESTINATIONS = "upcoming_destinations"
     const val TABLE_SAVED_PLACES = "saved_places"
+    const val TABLE_CONTACT_PERSONAS = "contact_personas"
+    const val TABLE_GROUP_ENGAGEMENT = "group_engagement"
 
     private const val COL_ID = "id"
     private const val COL_SBN_KEY = "sbn_key"
@@ -841,7 +1134,19 @@ class JarvisDatabase(
     private const val COL_PLACE_NAME = "place_name"
     private const val COL_SOURCE_SUMMARY = "source_summary"
     private const val COL_EXPIRES_AT = "expires_at"
+    private const val COL_VALID_FROM_EPOCH = "valid_from_epoch"
+    private const val COL_VALID_UNTIL_EPOCH = "valid_until_epoch"
     private const val COL_USED = "used"
+
+    private const val COL_RELATIONSHIP_TAG = "relationship_tag"
+    private const val COL_SENT_SAMPLES_JSON = "sent_samples_json"
+
+    private const val COL_GROUP_KEY = "group_key"
+    private const val COL_GROUP_NAME = "group_name"
+    private const val COL_RECEIVED_COUNT = "received_count"
+    private const val COL_USER_REPLIED_COUNT = "user_replied_count"
+    private const val COL_LAST_RECEIVED_AT_MS = "last_received_at_ms"
+    private const val COL_LAST_REPLIED_AT_MS = "last_replied_at_ms"
 
     private const val COL_SSID_NORMALIZED = "ssid_normalized"
     private const val COL_DISPLAY_SSID = "display_ssid"

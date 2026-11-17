@@ -20,13 +20,16 @@ import androidx.core.content.ContextCompat
 import com.nexwork.edith.MainActivity
 import com.nexwork.edith.R
 import com.nexwork.edith.jarvis.brain.GeminiClient
+import com.nexwork.edith.jarvis.brain.JarvisLanguagePrompt
 import com.nexwork.edith.jarvis.brain.PlannerClient
 import com.nexwork.edith.jarvis.memory.JarvisDatabase
 import com.nexwork.edith.jarvis.reflex.CommandExecutionResult
 import com.nexwork.edith.jarvis.reflex.DestinationStore
 import com.nexwork.edith.jarvis.reflex.GatekeeperCandidate
 import com.nexwork.edith.jarvis.reflex.GatekeeperDecision
+import com.nexwork.edith.jarvis.reflex.GroupRelevanceScorer
 import com.nexwork.edith.jarvis.reflex.LocalGatekeeper
+import com.nexwork.edith.jarvis.reflex.MessageBurstAggregator
 import com.nexwork.edith.jarvis.reflex.PlayServicesOneShotLocationVerifier
 import com.nexwork.edith.jarvis.reflex.PlaybookEnvironment
 import com.nexwork.edith.jarvis.reflex.PlaybookExecutor
@@ -42,8 +45,10 @@ import com.nexwork.edith.jarvis.senses.JarvisAccessibilityService
 import com.nexwork.edith.jarvis.senses.JarvisNotificationService
 import com.nexwork.edith.jarvis.senses.PassiveContextEngine
 import com.nexwork.edith.jarvis.senses.RemoteInputCache
+import com.nexwork.edith.jarvis.senses.VoiceNoteObserver
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -73,6 +78,8 @@ object JarvisRuntime {
 
   private const val PROACTIVE_CHANNEL_ID = "jarvis_proactive_channel"
   private const val PROACTIVE_NOTIFICATION_ID = 4110
+  private const val JARVIS_PREFS_NAME = "jarvis_runtime_prefs"
+  private const val KEY_OPUS_VOICE_READER = "opus_voice_reader_enabled"
 
   private val firstFrameScheduled = AtomicBoolean(false)
   private val initialized = AtomicBoolean(false)
@@ -116,6 +123,14 @@ object JarvisRuntime {
 
   @Volatile
   private var proactiveEngine: ProactiveEngine? = null
+
+  @Volatile
+  private var burstAggregator: MessageBurstAggregator? = null
+
+  @Volatile
+  private var voiceNoteObserver: VoiceNoteObserver? = null
+
+  private val suppressedGroupCount = AtomicInteger(0)
 
   @Volatile
   private var appContextRef: Context? = null
@@ -224,7 +239,7 @@ object JarvisRuntime {
 
   fun onNotificationCaptured(context: Context, extracted: ExtractedNotification) {
     val appCtx = context.applicationContext
-    val triageJob = scope.launch(start = CoroutineStart.LAZY) {
+    scope.launch {
       ensureComponentsLocked(appCtx)
       val keeper = gatekeeper ?: return@launch
       val db = database ?: return@launch
@@ -246,16 +261,76 @@ object JarvisRuntime {
       if (decision is GatekeeperDecision.Ignore) {
         return@launch
       }
-      val contentHash = (decision as GatekeeperDecision.Allow).contentHash
+
+      val now = captured.postTimeMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+
+      // Passively harvest user's own replies visible in MessagingStyle history
+      if (captured.selfSentSamples.isNotEmpty()) {
+        val personaContact = if (captured.isGroupConversation && captured.sender.isNotBlank()) {
+          captured.sender
+        } else {
+          captured.title.ifBlank { captured.sender }
+        }
+        var savedAny = false
+        captured.selfSentSamples.forEach { sample ->
+          if (db.recordOutgoingReplySample(personaContact, captured.packageName, sample, nowMs = now)) {
+            savedAny = true
+          }
+        }
+        if (captured.isGroupConversation && captured.title.isNotBlank()) {
+          db.recordGroupUserReply(captured.title, captured.packageName, nowMs = now)
+        }
+        if (savedAny) {
+          _uiState.update { it.copy(personaCount = db.getContactPersonaCount()) }
+        }
+      }
+
+      // Group relevance scoring: track incoming volume and silently suppress noisy unmentioned groups
+      if (captured.isGroupConversation && captured.title.isNotBlank()) {
+        val engagement = db.recordGroupMessageReceived(
+          groupName = captured.title,
+          packageName = captured.packageName,
+          nowMs = now,
+        )
+        if (
+          GroupRelevanceScorer.shouldSuppressLowEngagement(
+            engagement = engagement,
+            isGroupConversation = true,
+            isUserMentioned = captured.isUserMentioned,
+          )
+        ) {
+          val totalSuppressed = suppressedGroupCount.incrementAndGet()
+          _uiState.update { it.copy(suppressedGroupCount = totalSuppressed) }
+          JarvisForegroundService.recordProcessed("Muted low-engagement group: ${captured.title}")
+          return@launch
+        }
+      }
 
       extracted.replyHandle?.let { handle ->
         remoteInputCache.put(handle)
       }
 
+      burstAggregator?.submit(extracted)
+    }
+  }
+
+  private fun processDebouncedNotification(appCtx: Context, extracted: ExtractedNotification) {
+    val triageJob = scope.launch(start = CoroutineStart.LAZY) {
+      ensureComponentsLocked(appCtx)
+      val db = database ?: return@launch
+      val captured = extracted.captured
+      val now = captured.postTimeMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+      val contentHash = LocalGatekeeper.computeContentHash(
+        packageName = captured.packageName,
+        title = captured.title,
+        sender = captured.sender,
+        body = captured.body,
+      )
+
       val eventId = db.insertIncomingEvent(
         captured = captured,
         contentHash = contentHash,
-        createdAtMs = captured.postTimeMs.takeIf { it > 0L } ?: System.currentTimeMillis(),
+        createdAtMs = now,
       )
       syncEventsSnapshot(db)
 
@@ -274,8 +349,17 @@ object JarvisRuntime {
       _uiState.update { it.copy(isProcessing = true, lastError = null) }
       try {
         val rules = db.getActiveRules()
+        val persona = db.getContactPersona(captured.sender, captured.packageName)
+          ?: db.getContactPersona(captured.title, captured.packageName)
+        val audioBytes = voiceNoteObserver?.resolveAudioBytesForNotification(appCtx, captured)
         val client = geminiClient ?: return@launch
-        val result = client.classifyNotificationCancellable(apiKey, captured, rules)
+        val result = client.classifyNotificationCancellable(
+          apiKey = apiKey,
+          notification = captured,
+          rules = rules,
+          persona = persona,
+          audioOggBytes = audioBytes,
+        )
         result
           .onSuccess { triageResult ->
             db.updateTriageResult(
@@ -288,12 +372,16 @@ object JarvisRuntime {
               db.insertUpcomingDestination(
                 placeName = harvestedDest,
                 sourceSummary = "${captured.appLabel} · ${captured.sender}: ${captured.body.take(72)}",
+                nowMs = System.currentTimeMillis(),
+                validFromEpochMs = triageResult.triage.validFromEpochMs,
+                validUntilEpochMs = triageResult.triage.validUntilEpochMs,
               )
               syncProactiveSnapshot(db)
             }
             val quietPrefix = if (passiveContextEngine?.contextState?.value?.focusQuietActive == true) "[QUIET] " else ""
+            val voicePrefix = if (audioBytes != null) "[VOICE] " else ""
             JarvisForegroundService.recordProcessed(
-              "$quietPrefix${triageResult.triage.urgency} · ${triageResult.triage.sender}: ${triageResult.triage.intent}",
+              "$quietPrefix$voicePrefix${triageResult.triage.urgency} · ${triageResult.triage.sender}: ${triageResult.triage.intent}",
             )
           }
           .onFailure { err ->
@@ -398,7 +486,12 @@ object JarvisRuntime {
           }
           db?.let { store ->
             store.markReplySent(event.id, resolvedText)
+            store.recordOutgoingReplySample(event.sender, event.packageName, resolvedText)
+            if (event.title.isNotBlank() && !event.title.equals(event.sender, ignoreCase = true)) {
+              store.recordGroupUserReply(event.title, event.packageName)
+            }
             syncEventsSnapshot(store)
+            _uiState.update { it.copy(personaCount = store.getContactPersonaCount()) }
           }
           _uiState.update {
             it.copy(
@@ -585,6 +678,7 @@ object JarvisRuntime {
     }
     cmdJob?.cancel(CancellationException(reason))
     triageSnapshot.forEach { it.cancel(CancellationException(reason)) }
+    burstAggregator?.cancelAll()
     cancelPendingTier3Approval()
     recomputeAutomationActive()
     JarvisAccessibilityService.instance()?.abortActiveAutomation(bounceHome = bounceHome)
@@ -839,7 +933,43 @@ object JarvisRuntime {
       // Re-invoke FGS start so API 34+ dynamically promotes location/connectedDevice FGS types once granted.
       JarvisForegroundService.start(appCtx)
       passiveContextEngine?.refreshSensorsAfterPermissionGrant(appCtx)
+      voiceNoteObserver?.startIfPermitted(appCtx)
       syncEnvironmentOnly(appCtx)
+    }
+  }
+
+  fun audioReadPermission(): String =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      Manifest.permission.READ_MEDIA_AUDIO
+    } else {
+      Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+
+  fun hasMediaAudioPermission(context: Context): Boolean =
+    VoiceNoteObserver.hasAudioReadPermission(context)
+
+  fun setOpusVoiceReaderEnabled(context: Context, enabled: Boolean) {
+    val appCtx = context.applicationContext
+    appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
+      .edit()
+      .putBoolean(KEY_OPUS_VOICE_READER, enabled)
+      .apply()
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      voiceNoteObserver?.setEnabled(appCtx, enabled)
+      val hasPerm = VoiceNoteObserver.hasAudioReadPermission(appCtx)
+      _uiState.update {
+        it.copy(
+          opusVoiceReaderEnabled = enabled,
+          hasMediaAudioPermission = hasPerm,
+          lastError = null,
+          lastStatusBanner = if (enabled) {
+            if (hasPerm) "OPUS voice-note reader ON" else "OPUS reader ON (awaiting audio permission)"
+          } else {
+            "OPUS voice-note reader OFF"
+          },
+        )
+      }
     }
   }
 
@@ -1123,7 +1253,30 @@ object JarvisRuntime {
             contactName: String,
           ): Boolean = awaitTier3Approval(actionTitle, actionSummary, reason, targetPackage, contactName)
         }
-        playbookExecutor = PlaybookExecutor(env = env, store = store, security = gw, planner = pc)
+        playbookExecutor = PlaybookExecutor(
+          env = env,
+          store = store,
+          security = gw,
+          planner = pc,
+          resolvePersonaContext = { cmdText ->
+            val words = cmdText.split(Regex("""\s+""")).map { it.trim(',', '.', '!', '?') }.filter { it.length >= 2 }
+            val matched = words.firstNotNullOfOrNull { token -> db.getContactPersona(token) }
+            if (matched != null) JarvisLanguagePrompt.formatContactPersona(matched) else ""
+          },
+        )
+      }
+      if (burstAggregator == null) {
+        burstAggregator = MessageBurstAggregator(
+          scope = scope,
+          onFlush = { merged -> processDebouncedNotification(appCtx, merged) },
+        )
+      }
+      if (voiceNoteObserver == null) {
+        val observer = VoiceNoteObserver()
+        val opusOptIn = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
+          .getBoolean(KEY_OPUS_VOICE_READER, false)
+        observer.setEnabled(appCtx, opusOptIn)
+        voiceNoteObserver = observer
       }
       if (passiveContextEngine == null) {
         passiveContextEngine = PassiveContextEngine(scope = scope)
@@ -1178,7 +1331,10 @@ object JarvisRuntime {
     val playbooks = runCatching { db.getAllPlaybooks() }.getOrDefault(emptyList())
     val contacts = runCatching { db.getTrustedContacts() }.getOrDefault(emptyList())
     val savedPlaces = runCatching { db.getSavedPlaces() }.getOrDefault(emptyList())
-    val destinations = runCatching { db.getActiveUpcomingDestinations() }.getOrDefault(emptyList())
+    val destinations = runCatching { db.getAllUnexpiredDestinations() }.getOrDefault(emptyList())
+    val personaTotal = runCatching { db.getContactPersonaCount() }.getOrDefault(0)
+    val opusEnabled = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
+      .getBoolean(KEY_OPUS_VOICE_READER, false)
     val ambient = passiveContextEngine?.contextState?.value ?: _uiState.value.ambientContext
 
     _uiState.update { current ->
@@ -1193,10 +1349,14 @@ object JarvisRuntime {
         hasBackgroundLocationPermission = hasBackgroundLocation(appCtx),
         hasBluetoothConnectPermission = hasBluetoothConnect(appCtx),
         hasActivityRecognitionPermission = hasActivityRecognition(appCtx),
+        hasMediaAudioPermission = hasMediaAudioPermission(appCtx),
+        opusVoiceReaderEnabled = opusEnabled,
         batteryUnrestricted = isBatteryUnrestricted(appCtx),
         hasApiKey = vault?.hasApiKey?.value ?: false,
         maskedApiKey = vault?.maskedKeyPreview?.value.orEmpty(),
         activeReplyHandleCount = remoteInputCache.activeCount(),
+        personaCount = personaTotal,
+        suppressedGroupCount = suppressedGroupCount.get(),
         ambientContext = ambient,
         savedPlaces = savedPlaces,
         upcomingDestinations = destinations,
@@ -1211,6 +1371,8 @@ object JarvisRuntime {
 
   private fun syncEnvironmentOnly(appCtx: Context) {
     val vault = keyVault
+    val opusEnabled = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
+      .getBoolean(KEY_OPUS_VOICE_READER, false)
     val ambient = passiveContextEngine?.contextState?.value ?: _uiState.value.ambientContext
     _uiState.update { current ->
       current.copy(
@@ -1223,6 +1385,8 @@ object JarvisRuntime {
         hasBackgroundLocationPermission = hasBackgroundLocation(appCtx),
         hasBluetoothConnectPermission = hasBluetoothConnect(appCtx),
         hasActivityRecognitionPermission = hasActivityRecognition(appCtx),
+        hasMediaAudioPermission = hasMediaAudioPermission(appCtx),
+        opusVoiceReaderEnabled = opusEnabled,
         batteryUnrestricted = isBatteryUnrestricted(appCtx),
         hasApiKey = vault?.hasApiKey?.value ?: current.hasApiKey,
         maskedApiKey = vault?.maskedKeyPreview?.value ?: current.maskedApiKey,
@@ -1235,7 +1399,7 @@ object JarvisRuntime {
 
   private fun syncProactiveSnapshot(db: JarvisDatabase) {
     val savedPlaces = runCatching { db.getSavedPlaces() }.getOrDefault(emptyList())
-    val destinations = runCatching { db.getActiveUpcomingDestinations() }.getOrDefault(emptyList())
+    val destinations = runCatching { db.getAllUnexpiredDestinations() }.getOrDefault(emptyList())
     _uiState.update {
       it.copy(
         savedPlaces = savedPlaces,

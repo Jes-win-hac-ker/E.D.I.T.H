@@ -75,6 +75,7 @@ class PlaybookExecutor(
   private val security: SecurityGateway,
   private val planner: PlannerClient = PlannerClient(),
   private val settleDelayMs: Long = DEFAULT_STEP_DELAY_MS,
+  private val resolvePersonaContext: (String) -> String = { "" },
 ) {
 
   suspend fun executeCommand(
@@ -155,6 +156,7 @@ class PlaybookExecutor(
         if (!targetPackageHint.isNullOrBlank()) append("target_package=").append(targetPackageHint)
       },
       bridge = bridge,
+      personaContextNote = resolvePersonaContext(commandText),
     )
 
     return planResult.fold(

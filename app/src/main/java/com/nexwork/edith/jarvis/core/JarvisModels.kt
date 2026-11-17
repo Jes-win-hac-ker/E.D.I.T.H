@@ -15,6 +15,10 @@ data class NotificationTriage(
   val suggestedReply: String = "",
   @SerialName("extracted_destination")
   val extractedDestination: String = "",
+  @SerialName("valid_from_epoch")
+  val validFromEpochMs: Long = 0L,
+  @SerialName("valid_until_epoch")
+  val validUntilEpochMs: Long = 0L,
 )
 
 /**
@@ -43,6 +47,9 @@ data class CapturedNotification(
   val isOngoing: Boolean = false,
   val hasMessagingStyle: Boolean = false,
   val hasRemoteInput: Boolean = false,
+  val isGroupConversation: Boolean = false,
+  val isUserMentioned: Boolean = false,
+  val selfSentSamples: List<String> = emptyList(),
 )
 
 /**
@@ -231,6 +238,37 @@ data class UpcomingDestination(
   val expiresAtMs: Long,
   val used: Boolean = false,
   val createdAtMs: Long = 0L,
+  val validFromEpochMs: Long = 0L,
+  val validUntilEpochMs: Long = expiresAtMs,
+)
+
+/**
+ * Learned per-contact style & relationship profile passively populated from the user's own
+ * outgoing replies, stored in `contact_personas`.
+ */
+data class ContactPersona(
+  val id: Long = 0L,
+  val contactKey: String,
+  val displayName: String,
+  val packageName: String = "",
+  val relationshipTag: String = "general",
+  val sentSamples: List<String> = emptyList(),
+  val updatedAtMs: Long = 0L,
+)
+
+/**
+ * Group chat engagement counters stored in `group_engagement` to silently suppress
+ * low-engagement noisy groups unless the user is explicitly mentioned.
+ */
+data class GroupEngagementRecord(
+  val id: Long = 0L,
+  val groupKey: String,
+  val packageName: String,
+  val groupName: String,
+  val receivedCount: Int = 0,
+  val userRepliedCount: Int = 0,
+  val lastReceivedAtMs: Long = 0L,
+  val lastRepliedAtMs: Long = 0L,
 )
 
 /**
@@ -297,10 +335,14 @@ data class JarvisUiState(
   val hasBackgroundLocationPermission: Boolean = false,
   val hasBluetoothConnectPermission: Boolean = false,
   val hasActivityRecognitionPermission: Boolean = false,
+  val hasMediaAudioPermission: Boolean = false,
+  val opusVoiceReaderEnabled: Boolean = false,
   val batteryUnrestricted: Boolean = false,
   val hasApiKey: Boolean = false,
   val maskedApiKey: String = "",
   val activeReplyHandleCount: Int = 0,
+  val personaCount: Int = 0,
+  val suppressedGroupCount: Int = 0,
   val isProcessing: Boolean = false,
   val isExecutingCommand: Boolean = false,
   val lastStatusBanner: String? = null,

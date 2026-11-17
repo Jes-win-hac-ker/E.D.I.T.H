@@ -90,7 +90,9 @@ class ProactiveEngine(
   private fun tryEmitOpenMaps(ctx: AmbientContext, now: Long): Boolean {
     if (ctx.placeTag != PlaceTag.NONE) return false
     if (!canTriggerLocked(TRIGGER_OPEN_MAPS, now)) return false
-    val nextDest = destinationStore.getActiveUpcomingDestinations(now).firstOrNull() ?: return false
+    val nextDest = destinationStore.getActiveUpcomingDestinations(now)
+      .firstOrNull { isWithinTemporalWindow(it, now) }
+      ?: return false
     recordTriggerLocked(TRIGGER_OPEN_MAPS, now)
     publishSuggestion(
       ProactiveSuggestion.OpenMaps(
@@ -141,7 +143,8 @@ class ProactiveEngine(
    */
   fun simulateOpenMapsForDebug(fallbackPlaceName: String = "Koramangala 4th Block"): Boolean {
     val now = clockMs()
-    val nextDest = destinationStore.getActiveUpcomingDestinations(now).firstOrNull()
+    val nextDest = destinationStore.getActiveUpcomingDestinations(now)
+      .firstOrNull { isWithinTemporalWindow(it, now) }
     val id = nextDest?.id ?: -1L
     val place = nextDest?.placeName ?: fallbackPlaceName
     val src = nextDest?.sourceSummary ?: "Debug simulation: IN_VEHICLE -> STILL (>45s)"
@@ -198,6 +201,13 @@ class ProactiveEngine(
     const val DEFAULT_DINING_DWELL_MS = 20L * 60L * 1000L
     const val TRIGGER_OPEN_MAPS = "OPEN_MAPS"
     const val TRIGGER_SCAN_UPI_QR = "SCAN_UPI_QR"
+
+    internal fun isWithinTemporalWindow(dest: UpcomingDestination, nowMs: Long): Boolean {
+      if (dest.used) return false
+      val start = dest.validFromEpochMs
+      val end = if (dest.validUntilEpochMs > 0L) dest.validUntilEpochMs else dest.expiresAtMs
+      return nowMs in start..end
+    }
   }
 }
 

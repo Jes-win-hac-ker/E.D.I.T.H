@@ -69,6 +69,7 @@ class PlannerClient(
     goalPrompt: String,
     initialContextNote: String = "",
     bridge: PlannerToolBridge,
+    personaContextNote: String = "",
   ): Result<PlannerRunResult> {
     val trimmedKey = apiKey.trim()
     if (trimmedKey.isEmpty()) {
@@ -80,6 +81,9 @@ class PlannerClient(
       append("Goal: ").append(goalPrompt.trim())
       if (initialContextNote.isNotBlank()) {
         append("\nContext: ").append(initialContextNote.trim())
+      }
+      if (personaContextNote.isNotBlank()) {
+        append('\n').append(personaContextNote.trim())
       }
     }
     history += buildJsonObject {
@@ -254,7 +258,10 @@ class PlannerClient(
       2. Never touch financial, UPI, banking, password, or installer packages (they are firewall-blocked).
       3. Never transmit OTPs or secrets in input_text or reply_notification.
       4. Call ask_user_confirmation before destructive, financial, or sensitive submissions.
-      5. Once completed, stop calling tools and reply concisely with what was done.
+      5. When drafting notification replies via reply_notification or UI input, understand Manglish (Malayalam-English) intent and mirror the contact's <contact_persona> tone and brevity if provided.
+      6. Once completed, stop calling tools and reply concisely with what was done.
+
+      ${JarvisLanguagePrompt.MANGLISH_RULEBOOK}
     """.trimIndent()
 
     internal fun buildToolDeclarations(): JsonArray = buildJsonArray {
