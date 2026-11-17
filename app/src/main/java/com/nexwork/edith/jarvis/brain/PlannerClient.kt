@@ -207,8 +207,21 @@ class PlannerClient(
   }
 
   private suspend fun postGenerateContent(apiKey: String, bodyJson: String): Result<JsonObject> {
+    val primary = executePost(endpointUrl, apiKey, bodyJson)
+    if (primary.isSuccess) return primary
+    val err = primary.exceptionOrNull()
+    if (err is CancellationException) throw err
+    if (endpointUrl == DEFAULT_ENDPOINT_URL && err?.message?.contains("404") == true ||
+      (endpointUrl == DEFAULT_ENDPOINT_URL && err?.message?.contains("not found", ignoreCase = true) == true)
+    ) {
+      return executePost(FALLBACK_ENDPOINT_URL, apiKey, bodyJson)
+    }
+    return primary
+  }
+
+  private suspend fun executePost(url: String, apiKey: String, bodyJson: String): Result<JsonObject> {
     val request = Request.Builder()
-      .url(endpointUrl)
+      .url(url)
       .header("x-goog-api-key", apiKey)
       .header("Content-Type", "application/json")
       .post(bodyJson.toRequestBody(JSON_MEDIA_TYPE))
@@ -222,7 +235,7 @@ class PlannerClient(
             json.parseToJsonElement(raw).jsonObject["error"]
               ?.jsonObject?.get("message")?.jsonPrimitive?.content
           }.getOrNull() ?: "HTTP ${resp.code}"
-          return Result.failure(IOException("Planner HTTP error: $errMsg"))
+          return Result.failure(IOException("Planner HTTP error (${resp.code}): $errMsg"))
         }
         Result.success(json.parseToJsonElement(raw).jsonObject)
       }
@@ -235,8 +248,11 @@ class PlannerClient(
 
   companion object {
     const val DEFAULT_MODEL = "gemini-4-hydrogen"
+    const val FALLBACK_MODEL = "gemini-2.5-flash"
     const val DEFAULT_ENDPOINT_URL =
       "https://generativelanguage.googleapis.com/v1beta/models/$DEFAULT_MODEL:generateContent"
+    const val FALLBACK_ENDPOINT_URL =
+      "https://generativelanguage.googleapis.com/v1beta/models/$FALLBACK_MODEL:generateContent"
     const val MAX_PLANNER_TURNS = 10
 
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()

@@ -36,6 +36,11 @@ interface PlaybookEnvironment {
   suspend fun scrollNode(id: Int?, forward: Boolean): Result<String>
   suspend fun pressKey(keyCode: Int): Result<String> = Result.success("Sent keyevent $keyCode")
   fun openApp(packageName: String): Result<String>
+  fun launchMediaOrSearchIntent(
+    targetPackage: String,
+    query: String,
+    playImmediately: Boolean,
+  ): Result<String> = Result.failure(UnsupportedOperationException("Direct intent not supported"))
   fun sendNotificationReply(sbnKey: String, replyText: String): Result<String>
   fun isContactTrusted(contactName: String, packageName: String): Boolean
   suspend fun requestTier3BiometricApproval(
@@ -128,6 +133,65 @@ class PlaybookExecutor(
         is ReplayResult.StepFailed -> {
           traceLog += "Replay fallback (${playbook.skillId}): ${replayOutcome.reason}"
         }
+      }
+    }
+
+    // 1.5. Zero-Shizuku Direct Intent Fast-Path (YouTube / Spotify / Maps media & search)
+    parseDirectMediaCommand(commandText)?.let { directCmd ->
+      val dlpBlock = SecurityGateway.inspectOutboundText(directCmd.query)
+      if (dlpBlock != null) {
+        return CommandExecutionResult(
+          ok = false,
+          summary = dlpBlock,
+          traceLog = traceLog,
+          securityBlocked = true,
+        )
+      }
+      val verdict = security.evaluateAndConsume(
+        SecurityActionRequest(
+          actionType = JarvisActionType.OPEN_APP,
+          activePackage = env.currentForegroundPackage(),
+          targetPackage = directCmd.targetPackage,
+          targetLabel = directCmd.targetPackage,
+          runStepIndex = 0,
+        ),
+      )
+      if (verdict is SecurityVerdict.Deny) {
+        return CommandExecutionResult(
+          ok = false,
+          summary = verdict.reason,
+          traceLog = traceLog,
+          securityBlocked = true,
+        )
+      }
+      val launchRes = env.launchMediaOrSearchIntent(
+        targetPackage = directCmd.targetPackage,
+        query = directCmd.query,
+        playImmediately = directCmd.playImmediately,
+      )
+      if (launchRes.isSuccess) {
+        val detail = launchRes.getOrDefault("Launched ${directCmd.targetPackage}")
+        traceLog += "Direct intent fast-path: $detail (0 LLM tokens)"
+        if (directCmd.playImmediately && directCmd.targetPackage == "com.google.android.youtube") {
+          if (settleDelayMs > 0L) delay(settleDelayMs * 3)
+          val tree = env.dumpCompactUiTree()
+          if (tree.blockedReason == null && tree.nodes.isNotEmpty()) {
+            val videoNode = tree.nodes.firstOrNull { n ->
+              n.clickable && n.top > 210 && (n.text.length >= 4 || n.contentDesc.length >= 6) &&
+                !n.viewId.contains("search", ignoreCase = true)
+            }
+            if (videoNode != null) {
+              env.clickNode(videoNode.id)
+              traceLog += "Auto-tapped top video result id=${videoNode.id}"
+            }
+          }
+        }
+        return CommandExecutionResult(
+          ok = true,
+          summary = detail,
+          usedLlmPlanner = false,
+          traceLog = traceLog,
+        )
       }
     }
 
@@ -747,10 +811,53 @@ class PlaybookExecutor(
     val params: Map<String, String>,
   )
 
+  internal data class DirectMediaCommand(
+    val targetPackage: String,
+    val query: String,
+    val playImmediately: Boolean,
+  )
+
   companion object {
     const val DEFAULT_STEP_DELAY_MS = 450L
     private val SEARCH_FOR_REGEX = Regex("""^(search\s+[a-z0-9._-]+)\s+for\s+(.+)$""", RegexOption.IGNORE_CASE)
     private val SEARCH_COLON_REGEX = Regex("""^([a-z0-9._\-\s]+?)\s*:\s*(.+)$""")
+    private val YOUTUBE_PLAY_REGEX = Regex(
+      """^(?:open\s+youtube\s+(?:and\s+)?(?:play|search(?:\s+for)?)|play\s+(.+?)\s+on\s+youtube|youtube\s+play)\s*(.*)$""",
+      RegexOption.IGNORE_CASE,
+    )
+    private val SPOTIFY_PLAY_REGEX = Regex(
+      """^(?:open\s+spotify\s+(?:and\s+)?(?:play|search(?:\s+for)?)|play\s+(.+?)\s+on\s+spotify|spotify\s+play)\s*(.*)$""",
+      RegexOption.IGNORE_CASE,
+    )
+    private val MAPS_NAV_REGEX = Regex(
+      """^(?:open\s+(?:google\s+)?maps\s+(?:and\s+)?(?:navigate\s+to|search(?:\s+for)?|to)|navigate\s+to)\s+(.+)$""",
+      RegexOption.IGNORE_CASE,
+    )
+
+    internal fun parseDirectMediaCommand(rawCommand: String): DirectMediaCommand? {
+      val trimmed = rawCommand.trim()
+      if (trimmed.isEmpty()) return null
+      YOUTUBE_PLAY_REGEX.matchEntire(trimmed)?.let { m ->
+        val q = m.groupValues[1].ifBlank { m.groupValues[2] }.trim()
+        if (q.isNotEmpty()) {
+          val play = trimmed.contains("play", ignoreCase = true)
+          return DirectMediaCommand("com.google.android.youtube", q, playImmediately = play)
+        }
+      }
+      SPOTIFY_PLAY_REGEX.matchEntire(trimmed)?.let { m ->
+        val q = m.groupValues[1].ifBlank { m.groupValues[2] }.trim()
+        if (q.isNotEmpty()) {
+          return DirectMediaCommand("com.spotify.music", q, playImmediately = true)
+        }
+      }
+      MAPS_NAV_REGEX.matchEntire(trimmed)?.let { m ->
+        val q = m.groupValues[1].trim()
+        if (q.isNotEmpty()) {
+          return DirectMediaCommand("com.google.android.apps.maps", q, playImmediately = false)
+        }
+      }
+      return null
+    }
 
     internal fun parseCommandIntent(
       rawCommand: String,

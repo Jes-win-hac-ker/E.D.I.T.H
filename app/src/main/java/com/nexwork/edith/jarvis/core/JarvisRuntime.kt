@@ -1242,6 +1242,56 @@ object JarvisRuntime {
             }
           }
 
+          override fun launchMediaOrSearchIntent(
+            targetPackage: String,
+            query: String,
+            playImmediately: Boolean,
+          ): Result<String> {
+            val cleanPkg = targetPackage.trim()
+            if (SecurityGateway.isRestrictedPackage(cleanPkg, appCtx.packageName)) {
+              return Result.failure(SecurityException("Blocked restricted package: $cleanPkg"))
+            }
+            return runCatching {
+              val encoded = Uri.encode(query.trim())
+              val primaryIntent = when (cleanPkg) {
+                "com.google.android.youtube" -> Intent(
+                  Intent.ACTION_VIEW,
+                  Uri.parse("https://www.youtube.com/results?search_query=$encoded"),
+                ).apply {
+                  setPackage(cleanPkg)
+                  addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                "com.spotify.music" -> Intent(android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
+                  setPackage(cleanPkg)
+                  putExtra(android.app.SearchManager.QUERY, query.trim())
+                  addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                "com.google.android.apps.maps" -> Intent(
+                  Intent.ACTION_VIEW,
+                  Uri.parse("google.navigation:q=$encoded"),
+                ).apply {
+                  setPackage(cleanPkg)
+                  addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                else -> Intent(Intent.ACTION_SEARCH).apply {
+                  setPackage(cleanPkg)
+                  putExtra(android.app.SearchManager.QUERY, query.trim())
+                  addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+              }
+              try {
+                appCtx.startActivity(primaryIntent)
+              } catch (_: Throwable) {
+                val fallback = Intent(
+                  Intent.ACTION_VIEW,
+                  Uri.parse("https://www.youtube.com/results?search_query=$encoded"),
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                appCtx.startActivity(fallback)
+              }
+              "Opened $cleanPkg for '${query.trim()}'"
+            }
+          }
+
           override fun sendNotificationReply(sbnKey: String, replyText: String): Result<String> {
             return remoteInputCache.sendReply(appCtx, sbnKey, replyText).map { "Sent notification reply" }
           }

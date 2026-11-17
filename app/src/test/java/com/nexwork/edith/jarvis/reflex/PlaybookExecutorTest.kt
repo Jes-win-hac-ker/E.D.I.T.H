@@ -294,4 +294,16 @@ class PlaybookExecutorTest {
     assertTrue(aborted)
     assertEquals(listOf("open:com.android.settings"), env.actions)
   }
+
+  @Test
+  fun directMediaCommand_openYoutubeAndPlayJazz_parsesCleanly() {
+    val parsed = PlaybookExecutor.parseDirectMediaCommand("open YouTube and play jazz")
+    assertEquals("com.google.android.youtube", parsed?.targetPackage)
+    assertEquals("jazz", parsed?.query)
+    assertEquals(true, parsed?.playImmediately)
+
+    val spotify = PlaybookExecutor.parseDirectMediaCommand("play lo-fi beats on Spotify")
+    assertEquals("com.spotify.music", spotify?.targetPackage)
+    assertEquals("lo-fi beats", spotify?.query)
+  }
 }

@@ -28,10 +28,32 @@ import org.xmlpull.v1.XmlPullParserFactory
 class ShizukuControlService : IShizukuControlService.Stub {
 
   @Keep
-  constructor() : super()
+  constructor() : super() {
+    pinShizukuEnvironmentAsync()
+  }
 
   @Keep
-  constructor(@Suppress("UNUSED_PARAMETER") context: Context) : super()
+  constructor(@Suppress("UNUSED_PARAMETER") context: Context) : super() {
+    pinShizukuEnvironmentAsync()
+  }
+
+  private fun pinShizukuEnvironmentAsync() {
+    Thread {
+      runCatching {
+        runCommand("settings", "put", "global", "settings_enable_monitor_phantom_procs", "false")
+        runCommand("device_config", "set_sync_disabled_for_tests", "persistent")
+        runCommand("device_config", "put", "activity_manager", "max_phantom_processes", "2147483647")
+        runCommand("dumpsys", "deviceidle", "whitelist", "+moe.shizuku.privileged.api")
+        runCommand("dumpsys", "deviceidle", "whitelist", "+com.nexwork.edith")
+        runCommand("cmd", "appops", "set", "moe.shizuku.privileged.api", "RUN_IN_BACKGROUND", "allow")
+        runCommand("cmd", "appops", "set", "moe.shizuku.privileged.api", "RUN_ANY_IN_BACKGROUND", "allow")
+        runCommand("cmd", "activity", "set-standby-bucket", "moe.shizuku.privileged.api", "active")
+      }
+    }.apply {
+      isDaemon = true
+      name = "shizuku-env-pinner"
+    }.start()
+  }
 
   override fun destroy() {
     exitProcess(0)

@@ -342,19 +342,28 @@ class ShizukuControlManager(private val context: Context) {
   private suspend fun <T> withBoundControlService(
     block: suspend (IShizukuControlService) -> T,
   ): T? {
+    cachedControlService?.let { existing ->
+      val alive = runCatching { existing.asBinder().pingBinder() }.getOrDefault(false)
+      if (alive) {
+        return runCatching { block(existing) }.getOrNull()
+      }
+      cachedControlService = null
+    }
+
     val serviceDeferred = CompletableDeferred<IShizukuControlService?>()
     val serviceArgs = Shizuku.UserServiceArgs(
       ComponentName(context.packageName, ShizukuControlService::class.java.name),
     )
-      .daemon(false)
+      .daemon(true)
       .processNameSuffix("shizuku_control")
       .debuggable(false)
-      .version(1)
+      .version(2)
 
     val connection = object : ServiceConnection {
       override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
         val svc = IShizukuControlService.Stub.asInterface(binder)
         if (svc != null && binder != null && binder.pingBinder()) {
+          cachedControlService = svc
           if (!serviceDeferred.isCompleted) serviceDeferred.complete(svc)
         } else {
           if (!serviceDeferred.isCompleted) serviceDeferred.complete(null)
@@ -362,6 +371,7 @@ class ShizukuControlManager(private val context: Context) {
       }
 
       override fun onServiceDisconnected(name: ComponentName?) {
+        cachedControlService = null
         if (!serviceDeferred.isCompleted) serviceDeferred.complete(null)
       }
     }
@@ -372,8 +382,6 @@ class ShizukuControlManager(private val context: Context) {
       block(service)
     } catch (_: Throwable) {
       null
-    } finally {
-      runCatching { Shizuku.unbindUserService(serviceArgs, connection, true) }
     }
   }
 
@@ -392,6 +400,9 @@ class ShizukuControlManager(private val context: Context) {
     private const val MAX_TOKEN_LENGTH = 256
     private const val SHIZUKU_HANDS_REQUEST_CODE = 4208
     private val SAFE_TOKEN_REGEX = Regex("^[a-zA-Z0-9][a-zA-Z0-9._/$]*$")
+
+    @Volatile
+    private var cachedControlService: IShizukuControlService? = null
 
     fun isShizukuBinderAlive(): Boolean =
       runCatching { Shizuku.pingBinder() }.getOrDefault(false)
