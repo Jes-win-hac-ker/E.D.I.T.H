@@ -43,11 +43,13 @@ All UI/UX decisions, performance targets, and system integrations in this reposi
 - **Settings Tree Choreography & Styling Laws (`ui/hud/HudSettingsChoreography.kt` & `HudSettingsTree.kt`)**:
   - Never separate root card styling from trunk laser rail styling: `ROOT_BRANCH_SPECS` is the single source of truth for `isBuilt` (`LAUNCHER` and `JARVIS` active accent rails; `SHIZUKU` standby dim rail).
   - Never replace `HudSettingsChoreographyController` sequential gates with independent hardcoded `delay(...)` calls between root and overlay layers: `HudSettingsGateChecker.shouldPlaceRootAboveGlobe` must keep Stage 1 sunken behind the globe (`zIndex = 0f`) until Stage 2/3 detail cards and branch lasers finish retracing completely to `0f`.
-- **Verification**:
+- **Verification & Automatic OTA Release**:
   - Run `./gradlew testDebugUnitTest assembleDebug` to verify compilation and unit tests after code changes.
+  - **Standing OTA Rule**: Always push verified updates to `origin/main` and publish a new OTA release tag (`gh -R Jes-win-hac-ker/E.D.I.T.H release create v<versionName>+<versionCode> app/build/outputs/apk/debug/app-debug.apk ...`) automatically after completing and verifying an update.
+  - **Strict Zero-Accessibility Invariant**: Never add `BIND_ACCESSIBILITY_SERVICE` to `AndroidManifest.xml` (causes UPI/payment app lockdowns on sideloaded APKs). All Jarvis UI hands run via `ShizukuControlService` (`uid 2000`) and direct intents, and OTA installs stamp `com.android.vending` as the installer package.
 
 ---
 
 ## 4. Active Known Issues & Deferred Queue (Proactive Reminder)
 
-- **AI Hands / Rulebook Planner Hang (`PlannerClient` `gemini-4-hydrogen`)**: Running natural multi-step UI commands such as `"open YouTube and play jazz"` hands off from local playbooks to Gemini 4 Hydrogen and then stalls without completing until stopped via emergency abort. **Proactively remind NEX to investigate and fix this when the next session starts on AI Hands / Playbooks.**
+- *(Resolved in `v1.4.57+62`)*: Migrated Jarvis UI Hands to persistent `daemon(true)` `ShizukuControlService` (`uid 2000`), added Zero-Shizuku direct media/search intent fast-path (`"open YouTube and play jazz"`), and added automatic 404 model fallback from `gemini-4-hydrogen` to `gemini-2.5-flash`.
