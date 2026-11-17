@@ -1,5 +1,6 @@
 package com.nexwork.edith.theme
 
+import android.graphics.Typeface
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
@@ -8,6 +9,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import com.nexwork.edith.model.HudFontScope
 import com.nexwork.edith.model.HudIntensityPreset
 import com.nexwork.edith.model.LauncherAccentPreset
 import com.nexwork.edith.model.LauncherFontStyle
@@ -39,11 +41,16 @@ data class LauncherStyleTokens(
   val focusedBorderAlpha: Float = 0.94f,
   val railAlpha: Float = 0.74f,
   val plateTintAlpha: Float = 0.07f,
-  val fontFamily: FontFamily = FontFamily.Default,
+  val fontFamily: FontFamily = FontFamily.Monospace,
+  val telemetryFontFamily: FontFamily = FontFamily.Monospace,
+  val canvasTypeface: Typeface? = Typeface.MONOSPACE,
+  val canvasBoldTypeface: Typeface? = Typeface.MONOSPACE,
+  val telemetryTypeface: Typeface? = Typeface.MONOSPACE,
   val fontScale: Float = 1.0f,
   val accentPreset: LauncherAccentPreset = LauncherAccentPreset.ICE_CYAN,
   val hudIntensity: HudIntensityPreset = HudIntensityPreset.TACTICAL,
-  val fontStyle: LauncherFontStyle = LauncherFontStyle.DEFAULT,
+  val fontStyle: LauncherFontStyle = LauncherFontStyle.IBM_PLEX_MONO,
+  val fontScope: HudFontScope = HudFontScope.ALL_HUD,
 )
 
 val LocalLauncherStyle = staticCompositionLocalOf { LauncherStyleTokens() }
@@ -99,7 +106,12 @@ fun LauncherAccentPreset.toGlobePalette(): HudGlobePalette = when (this) {
   )
 }
 
-fun buildLauncherStyleTokens(settings: LauncherSettingsConfig): LauncherStyleTokens {
+fun buildLauncherStyleTokens(
+  settings: LauncherSettingsConfig,
+  canvasTypeface: Typeface? = Typeface.MONOSPACE,
+  canvasBoldTypeface: Typeface? = Typeface.MONOSPACE,
+  telemetryTypeface: Typeface? = Typeface.MONOSPACE,
+): LauncherStyleTokens {
   val accent = settings.accentPreset.toColor()
   val graphic = settings.accentPreset.toGraphicColor()
   val (voidTop, voidBottom, orbitalMuted) = when (settings.accentPreset) {
@@ -134,10 +146,15 @@ fun buildLauncherStyleTokens(settings: LauncherSettingsConfig): LauncherStyleTok
     railAlpha = railAlpha,
     plateTintAlpha = plateTintAlpha,
     fontFamily = settings.fontStyle.toFontFamily(),
+    telemetryFontFamily = settings.fontStyle.toTelemetryFontFamily(settings.fontScope),
+    canvasTypeface = canvasTypeface,
+    canvasBoldTypeface = canvasBoldTypeface,
+    telemetryTypeface = telemetryTypeface,
     fontScale = settings.fontScale.coerceIn(0.85f, 1.25f),
     accentPreset = settings.accentPreset,
     hudIntensity = settings.hudIntensity,
     fontStyle = settings.fontStyle,
+    fontScope = settings.fontScope,
   )
 }
 
@@ -180,7 +197,20 @@ fun EDITHTheme(
   launcherSettings: LauncherSettingsConfig = LauncherSettingsConfig(),
   content: @Composable () -> Unit,
 ) {
-  val styleTokens = buildLauncherStyleTokens(launcherSettings)
+  val primaryTypeface = rememberLauncherTypeface(launcherSettings.fontStyle, bold = false)
+  val boldTypeface = rememberLauncherTypeface(launcherSettings.fontStyle, bold = true)
+  val plexTypeface = rememberLauncherTypeface(LauncherFontStyle.IBM_PLEX_MONO, bold = false)
+  val telemetryTypeface = if (launcherSettings.fontScope == HudFontScope.ALL_HUD) {
+    primaryTypeface
+  } else {
+    plexTypeface
+  }
+  val styleTokens = buildLauncherStyleTokens(
+    settings = launcherSettings,
+    canvasTypeface = primaryTypeface,
+    canvasBoldTypeface = boldTypeface,
+    telemetryTypeface = telemetryTypeface,
+  )
   val baseScheme = if (crimsonMonetActive) EdithCrimsonMonetColorScheme else EdithGlassColorScheme
   val colorScheme = baseScheme.copy(
     primary = styleTokens.accent,
@@ -195,6 +225,7 @@ fun EDITHTheme(
       colorScheme = colorScheme,
       typography = buildEdithTypography(
         fontStyle = launcherSettings.fontStyle,
+        fontScope = launcherSettings.fontScope,
         scale = launcherSettings.fontScale,
       ),
       content = content,

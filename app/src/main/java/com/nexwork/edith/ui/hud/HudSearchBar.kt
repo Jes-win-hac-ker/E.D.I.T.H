@@ -149,7 +149,9 @@ fun HudSearchBar(
     else -> "${apps.size} INDEX"
   }
 
-  val eyebrowPaint = remember(density) { monoPaint(density, 7.5f, 1.15f, Paint.Align.LEFT, 165) }
+  val eyebrowPaint = remember(density, launcherStyle.telemetryTypeface, launcherStyle.fontScale) {
+    monoPaint(density, 7.5f, 1.15f, Paint.Align.LEFT, 165, launcherStyle.telemetryTypeface, launcherStyle.fontScale)
+  }
 
   val revealAnim = remember { Animatable(0f) }
   var mounted by remember { mutableStateOf(isOpen) }
@@ -244,6 +246,8 @@ fun HudSearchBar(
       Modifier
         .fillMaxSize()
         .drawWithCache {
+          val cachedStyle = styleState.value
+          eyebrowPaint.typeface = cachedStyle.telemetryTypeface
           val cx = size.width * 0.5f
           val arcApexY = 22.dp.toPx()
           // Shallow arc radius (~1.95x width -> ~21dp sagitta) keeps chord text completely clear.
@@ -426,7 +430,7 @@ fun HudSearchBar(
         text = ">",
         color = if (typing) launcherStyle.accent else TextSilver.copy(alpha = 0.65f),
         fontSize = (18f * launcherStyle.fontScale).sp,
-        fontFamily = FontFamily.Monospace,
+        fontFamily = launcherStyle.fontFamily,
         fontWeight = FontWeight.Bold,
       )
       Spacer(Modifier.width(8.dp))
@@ -442,7 +446,7 @@ fun HudSearchBar(
           textStyle = TextStyle(
             color = TextPureWhite,
             fontSize = (19f * launcherStyle.fontScale).sp,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = launcherStyle.fontFamily,
             fontWeight = FontWeight.Medium,
             letterSpacing = 1.6.sp,
           ),
@@ -471,8 +475,8 @@ fun HudSearchBar(
                 Text(
                   text = "SEARCH TELEMETRY",
                   color = TextPureWhite.copy(alpha = 0.28f),
-                  fontSize = 19.sp,
-                  fontFamily = FontFamily.Monospace,
+                  fontSize = (19f * launcherStyle.fontScale).sp,
+                  fontFamily = launcherStyle.fontFamily,
                   fontWeight = FontWeight.Medium,
                   letterSpacing = 1.6.sp,
                 )
@@ -487,8 +491,8 @@ fun HudSearchBar(
       Text(
         text = countLabel,
         color = if (typing) launcherStyle.accent else TextSilver.copy(alpha = 0.75f),
-        fontSize = 10.sp,
-        fontFamily = FontFamily.Monospace,
+        fontSize = (10f * launcherStyle.fontScale).sp,
+        fontFamily = launcherStyle.telemetryFontFamily,
         fontWeight = FontWeight.Bold,
         letterSpacing = 1.sp,
       )
@@ -515,7 +519,7 @@ fun HudSearchBar(
             text = "×",
             color = TextPureWhite.copy(alpha = 0.65f),
             fontSize = 14.sp,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = launcherStyle.telemetryFontFamily,
             fontWeight = FontWeight.Medium,
           )
         }

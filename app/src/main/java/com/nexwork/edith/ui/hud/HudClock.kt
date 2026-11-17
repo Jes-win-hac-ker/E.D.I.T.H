@@ -179,11 +179,22 @@ fun HudClock(
 
   if (!mounted) return
 
-  val eyebrowPaint = remember(density) { monoPaint(density, 7.5f, 1.2f, Paint.Align.LEFT, 120) }
-  val timePaint = remember(density) { monoPaint(density, 46f, 0.8f, Paint.Align.CENTER, 255) }
-  val wingPaint = remember(density) { monoPaint(density, 8.5f, 1.0f, Paint.Align.LEFT, 185) }
-  val wingRightPaint = remember(density) { monoPaint(density, 8.5f, 1.0f, Paint.Align.RIGHT, 185) }
-  val secReadoutPaint = remember(density) { monoPaint(density, 10.5f, 0.8f, Paint.Align.RIGHT, 240) }
+  val curStyle = LocalLauncherStyle.current
+  val eyebrowPaint = remember(density, curStyle.telemetryTypeface, curStyle.fontScale) {
+    monoPaint(density, 7.5f, 1.2f, Paint.Align.LEFT, 120, curStyle.telemetryTypeface, curStyle.fontScale)
+  }
+  val timePaint = remember(density, curStyle.canvasBoldTypeface, curStyle.fontScale) {
+    monoPaint(density, 46f, 0.8f, Paint.Align.CENTER, 255, curStyle.canvasBoldTypeface, curStyle.fontScale)
+  }
+  val wingPaint = remember(density, curStyle.telemetryTypeface, curStyle.fontScale) {
+    monoPaint(density, 8.5f, 1.0f, Paint.Align.LEFT, 185, curStyle.telemetryTypeface, curStyle.fontScale)
+  }
+  val wingRightPaint = remember(density, curStyle.telemetryTypeface, curStyle.fontScale) {
+    monoPaint(density, 8.5f, 1.0f, Paint.Align.RIGHT, 185, curStyle.telemetryTypeface, curStyle.fontScale)
+  }
+  val secReadoutPaint = remember(density, curStyle.telemetryTypeface, curStyle.fontScale) {
+    monoPaint(density, 10.5f, 0.8f, Paint.Align.RIGHT, 240, curStyle.telemetryTypeface, curStyle.fontScale)
+  }
   val secChars = remember { CharArray(3).apply { this[0] = ':' } }
 
   Box(
@@ -196,6 +207,12 @@ fun HudClock(
       Modifier
         .fillMaxSize()
         .drawWithCache {
+          val cachedStyle = launcherStyle.value
+          eyebrowPaint.typeface = cachedStyle.telemetryTypeface
+          timePaint.typeface = cachedStyle.canvasBoldTypeface
+          wingPaint.typeface = cachedStyle.telemetryTypeface
+          wingRightPaint.typeface = cachedStyle.telemetryTypeface
+          secReadoutPaint.typeface = cachedStyle.telemetryTypeface
           val ux = size.width / 312f
           val uy = size.height / 168f
           fun X(sx: Float) = sx * ux

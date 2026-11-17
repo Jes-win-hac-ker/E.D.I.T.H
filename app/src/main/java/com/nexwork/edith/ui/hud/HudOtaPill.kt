@@ -225,9 +225,11 @@ fun HudTelemetryRail(
     label = "hudRailSweepPhase",
   )
 
-  val eyebrowPaint = remember(density) { monoPaint(density, 7.5f, 1.1f, Paint.Align.LEFT, 180) }
-  val labelPaint = remember(density) {
-    TextPaint(monoPaint(density, 10.5f, 0.9f, Paint.Align.LEFT, 255))
+  val eyebrowPaint = remember(density, launcherStyle.telemetryTypeface, launcherStyle.fontScale) {
+    monoPaint(density, 7.5f, 1.1f, Paint.Align.LEFT, 180, launcherStyle.telemetryTypeface, launcherStyle.fontScale)
+  }
+  val labelPaint = remember(density, launcherStyle.canvasBoldTypeface, launcherStyle.fontScale) {
+    TextPaint(monoPaint(density, 10.5f, 0.9f, Paint.Align.LEFT, 255, launcherStyle.canvasBoldTypeface, launcherStyle.fontScale))
   }
   val rowInteraction = remember { MutableInteractionSource() }
   val dismissInteraction = remember { MutableInteractionSource() }
@@ -416,8 +418,8 @@ fun HudTelemetryRail(
         Text(
           text = badge,
           color = if (isError) CrimsonBright else launcherStyle.accent,
-          fontFamily = FontFamily.Monospace,
-          fontSize = 11.sp,
+          fontFamily = launcherStyle.fontFamily,
+          fontSize = (11f * launcherStyle.fontScale).sp,
           fontWeight = FontWeight.Bold,
           letterSpacing = 1.sp,
         )
@@ -440,7 +442,7 @@ fun HudTelemetryRail(
           Text(
             text = "×",
             color = TextPureWhite.copy(alpha = 0.65f),
-            fontFamily = FontFamily.Monospace,
+            fontFamily = launcherStyle.telemetryFontFamily,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
           )

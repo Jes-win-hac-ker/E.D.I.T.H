@@ -82,6 +82,7 @@ import com.nexwork.edith.jarvis.core.PlaceTag
 import com.nexwork.edith.jarvis.core.TriageStatus
 import com.nexwork.edith.jarvis.security.BiometricPromptHelper
 import com.nexwork.edith.model.DeviceTelemetry
+import com.nexwork.edith.model.HudFontScope
 import com.nexwork.edith.model.HudIntensityPreset
 import com.nexwork.edith.model.JarvisSettingsSection
 import com.nexwork.edith.model.LauncherAccentPreset
@@ -95,6 +96,7 @@ import com.nexwork.edith.theme.LauncherStyleTokens
 import com.nexwork.edith.theme.LocalLauncherStyle
 import com.nexwork.edith.theme.TextPureWhite
 import com.nexwork.edith.theme.TextSilver
+import com.nexwork.edith.theme.rememberLauncherTypeface
 import com.nexwork.edith.theme.toColor
 import java.util.Date
 import kotlin.math.abs
@@ -226,6 +228,7 @@ fun HudSettingsTree(
   onAccentChange: (LauncherAccentPreset) -> Unit,
   onIntensityChange: (HudIntensityPreset) -> Unit = {},
   onFontChange: (LauncherFontStyle) -> Unit,
+  onFontScopeChange: (HudFontScope) -> Unit = {},
   onFontScaleChange: (Float) -> Unit,
   onUse24HourChange: (Boolean) -> Unit,
   onRefreshRateSelect: (Int?) -> Unit,
@@ -283,6 +286,7 @@ fun HudSettingsTree(
       onAccentChange = onAccentChange,
       onIntensityChange = onIntensityChange,
       onFontChange = onFontChange,
+      onFontScopeChange = onFontScopeChange,
       onFontScaleChange = onFontScaleChange,
       onUse24HourChange = onUse24HourChange,
       onRefreshRateSelect = onRefreshRateSelect,
@@ -502,6 +506,7 @@ fun HudSettingsOverlayLayer(
   onAccentChange: (LauncherAccentPreset) -> Unit,
   onIntensityChange: (HudIntensityPreset) -> Unit = {},
   onFontChange: (LauncherFontStyle) -> Unit,
+  onFontScopeChange: (HudFontScope) -> Unit = {},
   onFontScaleChange: (Float) -> Unit,
   onUse24HourChange: (Boolean) -> Unit,
   onRefreshRateSelect: (Int?) -> Unit,
@@ -574,6 +579,10 @@ fun HudSettingsOverlayLayer(
           onFontChange = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             onFontChange(it)
+          },
+          onFontScopeChange = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onFontScopeChange(it)
           },
           onFontScaleChange = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -904,6 +913,7 @@ private fun LauncherDetailCardContent(
   onAccentChange: (LauncherAccentPreset) -> Unit,
   onIntensityChange: (HudIntensityPreset) -> Unit,
   onFontChange: (LauncherFontStyle) -> Unit,
+  onFontScopeChange: (HudFontScope) -> Unit,
   onFontScaleChange: (Float) -> Unit,
   onUse24HourChange: (Boolean) -> Unit,
   onRefreshRateSelect: (Int?) -> Unit,
@@ -977,42 +987,69 @@ private fun LauncherDetailCardContent(
 
       LauncherSettingsSection.FONT_SCALE -> {
         val styles = LauncherFontStyle.entries
+        val scopes = HudFontScope.entries
         val scaleOptions = listOf(0.90f to "0.9X", 1.00f to "1.0X", 1.12f to "1.12X")
-        val totalSteps = styles.size + 2
+        val totalSteps = styles.size + 4
         styles.forEachIndexed { idx, styleItem ->
           val selected = settings.fontStyle == styleItem
+          val specimenTypeface = rememberLauncherTypeface(styleItem, bold = true)
           CompactHudCard(
             title = styleItem.label.uppercase(),
             badge = if (selected) "ACTIVE" else styleItem.code,
             focused = selected,
             accent = accent,
-            titleSizeSp = 10.5f,
-            reveal = { staggeredReveal(reveal(), idx + 1, totalSteps, stagger = 0.14f) },
+            titleSizeSp = 10.0f,
+            titleTypefaceOverride = specimenTypeface,
+            reveal = { staggeredReveal(reveal(), idx + 1, totalSteps, stagger = 0.11f) },
             enabled = enabled,
-            modifier = Modifier.fillMaxWidth().height(40.dp),
+            modifier = Modifier.fillMaxWidth().height(36.dp),
             onClick = { onFontChange(styleItem) },
           )
         }
         Spacer(Modifier.height(1.dp))
         HudMicroLabel(
-          text = "TEXT SCALE",
-          reveal = { staggeredReveal(reveal(), styles.size + 1, totalSteps, stagger = 0.14f) },
+          text = "FONT SCOPE",
+          reveal = { staggeredReveal(reveal(), styles.size + 1, totalSteps, stagger = 0.11f) },
         )
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-          scaleOptions.forEachIndexed { sIdx, (scaleVal, tag) ->
+          scopes.forEach { scopeItem ->
+            val selected = settings.fontScope == scopeItem
+            CompactHudCard(
+              title = scopeItem.code,
+              focused = selected,
+              accent = accent,
+              titleSizeSp = 9.5f,
+              centerText = true,
+              reveal = { staggeredReveal(reveal(), styles.size + 2, totalSteps, stagger = 0.11f) },
+              enabled = enabled,
+              modifier = Modifier.weight(1f).height(32.dp),
+              onClick = { onFontScopeChange(scopeItem) },
+            )
+          }
+        }
+        Spacer(Modifier.height(1.dp))
+        HudMicroLabel(
+          text = "TEXT SCALE",
+          reveal = { staggeredReveal(reveal(), styles.size + 3, totalSteps, stagger = 0.11f) },
+        )
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          scaleOptions.forEach { (scaleVal, tag) ->
             val selected = abs(settings.fontScale - scaleVal) < 0.03f
             CompactHudCard(
               title = tag,
               focused = selected,
               accent = accent,
-              titleSizeSp = 10f,
+              titleSizeSp = 9.5f,
               centerText = true,
-              reveal = { staggeredReveal(reveal(), styles.size + 1, totalSteps, stagger = 0.14f) },
+              reveal = { staggeredReveal(reveal(), styles.size + 3, totalSteps, stagger = 0.11f) },
               enabled = enabled,
-              modifier = Modifier.weight(1f).height(34.dp),
+              modifier = Modifier.weight(1f).height(32.dp),
               onClick = { onFontScaleChange(scaleVal) },
             )
           }
@@ -2126,6 +2163,7 @@ private fun CompactHudCard(
   focused: Boolean = false,
   centerText: Boolean = false,
   titleSizeSp: Float = 11.2f,
+  titleTypefaceOverride: Typeface? = null,
   enabled: Boolean = true,
   onClick: (() -> Unit)? = null,
 ) {
@@ -2140,17 +2178,17 @@ private fun CompactHudCard(
   val curEyebrow = rememberUpdatedState(eyebrow)
   val curBadge = rememberUpdatedState(badge)
   val curCenter = rememberUpdatedState(centerText)
+  val curTitleOverride = rememberUpdatedState(titleTypefaceOverride)
 
-  val eyebrowPaint = remember(density) { monoPaint(density, 7.8f, 0.9f, Paint.Align.LEFT, 165) }
-  val titlePaint = remember(density, titleSizeSp) {
-    monoPaint(density, titleSizeSp, 0.9f, Paint.Align.LEFT, 255).apply {
-      typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-    }
+  val resolvedTitleTf = titleTypefaceOverride ?: style.canvasBoldTypeface
+  val eyebrowPaint = remember(density, style.telemetryTypeface, style.fontScale) {
+    monoPaint(density, 7.8f, 0.9f, Paint.Align.LEFT, 165, style.telemetryTypeface, style.fontScale)
   }
-  val badgePaint = remember(density) {
-    monoPaint(density, 8.2f, 0.8f, Paint.Align.LEFT, 220).apply {
-      typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-    }
+  val titlePaint = remember(density, titleSizeSp, resolvedTitleTf, style.fontScale) {
+    monoPaint(density, titleSizeSp, 0.9f, Paint.Align.LEFT, 255, resolvedTitleTf, style.fontScale)
+  }
+  val badgePaint = remember(density, style.telemetryTypeface, style.fontScale) {
+    monoPaint(density, 8.2f, 0.8f, Paint.Align.LEFT, 220, style.telemetryTypeface, style.fontScale)
   }
 
   val clickMod = if (onClick != null) {
@@ -2168,6 +2206,11 @@ private fun CompactHudCard(
     modifier = modifier
       .then(clickMod)
       .drawWithCache {
+        val cachedStyle = curStyle.value
+        val overrideTf = curTitleOverride.value
+        eyebrowPaint.typeface = cachedStyle.telemetryTypeface
+        titlePaint.typeface = overrideTf ?: cachedStyle.canvasBoldTypeface
+        badgePaint.typeface = cachedStyle.telemetryTypeface
         val tText = curTitle.value
         val eText = curEyebrow.value
         val bText = curBadge.value
@@ -2205,16 +2248,24 @@ private fun CompactHudCard(
           else -> (size.width - padX).coerceAtLeast(textLeft + 8f)
         }
 
-        val titleAdvance = (titlePaint.measureText("MM") - titlePaint.measureText("M")).coerceAtLeast(1f)
-        val maxTitleChars = ((titleRight - textLeft) / titleAdvance).toInt().coerceAtLeast(1)
-        val shownTitle = if (tText.length <= maxTitleChars) tText else {
+        val availTitleW = (titleRight - textLeft).coerceAtLeast(8f)
+        val shownTitle = if (titlePaint.measureText(tText) <= availTitleW) {
+          tText
+        } else {
+          val titleAdvance = (titlePaint.measureText("MM") - titlePaint.measureText("M")).coerceAtLeast(1f)
+          val maxTitleChars = (availTitleW / titleAdvance).toInt().coerceAtLeast(1)
           if (maxTitleChars <= 1) "…" else tText.take(maxTitleChars - 1) + "…"
         }
 
         val shownEyebrow = eText?.let { raw ->
-          val eAdvance = (eyebrowPaint.measureText("MM") - eyebrowPaint.measureText("M")).coerceAtLeast(1f)
-          val maxE = ((eyebrowRight - textLeft) / eAdvance).toInt().coerceAtLeast(1)
-          if (raw.length <= maxE) raw else if (maxE <= 1) "…" else raw.take(maxE - 1) + "…"
+          val availEyebrowW = (eyebrowRight - textLeft).coerceAtLeast(8f)
+          if (eyebrowPaint.measureText(raw) <= availEyebrowW) {
+            raw
+          } else {
+            val eAdvance = (eyebrowPaint.measureText("MM") - eyebrowPaint.measureText("M")).coerceAtLeast(1f)
+            val maxE = (availEyebrowW / eAdvance).toInt().coerceAtLeast(1)
+            if (maxE <= 1) "…" else raw.take(maxE - 1) + "…"
+          }
         }
 
         val titleX = if (centered) {
@@ -2374,15 +2425,11 @@ private fun HudHeaderDecryptBlock(
   val curAccent = rememberUpdatedState(accent)
   val curEyebrow = rememberUpdatedState(eyebrow)
   val curTitle = rememberUpdatedState(title)
-  val eyebrowPaint = remember(density) {
-    monoPaint(density, 8.5f, 1.0f, Paint.Align.LEFT, 255).apply {
-      typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-    }
+  val eyebrowPaint = remember(density, style.telemetryTypeface, style.fontScale) {
+    monoPaint(density, 8.5f, 1.0f, Paint.Align.LEFT, 255, style.telemetryTypeface, style.fontScale)
   }
-  val titlePaint = remember(density) {
-    monoPaint(density, 13.5f, 1.1f, Paint.Align.LEFT, 255).apply {
-      typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-    }
+  val titlePaint = remember(density, style.canvasBoldTypeface, style.fontScale) {
+    monoPaint(density, 13.5f, 1.1f, Paint.Align.LEFT, 255, style.canvasBoldTypeface, style.fontScale)
   }
 
   Box(
@@ -2390,13 +2437,20 @@ private fun HudHeaderDecryptBlock(
       .fillMaxWidth()
       .height(34.dp)
       .drawWithCache {
+        val cachedStyle = curStyle.value
+        eyebrowPaint.typeface = cachedStyle.telemetryTypeface
+        titlePaint.typeface = cachedStyle.canvasBoldTypeface
         val eText = curEyebrow.value
         val tText = curTitle.value
         val eBase = centerBaseline(eyebrowPaint, size.height * 0.28f)
         val tBase = centerBaseline(titlePaint, size.height * 0.74f)
-        val advance = (titlePaint.measureText("MM") - titlePaint.measureText("M")).coerceAtLeast(1f)
-        val maxChars = (size.width / advance).toInt().coerceAtLeast(1)
-        val shownTitle = if (tText.length <= maxChars) tText else tText.take((maxChars - 1).coerceAtLeast(1)) + "…"
+        val shownTitle = if (titlePaint.measureText(tText) <= size.width) {
+          tText
+        } else {
+          val advance = (titlePaint.measureText("MM") - titlePaint.measureText("M")).coerceAtLeast(1f)
+          val maxChars = (size.width / advance).toInt().coerceAtLeast(1)
+          tText.take((maxChars - 1).coerceAtLeast(1)) + "…"
+        }
         val seed = eText.hashCode() + tText.hashCode()
 
         onDrawBehind {
@@ -2424,13 +2478,18 @@ private fun HudMicroLabel(
   reveal: () -> Float,
 ) {
   val density = LocalDensity.current
+  val style = LocalLauncherStyle.current
+  val curStyle = rememberUpdatedState(style)
   val curText = rememberUpdatedState(text)
-  val paint = remember(density) { monoPaint(density, 8.2f, 0.9f, Paint.Align.LEFT, 168) }
+  val paint = remember(density, style.telemetryTypeface, style.fontScale) {
+    monoPaint(density, 8.2f, 0.9f, Paint.Align.LEFT, 168, style.telemetryTypeface, style.fontScale)
+  }
   Box(
     modifier = Modifier
       .fillMaxWidth()
       .height(14.dp)
       .drawWithCache {
+        paint.typeface = curStyle.value.telemetryTypeface
         val label = curText.value
         val base = centerBaseline(paint, size.height * 0.5f)
         val seed = label.hashCode()

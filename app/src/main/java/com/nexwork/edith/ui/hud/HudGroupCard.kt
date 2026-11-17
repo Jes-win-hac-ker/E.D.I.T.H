@@ -80,12 +80,24 @@ fun HudGroupCard(
     Brush.verticalGradient(listOf(style.voidTop.copy(alpha = 0.72f), style.voidBottom.copy(alpha = 0.72f)))
   }
 
-  val labelPaint = remember(density) { monoPaint(density, 17f, 1.6f, Paint.Align.LEFT, 255) }
-  val metaPaint = remember(density) { monoPaint(density, 9.5f, 1f, Paint.Align.LEFT, 140) }
-  val countPaint = remember(density) { monoPaint(density, 16f, 0.5f, Paint.Align.LEFT, 230) }
-  val captionPaint = remember(density) { monoPaint(density, 7.5f, 1.1f, Paint.Align.LEFT, 107) }
-  val ghostPaint = remember(density) { monoPaint(density, 20f, 0f, Paint.Align.CENTER, 46) }
-  val finePaint = remember(density) { monoPaint(density, 7.5f, 0f, Paint.Align.RIGHT, 88) }
+  val labelPaint = remember(density, style.canvasBoldTypeface, style.fontScale) {
+    monoPaint(density, 17f, 1.6f, Paint.Align.LEFT, 255, style.canvasBoldTypeface, style.fontScale)
+  }
+  val metaPaint = remember(density, style.telemetryTypeface, style.fontScale) {
+    monoPaint(density, 9.5f, 1f, Paint.Align.LEFT, 140, style.telemetryTypeface, style.fontScale)
+  }
+  val countPaint = remember(density, style.canvasBoldTypeface, style.fontScale) {
+    monoPaint(density, 16f, 0.5f, Paint.Align.LEFT, 230, style.canvasBoldTypeface, style.fontScale)
+  }
+  val captionPaint = remember(density, style.telemetryTypeface, style.fontScale) {
+    monoPaint(density, 7.5f, 1.1f, Paint.Align.LEFT, 107, style.telemetryTypeface, style.fontScale)
+  }
+  val ghostPaint = remember(density, style.canvasBoldTypeface, style.fontScale) {
+    monoPaint(density, 20f, 0f, Paint.Align.CENTER, 46, style.canvasBoldTypeface, style.fontScale)
+  }
+  val finePaint = remember(density, style.telemetryTypeface, style.fontScale) {
+    monoPaint(density, 7.5f, 0f, Paint.Align.RIGHT, 88, style.telemetryTypeface, style.fontScale)
+  }
 
   Box(
     modifier = modifier
@@ -97,6 +109,13 @@ fun HudGroupCard(
       Modifier
         .fillMaxSize()
         .drawWithCache {
+          val cachedStyle = styleState.value
+          labelPaint.typeface = cachedStyle.canvasBoldTypeface
+          metaPaint.typeface = cachedStyle.telemetryTypeface
+          countPaint.typeface = cachedStyle.canvasBoldTypeface
+          captionPaint.typeface = cachedStyle.telemetryTypeface
+          ghostPaint.typeface = cachedStyle.canvasBoldTypeface
+          finePaint.typeface = cachedStyle.telemetryTypeface
           val ux = size.width / 312f
           val uy = size.height / 124f
           fun X(sx: Float) = sx * ux

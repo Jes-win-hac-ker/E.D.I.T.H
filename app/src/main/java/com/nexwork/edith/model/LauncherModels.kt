@@ -67,10 +67,34 @@ enum class HudIntensityPreset(val label: String, val code: String) {
   OVERDRIVE("Overdrive", "MAX"),
 }
 
-enum class LauncherFontStyle(val label: String, val code: String) {
-  DEFAULT("System", "SYS"),
-  MONOSPACE("Tactical Mono", "MONO"),
-  CLEAN_SANS("Clean Sans", "SANS"),
+enum class LauncherFontStyle(
+  val label: String,
+  val code: String,
+  val isProportionalDisplay: Boolean = false,
+) {
+  IBM_PLEX_MONO("IBM Plex Mono", "PLEX"),
+  ORBITRON("Orbitron HUD", "ORBIT", isProportionalDisplay = true),
+  HACK_MONO("Hack Terminal", "HACK"),
+  PIXELON("Pixelon 8-Bit", "PIXEL", isProportionalDisplay = true),
+  KOGNIGEAR("KogniGear Mech", "MECH", isProportionalDisplay = true),
+  ESPACION("Espacion Sci-Fi", "ASTRO", isProportionalDisplay = true);
+
+  companion object {
+    fun fromPersistedName(name: String?): LauncherFontStyle {
+      if (name.isNullOrBlank()) return IBM_PLEX_MONO
+      entries.firstOrNull { it.name == name }?.let { return it }
+      return when (name) {
+        "DEFAULT", "MONOSPACE" -> IBM_PLEX_MONO
+        "CLEAN_SANS" -> ORBITRON
+        else -> IBM_PLEX_MONO
+      }
+    }
+  }
+}
+
+enum class HudFontScope(val label: String, val code: String) {
+  ALL_HUD("All HUD", "FULL"),
+  HEADERS_CLOCK_ONLY("Headers & Clock", "HEAD"),
 }
 
 enum class SettingsStage {
@@ -100,7 +124,8 @@ enum class JarvisSettingsSection(val title: String, val tag: String) {
 data class LauncherSettingsConfig(
   val accentPreset: LauncherAccentPreset = LauncherAccentPreset.ICE_CYAN,
   val hudIntensity: HudIntensityPreset = HudIntensityPreset.TACTICAL,
-  val fontStyle: LauncherFontStyle = LauncherFontStyle.DEFAULT,
+  val fontStyle: LauncherFontStyle = LauncherFontStyle.IBM_PLEX_MONO,
+  val fontScope: HudFontScope = HudFontScope.ALL_HUD,
   val fontScale: Float = 1.0f,
   val use24Hour: Boolean = true,
 )

@@ -324,17 +324,22 @@ class MainScreenViewModelTest {
 
     viewModel.updateLauncherAccent(LauncherAccentPreset.SOLAR_AMBER)
     viewModel.updateHudIntensity(HudIntensityPreset.OVERDRIVE)
-    viewModel.updateLauncherFont(LauncherFontStyle.MONOSPACE)
+    viewModel.updateLauncherFont(LauncherFontStyle.ORBITRON)
+    viewModel.updateLauncherFontScope(com.nexwork.edith.model.HudFontScope.HEADERS_CLOCK_ONLY)
     viewModel.updateLauncherFontScale(1.12f)
     viewModel.setUse24Hour(false)
 
     val cfg = viewModel.launcherState.value.launcherSettings
     assertEquals(LauncherAccentPreset.SOLAR_AMBER, cfg.accentPreset)
     assertEquals(HudIntensityPreset.OVERDRIVE, cfg.hudIntensity)
-    assertEquals(LauncherFontStyle.MONOSPACE, cfg.fontStyle)
+    assertEquals(LauncherFontStyle.ORBITRON, cfg.fontStyle)
+    assertEquals(com.nexwork.edith.model.HudFontScope.HEADERS_CLOCK_ONLY, cfg.fontScope)
     assertEquals(1.12f, cfg.fontScale, 0.001f)
     assertFalse(cfg.use24Hour)
     assertFalse(viewModel.launcherState.value.use24Hour)
+    assertEquals(6, LauncherFontStyle.entries.size)
+    assertEquals(LauncherFontStyle.IBM_PLEX_MONO, LauncherFontStyle.fromPersistedName("MONOSPACE"))
+    assertEquals(LauncherFontStyle.ORBITRON, LauncherFontStyle.fromPersistedName("CLEAN_SANS"))
     // Launcher theme customization must never alter OS-wide Shizuku Monet state
     assertFalse(viewModel.launcherState.value.monetUiState.isEnabledPersisted)
 

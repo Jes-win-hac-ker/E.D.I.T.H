@@ -69,19 +69,22 @@ internal fun centerBaseline(paint: Paint, centreY: Float): Float {
   return centreY - (fm.ascent + fm.descent) / 2f
 }
 
-/** Monospace HUD readout: [trackingSp] is extra tracking in sp, [alpha] is 0..255. */
+/** Tactical HUD readout: [trackingSp] is extra tracking in sp, [alpha] is 0..255. */
 internal fun monoPaint(
   density: Density,
   sizeSp: Float,
   trackingSp: Float,
   align: Paint.Align,
   alpha: Int,
+  typeface: Typeface? = Typeface.MONOSPACE,
+  fontScale: Float = 1f,
 ): Paint = with(density) {
+  val scaledSp = (sizeSp * fontScale.coerceIn(0.85f, 1.25f)).coerceAtLeast(6f)
   Paint().apply {
     isAntiAlias = true
-    typeface = Typeface.MONOSPACE
-    textSize = sizeSp.sp.toPx()
-    letterSpacing = trackingSp / sizeSp
+    this.typeface = typeface ?: Typeface.MONOSPACE
+    textSize = scaledSp.sp.toPx()
+    letterSpacing = trackingSp / sizeSp.coerceAtLeast(1f)
     textAlign = align
     color = android.graphics.Color.argb(alpha, 255, 255, 255)
   }
@@ -136,7 +139,8 @@ internal fun DrawScope.drawDecrypt(
   val resolved = (progress * (text.length + 1)).toInt().coerceAtMost(text.length)
   if (resolved > 0) canvas.drawText(text, 0, resolved, x, baseline, paint)
   if (resolved >= text.length) return
-  val advance = paint.measureText("MM") - paint.measureText("M")
+  val prefixWidth = if (resolved > 0) paint.measureText(text, 0, resolved) else 0f
+  val advance = (paint.measureText("MM") - paint.measureText("M")).coerceAtLeast(paint.textSize * 0.45f)
   val salt = (progress * 18f).toInt()
   val settledAlpha = paint.alpha
   paint.alpha = (settledAlpha * 0.62f).toInt()
@@ -145,7 +149,7 @@ internal fun DrawScope.drawDecrypt(
     val ch = if (text[i] == ' ') ' ' else decryptGlyph(seed, i, salt)
     buffer.append(ch)
     val wobble = if (jitter == 0f || text[i] == ' ') 0f else jitter * sin((i * 2.4f) + salt * 1.7f)
-    canvas.drawText(buffer, 0, 1, x + i * advance, baseline + wobble, paint)
+    canvas.drawText(buffer, 0, 1, x + prefixWidth + (i - resolved) * advance, baseline + wobble, paint)
     buffer.setLength(0)
   }
   paint.alpha = settledAlpha

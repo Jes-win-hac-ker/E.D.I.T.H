@@ -760,6 +760,10 @@ class MainScreenViewModel(
     updateLauncherSettings { it.copy(fontStyle = style) }
   }
 
+  fun updateLauncherFontScope(scope: com.nexwork.edith.model.HudFontScope) {
+    updateLauncherSettings { it.copy(fontScope = scope) }
+  }
+
   fun updateLauncherFontScale(scale: Float) {
     val clamped = scale.coerceIn(0.85f, 1.25f)
     updateLauncherSettings { it.copy(fontScale = clamped) }

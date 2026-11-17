@@ -649,6 +649,7 @@ fun MainScreen(
       onAccentChange = viewModel::updateLauncherAccent,
       onIntensityChange = viewModel::updateHudIntensity,
       onFontChange = viewModel::updateLauncherFont,
+      onFontScopeChange = viewModel::updateLauncherFontScope,
       onFontScaleChange = viewModel::updateLauncherFontScale,
       onUse24HourChange = viewModel::setUse24Hour,
       onRefreshRateSelect = { hz -> viewModel.setRefreshRatePreset(hz) },

@@ -55,6 +55,7 @@ import com.nexwork.edith.model.AppFootprint
 import com.nexwork.edith.theme.Crimson
 import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.LocalCrimsonMonetActive
+import com.nexwork.edith.theme.LocalLauncherStyle
 import com.nexwork.edith.theme.TextPureWhite
 import com.nexwork.edith.theme.TextSilver
 import kotlin.math.abs
@@ -586,6 +587,7 @@ private fun CardSwipeActionTray(
   revealFraction: () -> Float,
   modifier: Modifier = Modifier,
 ) {
+  val style = LocalLauncherStyle.current
   val trayPlateBg = if (LocalCrimsonMonetActive.current) Color(0xFF0A0A0A) else Color(0xFF0F141E)
   Column(
     modifier = modifier
@@ -609,16 +611,16 @@ private fun CardSwipeActionTray(
         Text(
           text = "SYSTEM APP",
           color = TextSilver.copy(alpha = 0.72f),
-          fontFamily = FontFamily.Monospace,
-          fontSize = 8.sp,
+          fontFamily = style.telemetryFontFamily,
+          fontSize = (8f * style.fontScale).sp,
           letterSpacing = 1.sp,
           textAlign = TextAlign.Center,
         )
         Text(
           text = "APP INFO",
           color = TextPureWhite,
-          fontFamily = FontFamily.Monospace,
-          fontSize = 10.sp,
+          fontFamily = style.fontFamily,
+          fontSize = (10f * style.fontScale).sp,
           fontWeight = FontWeight.SemiBold,
           letterSpacing = 1.2.sp,
           textAlign = TextAlign.Center,
@@ -638,8 +640,8 @@ private fun CardSwipeActionTray(
         Text(
           text = "APP INFO",
           color = TextPureWhite,
-          fontFamily = FontFamily.Monospace,
-          fontSize = 10.sp,
+          fontFamily = style.fontFamily,
+          fontSize = (10f * style.fontScale).sp,
           fontWeight = FontWeight.SemiBold,
           letterSpacing = 1.2.sp,
           textAlign = TextAlign.Center,
@@ -657,8 +659,8 @@ private fun CardSwipeActionTray(
         Text(
           text = "✕ UNINSTALL",
           color = CrimsonBright,
-          fontFamily = FontFamily.Monospace,
-          fontSize = 10.sp,
+          fontFamily = style.fontFamily,
+          fontSize = (10f * style.fontScale).sp,
           fontWeight = FontWeight.Bold,
           letterSpacing = 1.sp,
           textAlign = TextAlign.Center,

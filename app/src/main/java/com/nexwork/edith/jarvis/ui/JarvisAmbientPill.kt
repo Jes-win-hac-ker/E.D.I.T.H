@@ -124,16 +124,16 @@ fun JarvisEmergencyStopHudPill(
       Text(
         text = "STOP",
         color = CrimsonBright,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 10.sp,
+        fontFamily = style.fontFamily,
+        fontSize = (10f * style.fontScale).sp,
         fontWeight = FontWeight.Bold,
         letterSpacing = 0.9.sp,
       )
       Text(
         text = label,
         color = TextPureWhite,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 9.5.sp,
+        fontFamily = style.telemetryFontFamily,
+        fontSize = (9.5f * style.fontScale).sp,
         fontWeight = FontWeight.Medium,
         letterSpacing = 0.6.sp,
         maxLines = 1,

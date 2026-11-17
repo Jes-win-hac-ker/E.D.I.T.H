@@ -208,16 +208,16 @@ fun JarvisBaseplatePanel(
         Text(
           text = "SYS.02 // JARVIS BASEPLATE",
           color = accent,
-          fontFamily = FontFamily.Monospace,
-          fontSize = 10.sp,
+          fontFamily = style.telemetryFontFamily,
+          fontSize = (10f * style.fontScale).sp,
           fontWeight = FontWeight.SemiBold,
           letterSpacing = 1.2.sp,
         )
         Text(
           text = "${uiState.playbooks.size} PLAYBOOKS · ${uiState.activeReplyHandleCount} REPLY HANDLES",
           color = TextPureWhite,
-          fontFamily = FontFamily.Monospace,
-          fontSize = 11.5.sp,
+          fontFamily = style.fontFamily,
+          fontSize = (11.5f * style.fontScale).sp,
           fontWeight = FontWeight.Bold,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
@@ -254,8 +254,8 @@ fun JarvisBaseplatePanel(
           Text(
             text = if (hasActiveJobs) "■ STOP" else "■ E-STOP",
             color = if (hasActiveJobs) TextPureWhite else CrimsonBright,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 10.sp,
+            fontFamily = style.fontFamily,
+            fontSize = (10f * style.fontScale).sp,
             fontWeight = FontWeight.Bold,
           )
         }
@@ -281,8 +281,8 @@ fun JarvisBaseplatePanel(
           Text(
             text = closeLabel,
             color = accent,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 10.sp,
+            fontFamily = style.fontFamily,
+            fontSize = (10f * style.fontScale).sp,
             fontWeight = FontWeight.Bold,
           )
         }

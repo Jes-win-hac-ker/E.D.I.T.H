@@ -26,6 +26,7 @@ import android.view.WindowManager
 import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.model.AppFootprint
 import com.nexwork.edith.model.DeviceTelemetry
+import com.nexwork.edith.model.HudFontScope
 import com.nexwork.edith.model.HudIntensityPreset
 import com.nexwork.edith.model.LauncherAccentPreset
 import com.nexwork.edith.model.LauncherFontStyle
@@ -92,14 +93,17 @@ class LauncherRepository(private var context: Context? = null) {
     val intensity = HudIntensityPreset.entries.firstOrNull { it.name == intensityName }
       ?: HudIntensityPreset.TACTICAL
     val fontName = p.getString(KEY_LAUNCHER_FONT, null)
-    val font = LauncherFontStyle.entries.firstOrNull { it.name == fontName }
-      ?: LauncherFontStyle.DEFAULT
+    val font = LauncherFontStyle.fromPersistedName(fontName)
+    val scopeName = p.getString(KEY_LAUNCHER_FONT_SCOPE, null)
+    val fontScope = HudFontScope.entries.firstOrNull { it.name == scopeName }
+      ?: HudFontScope.ALL_HUD
     val fontScale = p.getFloat(KEY_LAUNCHER_FONT_SCALE, 1.0f).coerceIn(0.85f, 1.25f)
     val use24Hour = p.getBoolean(KEY_USE_24_HOUR, true)
     return LauncherSettingsConfig(
       accentPreset = accent,
       hudIntensity = intensity,
       fontStyle = font,
+      fontScope = fontScope,
       fontScale = fontScale,
       use24Hour = use24Hour,
     )
@@ -110,6 +114,7 @@ class LauncherRepository(private var context: Context? = null) {
       ?.putString(KEY_LAUNCHER_ACCENT, config.accentPreset.name)
       ?.putString(KEY_HUD_INTENSITY, config.hudIntensity.name)
       ?.putString(KEY_LAUNCHER_FONT, config.fontStyle.name)
+      ?.putString(KEY_LAUNCHER_FONT_SCOPE, config.fontScope.name)
       ?.putFloat(KEY_LAUNCHER_FONT_SCALE, config.fontScale.coerceIn(0.85f, 1.25f))
       ?.putBoolean(KEY_USE_24_HOUR, config.use24Hour)
       ?.apply()
@@ -642,6 +647,7 @@ class LauncherRepository(private var context: Context? = null) {
     private const val KEY_LAUNCHER_ACCENT = "launcher_accent_preset"
     private const val KEY_HUD_INTENSITY = "launcher_hud_intensity"
     private const val KEY_LAUNCHER_FONT = "launcher_font_style"
+    private const val KEY_LAUNCHER_FONT_SCOPE = "launcher_font_scope"
     private const val KEY_LAUNCHER_FONT_SCALE = "launcher_font_scale"
     private const val KEY_USE_24_HOUR = "launcher_use_24_hour"
 
