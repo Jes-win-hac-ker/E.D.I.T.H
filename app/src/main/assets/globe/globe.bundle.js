@@ -1850,6 +1850,7 @@ function attachPulseShader(material, pulseUniforms, radarUniforms, isHaze = fals
         shader.uniforms.uPulseThetas = pulseUniforms.uPulseThetas;
         shader.uniforms.uPulseWidths = pulseUniforms.uPulseWidths;
         shader.uniforms.uPulseAmplitudes = pulseUniforms.uPulseAmplitudes;
+        shader.uniforms.uWaveColor = pulseUniforms.uWaveColor;
         shader.uniforms.uRadarCenter = radarUniforms.uRadarCenter;
         shader.uniforms.uRadarAngle = radarUniforms.uRadarAngle;
 
@@ -1861,6 +1862,7 @@ function attachPulseShader(material, pulseUniforms, radarUniforms, isHaze = fals
             uniform float uPulseThetas[4];
             uniform float uPulseWidths[4];
             uniform float uPulseAmplitudes[4];
+            uniform vec3 uWaveColor;
             uniform vec3 uRadarCenter;
             uniform float uRadarAngle;
             `
@@ -1933,7 +1935,7 @@ function attachPulseShader(material, pulseUniforms, radarUniforms, isHaze = fals
                 float radarEdge = (aCoast > 0.5 && uRadarAngle < 5.0) ? (1.0 - snapEased) * 0.24 : 0.0;
                 float radarCrimson = (uRadarAngle < 5.0) ? pow(1.0 - snapEased, 1.35) * ((aCoast > 0.5) ? 0.92 : 0.58) : 0.0;
                 float totalCrimson = max(crimsonTint, radarCrimson);
-                vec3 crimsonWaveColor = vec3(1.65, 0.04, 0.14);
+                vec3 crimsonWaveColor = uWaveColor;
                 vColor = mix(vColor * (1.0 + radarEdge), crimsonWaveColor * (1.0 + coastSilhouette), clamp(totalCrimson, 0.0, 0.98));
             }
             `
@@ -1981,9 +1983,13 @@ function createLandmass(radius = GLOBE_CONFIG.radius, onReady = null) {
         uPulseCenters: { value: new Float32Array(12) },
         uPulseThetas: { value: new Float32Array(4) },
         uPulseWidths: { value: new Float32Array(4) },
-        uPulseAmplitudes: { value: new Float32Array(4) }
+        uPulseAmplitudes: { value: new Float32Array(4) },
+        uWaveColor: { value: new THREE.Vector3(1.65, 0.04, 0.14) }
     };
     group.userData.pulseUniforms = pulseUniforms;
+    group.setWaveColor = (r, g, b) => {
+        pulseUniforms.uWaveColor.value.set(r, g, b);
+    };
 
     // Origin-Out Radar Reveal Uniforms
     const radarUniforms = {

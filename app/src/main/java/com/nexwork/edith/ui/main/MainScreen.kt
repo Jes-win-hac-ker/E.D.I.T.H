@@ -66,8 +66,11 @@ import com.nexwork.edith.jarvis.core.JarvisRuntime
 import com.nexwork.edith.jarvis.ui.JarvisAmbientPill
 import com.nexwork.edith.jarvis.ui.JarvisDrawerSheet
 import com.nexwork.edith.jarvis.ui.JarvisEmergencyStopHudPill
+import com.nexwork.edith.model.HudIntensityPreset
 import com.nexwork.edith.model.SettingsStage
 import com.nexwork.edith.theme.EDITHTheme
+import com.nexwork.edith.theme.LocalLauncherStyle
+import com.nexwork.edith.theme.toGlobePalette
 import com.nexwork.edith.ui.hud.BindHudSettingsChoreography
 import com.nexwork.edith.ui.hud.CrimeSceneFocusOverlay
 import com.nexwork.edith.ui.hud.HudCardDeck
@@ -343,6 +346,22 @@ fun MainScreen(
     crimsonMonetActive = state.monetUiState.isEnabledPersisted,
     launcherSettings = state.launcherSettings,
   ) {
+  val activeStyle = LocalLauncherStyle.current
+  LaunchedEffect(activeStyle.accentPreset, activeStyle.hudIntensity) {
+    val gp = activeStyle.accentPreset.toGlobePalette()
+    val gain = when (activeStyle.hudIntensity) {
+      HudIntensityPreset.STEALTH -> 0.72f
+      HudIntensityPreset.TACTICAL -> 1.00f
+      HudIntensityPreset.OVERDRIVE -> 1.28f
+    }
+    globeController.setAccentTheme(
+      accentHex = gp.accentHex,
+      waveR = gp.waveR * gain,
+      waveG = gp.waveG * gain,
+      waveB = gp.waveB * gain,
+      graticuleHex = gp.graticuleHex,
+    )
+  }
   BoxWithConstraints(
     modifier = modifier
       .fillMaxSize()
@@ -628,6 +647,7 @@ fun MainScreen(
       onOpenJarvisDrawer = viewModel::openJarvisSheet,
       onBackStep = { viewModel.handleBackPress() },
       onAccentChange = viewModel::updateLauncherAccent,
+      onIntensityChange = viewModel::updateHudIntensity,
       onFontChange = viewModel::updateLauncherFont,
       onFontScaleChange = viewModel::updateLauncherFontScale,
       onUse24HourChange = viewModel::setUse24Hour,

@@ -1,11 +1,16 @@
 package com.nexwork.edith.ui.main
 
 import com.nexwork.edith.data.DataRepository
+import com.nexwork.edith.model.HudIntensityPreset
 import com.nexwork.edith.model.JarvisSettingsSection
 import com.nexwork.edith.model.LauncherAccentPreset
 import com.nexwork.edith.model.LauncherFontStyle
+import com.nexwork.edith.model.LauncherSettingsConfig
 import com.nexwork.edith.model.LauncherSettingsSection
 import com.nexwork.edith.model.SettingsStage
+import com.nexwork.edith.theme.IceGlowAccent
+import com.nexwork.edith.theme.WarmSunAccent
+import com.nexwork.edith.theme.buildLauncherStyleTokens
 import junit.framework.TestCase.assertEquals
 import junit.framework.TestCase.assertFalse
 import junit.framework.TestCase.assertNull
@@ -318,18 +323,29 @@ class MainScreenViewModelTest {
     assertFalse(viewModel.launcherState.value.monetUiState.isEnabledPersisted)
 
     viewModel.updateLauncherAccent(LauncherAccentPreset.SOLAR_AMBER)
+    viewModel.updateHudIntensity(HudIntensityPreset.OVERDRIVE)
     viewModel.updateLauncherFont(LauncherFontStyle.MONOSPACE)
     viewModel.updateLauncherFontScale(1.12f)
     viewModel.setUse24Hour(false)
 
     val cfg = viewModel.launcherState.value.launcherSettings
     assertEquals(LauncherAccentPreset.SOLAR_AMBER, cfg.accentPreset)
+    assertEquals(HudIntensityPreset.OVERDRIVE, cfg.hudIntensity)
     assertEquals(LauncherFontStyle.MONOSPACE, cfg.fontStyle)
     assertEquals(1.12f, cfg.fontScale, 0.001f)
     assertFalse(cfg.use24Hour)
     assertFalse(viewModel.launcherState.value.use24Hour)
     // Launcher theme customization must never alter OS-wide Shizuku Monet state
     assertFalse(viewModel.launcherState.value.monetUiState.isEnabledPersisted)
+
+    // Amber accent shifts semanticWarn to cyan so warnings stay distinct from active chrome
+    val amberTokens = buildLauncherStyleTokens(cfg)
+    assertEquals(IceGlowAccent, amberTokens.semanticWarn)
+    assertEquals(1.0f, amberTokens.focusedBorderAlpha, 0.001f)
+
+    viewModel.updateLauncherAccent(LauncherAccentPreset.VERIDIAN_TAC)
+    val veridianTokens = buildLauncherStyleTokens(viewModel.launcherState.value.launcherSettings)
+    assertEquals(WarmSunAccent, veridianTokens.semanticWarn)
 
     // !ota command remains available alongside the Settings OTA button
     viewModel.openSpotlightSearch()

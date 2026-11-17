@@ -40,6 +40,7 @@ import com.nexwork.edith.theme.Crimson
 import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.CrimsonDim
 import com.nexwork.edith.theme.LocalCrimsonMonetActive
+import com.nexwork.edith.theme.LocalLauncherStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -72,6 +73,8 @@ fun HudAppCard(
 ) {
   val density = LocalDensity.current
   val crimsonMonetActive = rememberUpdatedState(LocalCrimsonMonetActive.current)
+  val style = LocalLauncherStyle.current
+  val styleState = rememberUpdatedState(style)
   val monochrome = remember { ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }) }
   val iconBitmap = remember(app.packageName, app.icon) { app.cachedIconBitmap() }
   val ghost = remember(app.label) { app.label.filter { it.isLetterOrDigit() }.take(2).uppercase() }
@@ -80,11 +83,11 @@ fun HudAppCard(
   val meta = remember(app, unreadCount) { cardMetaLine(app, unreadCount) }
   val peakValue = remember(usageFraction) { (usageFraction.coerceIn(0.04f, 1f) * 100f).roundToInt() }
   val iconRise = remember(density) { with(density) { 2.dp.toPx() } }
-  val leaderBrush = remember {
-    Brush.verticalGradient(listOf(Color(0xD9050505), Color(0xD9111111)))
+  val leaderBrush = remember(style.voidTop, style.voidBottom) {
+    Brush.verticalGradient(listOf(style.voidTop.copy(alpha = 0.88f), style.voidBottom.copy(alpha = 0.88f)))
   }
-  val stackBrush = remember {
-    Brush.verticalGradient(listOf(Color(0xB8050505), Color(0xB8111111)))
+  val stackBrush = remember(style.voidTop, style.voidBottom) {
+    Brush.verticalGradient(listOf(style.voidTop.copy(alpha = 0.72f), style.voidBottom.copy(alpha = 0.72f)))
   }
 
   val labelPaint = remember(density) {
@@ -176,15 +179,16 @@ fun HudAppCard(
           val chargeTop = Y(2f)
           val chargeSpan = Y(122f) - Y(2f)
           val headW = 18f.dp.toPx()
+          val scanAccent = styleState.value.accent
           val chargeFill = Brush.horizontalGradient(
-            0f to CrimsonBright.copy(alpha = 0.04f),
-            1f to CrimsonBright.copy(alpha = 0.22f),
+            0f to scanAccent.copy(alpha = 0.05f),
+            1f to scanAccent.copy(alpha = 0.24f),
             startX = chargeLeft,
             endX = chargeRight,
           )
           val chargeHead = Brush.horizontalGradient(
             0f to Color.Transparent,
-            headW to CrimsonBright.copy(alpha = 0.45f),
+            headW to scanAccent.copy(alpha = 0.48f),
             headW * 2f to Color.Transparent,
           )
 
@@ -226,18 +230,20 @@ fun HudAppCard(
             val stripP = phase(progress, 0.7f, 1f)
             val fineP = phase(progress, 0.82f, 1f)
 
+            val activeStyle = styleState.value
+            val leaderTint = activeStyle.graphicAccent
             fun drawPlateAndGrid() {
               val isMonet = crimsonMonetActive.value
               val plateColor = when {
                 isMonet && leader -> Color(0xD90A0A0A)
                 isMonet -> Color(0xB80A0A0A)
-                leader -> Color(0xD90F141E)
-                else -> Color(0xB80F141E)
+                leader -> activeStyle.voidBottom.copy(alpha = 0.88f)
+                else -> activeStyle.voidBottom.copy(alpha = 0.72f)
               }
               drawPath(platePath, plateColor)
               drawPath(
                 platePath,
-                if (leader) CrimsonBright.copy(alpha = if (isMonet) 0.72f else 0.5f) else CrimsonDim,
+                if (leader) leaderTint.copy(alpha = activeStyle.focusedBorderAlpha * 0.82f) else leaderTint.copy(alpha = activeStyle.idleBorderAlpha * 0.65f),
                 style = plateStroke,
               )
               gridBitmap?.let { drawImage(it) }
@@ -263,7 +269,7 @@ fun HudAppCard(
 
             if (crossP > 0f) {
               crosses.forEachIndexed { idx, (centre, alpha) ->
-                val color = if (idx == 0 && leader) CrimsonBright.copy(alpha * crossP) else Color.White.copy(alpha * crossP)
+                val color = if (idx == 0 && leader) activeStyle.accent.copy(alpha * crossP) else Color.White.copy(alpha * crossP)
                 drawCross(
                   centre.x, centre.y, crossArm, crossStroke,
                   color,
@@ -360,12 +366,12 @@ fun HudAppCard(
               cornerAt = cornerAt,
               barPx = bar,
               tint = bracketTint,
-              trTint = if (leader) CrimsonBright.copy(alpha = 0.85f) else bracketTint,
-              blTint = if (leader) CrimsonDim else bracketTint,
+              trTint = if (leader) activeStyle.accent.copy(alpha = activeStyle.focusedBorderAlpha) else bracketTint,
+              blTint = if (leader) activeStyle.graphicAccent.copy(alpha = activeStyle.idleBorderAlpha) else bracketTint,
             )
 
             drawRect(
-              color = if (app.isEssentialQuickAccess || app.isPinned) CrimsonBright.copy(alpha = 0.82f * meterP) else Color.White.copy(alpha = 0.22f * meterP),
+              color = if (app.isEssentialQuickAccess || app.isPinned) activeStyle.accent.copy(alpha = 0.88f * meterP) else Color.White.copy(alpha = 0.22f * meterP),
               topLeft = Offset(X(283.5f), Y(110f)),
               size = Size(3f * ux, 3f * uy),
             )
@@ -375,7 +381,7 @@ fun HudAppCard(
               height = keylineH,
               progress = trace,
               strokeWidth = stroke,
-              color = Color.White.copy(if (leader) 0.85f else 0.3f),
+              color = if (leader) activeStyle.graphicAccent.copy(alpha = activeStyle.focusedBorderAlpha) else activeStyle.graphicAccent.copy(alpha = activeStyle.idleBorderAlpha * 0.72f),
               head = if (trace in 0.02f..0.98f) 1f else 0f,
             )
 
@@ -388,7 +394,7 @@ fun HudAppCard(
                 )
               }
               drawLine(
-                color = CrimsonBright.copy(alpha = 0.55f + 0.45f * charge),
+                color = activeStyle.accent.copy(alpha = 0.55f + 0.45f * charge),
                 start = Offset(headX, chargeTop),
                 end = Offset(headX, chargeTop + chargeSpan),
                 strokeWidth = (1.5f + 1.0f * charge).dp.toPx(),

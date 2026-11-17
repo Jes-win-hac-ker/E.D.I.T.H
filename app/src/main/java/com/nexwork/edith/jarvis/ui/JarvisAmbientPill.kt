@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.nexwork.edith.jarvis.core.ProactiveSuggestion
 import com.nexwork.edith.theme.Crimson
 import com.nexwork.edith.theme.CrimsonBright
+import com.nexwork.edith.theme.LocalLauncherStyle
 import com.nexwork.edith.theme.TextPureWhite
 import com.nexwork.edith.ui.hud.HudTelemetryRail
 import com.nexwork.edith.ui.hud.starkHudPlate
@@ -99,6 +100,7 @@ fun JarvisEmergencyStopHudPill(
     exit = fadeOut(),
     modifier = modifier,
   ) {
+    val style = LocalLauncherStyle.current
     Row(
       modifier = Modifier
         .starkHudPlate(
@@ -107,6 +109,7 @@ fun JarvisEmergencyStopHudPill(
           showBrackets = true,
           bracketScale = 0.48f,
           plateAlpha = 0.92f,
+          style = style,
         )
         .clickable(onClick = onStop)
         .padding(horizontal = 10.dp, vertical = 7.dp),

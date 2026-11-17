@@ -51,8 +51,6 @@ import com.nexwork.edith.theme.LocalLauncherStyle
 import com.nexwork.edith.theme.TextPureWhite
 import kotlin.math.roundToInt
 
-private val OtaOrbitalSlate = Color(0xFF64748B)
-
 private data class OtaHudCopy(
   val eyebrow: String,
   val label: String,
@@ -207,6 +205,7 @@ fun HudTelemetryRail(
   val density = LocalDensity.current
   val haptic = LocalHapticFeedback.current
   val launcherStyle = LocalLauncherStyle.current
+  val styleState = rememberUpdatedState(launcherStyle)
   val accentColor = rememberUpdatedState(launcherStyle.accent)
 
   val animatedProgress by animateFloatAsState(
@@ -294,16 +293,14 @@ fun HudTelemetryRail(
         }
 
         // 1. Center-out traced orbital baseline + laser tips / zenith spark
+        val activeStyle = styleState.value
         val activeAccent = accentColor.value
-        val activeDim = activeAccent.copy(alpha = 0.42f)
+        val activeStrokeAccent = if (isError) activeStyle.semanticDangerGraphic else activeStyle.graphicAccent
+        val activeDim = activeStrokeAccent.copy(alpha = activeStyle.railAlpha * 0.58f)
         if (trace > 0.01f) {
           val leftX = cx - halfSpan * trace
           val rightX = cx + halfSpan * trace
-          val baseColor = if (isError) {
-            Crimson.copy(alpha = 0.62f * lineAlpha)
-          } else {
-            activeAccent.copy(alpha = 0.45f * lineAlpha)
-          }
+          val baseColor = activeStrokeAccent.copy(alpha = activeStyle.railAlpha * lineAlpha)
           drawLine(
             color = baseColor,
             start = Offset(leftX, baselineY),

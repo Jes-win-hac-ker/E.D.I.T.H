@@ -19,6 +19,7 @@ import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.model.AppFootprint
 import com.nexwork.edith.model.DeviceTelemetry
 import com.nexwork.edith.model.JarvisSettingsSection
+import com.nexwork.edith.model.HudIntensityPreset
 import com.nexwork.edith.model.LauncherAccentPreset
 import com.nexwork.edith.model.LauncherFontStyle
 import com.nexwork.edith.model.LauncherSettingsConfig
@@ -749,6 +750,10 @@ class MainScreenViewModel(
   /** Applies a launcher-only accent preset without altering OS-wide Shizuku Monet. */
   fun updateLauncherAccent(preset: LauncherAccentPreset) {
     updateLauncherSettings { it.copy(accentPreset = preset) }
+  }
+
+  fun updateHudIntensity(preset: HudIntensityPreset) {
+    updateLauncherSettings { it.copy(hudIntensity = preset) }
   }
 
   fun updateLauncherFont(style: LauncherFontStyle) {

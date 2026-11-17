@@ -595,6 +595,24 @@
 
             // Input is routed exclusively through Compose + GlobeController to prevent duplicate waves.
 
+            window.setHudAccentColor = (hexInt, waveR, waveG, waveB, graticuleHex) => {
+                const targetHex = (typeof hexInt === 'number') ? hexInt : 0xE01432;
+                const gratHex = (typeof graticuleHex === 'number') ? graticuleHex : 0x64748B;
+                globeGroup.traverse((obj) => {
+                    if ((obj.isLine || obj.isLineSegments) && obj.material && obj.material.color) {
+                        if (obj.name === 'graticule-equator' || obj.name === 'solar-terminator-line' || obj.name === 'startup-equator-tracer') {
+                            obj.material.color.setHex(targetHex);
+                        } else if (!isInside(obj, userLocation.group)) {
+                            obj.material.color.setHex(gratHex);
+                        }
+                    }
+                });
+                if (typeof landmass.setWaveColor === 'function' && typeof waveR === 'number') {
+                    landmass.setWaveColor(waveR, waveG, waveB);
+                }
+                wakeLoop(450);
+            };
+
             // 11. Adaptive Animation Loop (Full 90/120Hz on motion/waves; true 30fps timer idle; paused behind console blur)
             function animate(now) {
                 rafId = null;

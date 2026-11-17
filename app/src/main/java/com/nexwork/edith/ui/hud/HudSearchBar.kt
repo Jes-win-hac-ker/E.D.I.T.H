@@ -70,8 +70,6 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlinx.coroutines.delay
 
-private val SearchOrbitalSlate = Color(0xFF64748B)
-
 /**
  * Top inverted orbital arc search console (Option B) aligned with [HudClock] and [HudOtaPill]:
  * zero box fill, bitmap grid, or corner brackets. A shallow 1dp orbital arc crowns the prompt
@@ -98,6 +96,7 @@ fun HudSearchBar(
   val density = LocalDensity.current
   val haptic = LocalHapticFeedback.current
   val launcherStyle = LocalLauncherStyle.current
+  val styleState = rememberUpdatedState(launcherStyle)
   val accentColor = rememberUpdatedState(launcherStyle.accent)
   val focusRequester = remember { FocusRequester() }
   val focusManager = LocalFocusManager.current
@@ -294,6 +293,7 @@ fun HudSearchBar(
               eyebrowOffsetY = (1f - hudEaseOutCubic(phase(r, 0.26f, 0.74f))) * 3.dp.toPx()
             }
 
+            val activeStyle = styleState.value
             val activeAccent = accentColor.value
 
             // 1. Shallow inverted orbital horizon arc + twin laser heads / idle orbital pulse
@@ -309,9 +309,9 @@ fun HudSearchBar(
                 if (i == 0) arcPath.moveTo(px, py) else arcPath.lineTo(px, py)
               }
               val arcColor = when {
-                isLaunchLocked -> activeAccent.copy(alpha = 0.85f * arcAlpha)
-                typing -> activeAccent.copy(alpha = 0.65f * arcAlpha)
-                else -> SearchOrbitalSlate.copy(alpha = 0.52f * arcAlpha)
+                isLaunchLocked -> activeAccent.copy(alpha = 0.92f * arcAlpha)
+                typing -> activeAccent.copy(alpha = activeStyle.railAlpha.coerceAtLeast(0.75f) * arcAlpha)
+                else -> activeStyle.orbitalMuted.copy(alpha = (activeStyle.railAlpha * 0.90f).coerceAtMost(0.88f) * arcAlpha)
               }
               drawPath(path = arcPath, color = arcColor, style = arcStroke)
 
@@ -359,7 +359,7 @@ fun HudSearchBar(
                 val tickColor = if (lit) {
                   activeAccent.copy(alpha = 0.92f * localPop)
                 } else {
-                  SearchOrbitalSlate.copy(alpha = 0.55f * localPop)
+                  activeStyle.orbitalMuted.copy(alpha = (activeStyle.railAlpha * 0.85f).coerceAtMost(0.82f) * localPop)
                 }
                 drawLine(
                   color = tickColor,

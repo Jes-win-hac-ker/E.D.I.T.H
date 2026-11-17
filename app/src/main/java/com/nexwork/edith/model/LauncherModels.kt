@@ -54,9 +54,17 @@ data class DeviceTelemetry(
 )
 
 enum class LauncherAccentPreset(val label: String, val code: String) {
-  ICE_CYAN("Ice Cyan", "CYAN"),
-  STARK_CRIMSON("Crimson", "RED"),
-  SOLAR_AMBER("Solar Amber", "AMBER"),
+  ICE_CYAN("Arc Reactor", "CYAN"),
+  STARK_CRIMSON("Mk LXXXV Crimson", "RED"),
+  SOLAR_AMBER("Solar Reactor", "AMBER"),
+  VERIDIAN_TAC("Veridian Tac", "TEAL"),
+  STEALTH_TITANIUM("Stealth Titanium", "TITAN"),
+}
+
+enum class HudIntensityPreset(val label: String, val code: String) {
+  STEALTH("Stealth", "LOW"),
+  TACTICAL("Tactical", "MID"),
+  OVERDRIVE("Overdrive", "MAX"),
 }
 
 enum class LauncherFontStyle(val label: String, val code: String) {
@@ -91,6 +99,7 @@ enum class JarvisSettingsSection(val title: String, val tag: String) {
 
 data class LauncherSettingsConfig(
   val accentPreset: LauncherAccentPreset = LauncherAccentPreset.ICE_CYAN,
+  val hudIntensity: HudIntensityPreset = HudIntensityPreset.TACTICAL,
   val fontStyle: LauncherFontStyle = LauncherFontStyle.DEFAULT,
   val fontScale: Float = 1.0f,
   val use24Hour: Boolean = true,

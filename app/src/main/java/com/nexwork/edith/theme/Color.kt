@@ -11,6 +11,8 @@ val TextPureWhite = Color(0xFFF8FAFC)
 val TextSilver = Color(0xFFCBD5E1)
 val IceGlowAccent = Color(0xFF38BDF8)
 val WarmSunAccent = Color(0xFFFBBF24)
+val VeridianAccent = Color(0xFF2DD4BF)
+val TitaniumAccent = Color(0xFFE2E8F0)
 
 // ===== STARK HUD accent =====
 // Mechanically validated (aesthete-agent): slop-clean, WCAG-checked.

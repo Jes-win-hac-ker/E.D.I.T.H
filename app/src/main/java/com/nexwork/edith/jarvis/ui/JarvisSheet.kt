@@ -71,7 +71,6 @@ import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.LocalLauncherStyle
 import com.nexwork.edith.theme.TextPureWhite
 import com.nexwork.edith.theme.TextSilver
-import com.nexwork.edith.theme.WarmSunAccent
 import com.nexwork.edith.ui.hud.starkHudPlate
 import java.util.Date
 
@@ -89,6 +88,7 @@ fun JarvisDrawerSheet(
       .background(Color.Black.copy(alpha = 0.80f))
       .clickable(onClick = onDismiss),
   ) {
+    val sheetStyle = LocalLauncherStyle.current
     Box(
       modifier = Modifier
         .align(Alignment.BottomCenter)
@@ -98,11 +98,12 @@ fun JarvisDrawerSheet(
         .navigationBarsPadding()
         .padding(horizontal = 12.dp, vertical = 10.dp)
         .starkHudPlate(
-          accent = LocalLauncherStyle.current.accent,
+          accent = sheetStyle.accent,
           focused = true,
           showBrackets = true,
           bracketScale = 0.85f,
           plateAlpha = 0.96f,
+          style = sheetStyle,
         )
         .clickable(enabled = false) {}
         .padding(14.dp),
@@ -131,7 +132,8 @@ fun JarvisBaseplatePanel(
   val haptic = LocalHapticFeedback.current
   val focusManager = LocalFocusManager.current
   val keyboardController = LocalSoftwareKeyboardController.current
-  val accent = LocalLauncherStyle.current.accent
+  val style = LocalLauncherStyle.current
+  val accent = style.accent
 
   LaunchedEffect(Unit) {
     JarvisRuntime.ensureInitialized(context)
@@ -224,6 +226,7 @@ fun JarvisBaseplatePanel(
               showBrackets = hasActiveJobs,
               bracketScale = 0.42f,
               plateAlpha = 0.92f,
+              style = style,
             )
             .clickable {
               haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -250,6 +253,7 @@ fun JarvisBaseplatePanel(
               showBrackets = true,
               bracketScale = 0.42f,
               plateAlpha = 0.90f,
+              style = style,
             )
             .clickable {
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -537,8 +541,8 @@ fun JarvisBaseplatePanel(
           Row(
             modifier = Modifier
               .fillMaxWidth()
-              .background(Color(0xEB050508))
-              .border(0.8.dp, (if (isErr) Crimson else bannerColor).copy(alpha = 0.72f))
+              .background(style.voidTop.copy(alpha = 0.92f))
+              .border(0.8.dp, (if (isErr) Crimson else style.graphicAccent).copy(alpha = 0.78f))
               .clickable { JarvisRuntime.clearBanner() }
               .padding(horizontal = 10.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -599,6 +603,7 @@ fun JarvisBaseplatePanel(
                 focused = false,
                 showBrackets = false,
                 plateAlpha = 0.80f,
+                style = style,
               )
               .padding(14.dp),
             contentAlignment = Alignment.Center,
@@ -637,7 +642,9 @@ private fun Tier3BiometricApprovalCard(
   onDeny: (Tier3ApprovalRequest) -> Unit,
   onTriggerTest: () -> Unit,
 ) {
-  val cardAccent = if (pending != null) WarmSunAccent else accent
+  val style = LocalLauncherStyle.current
+  val warnAccent = style.semanticWarn
+  val cardAccent = if (pending != null) warnAccent else accent
   Column(
     modifier = Modifier
       .fillMaxWidth()
@@ -647,6 +654,7 @@ private fun Tier3BiometricApprovalCard(
         showBrackets = true,
         bracketScale = 0.56f,
         plateAlpha = 0.90f,
+        style = style,
       )
       .padding(10.dp),
     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -658,7 +666,7 @@ private fun Tier3BiometricApprovalCard(
     ) {
       Text(
         text = pending?.actionTitle ?: "TIER 3 // BIOMETRIC GATE",
-        color = if (pending != null) WarmSunAccent else TextSilver,
+        color = if (pending != null) warnAccent else TextSilver,
         fontFamily = FontFamily.Monospace,
         fontSize = 9.5.sp,
         fontWeight = FontWeight.Bold,
@@ -726,6 +734,7 @@ private fun CommandTestBarCard(
   onRun: () -> Unit,
   onStop: () -> Unit,
 ) {
+  val style = LocalLauncherStyle.current
   Column(
     modifier = Modifier
       .fillMaxWidth()
@@ -735,6 +744,7 @@ private fun CommandTestBarCard(
         showBrackets = true,
         bracketScale = 0.56f,
         plateAlpha = 0.88f,
+        style = style,
       )
       .padding(10.dp),
     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -835,6 +845,7 @@ private fun TrustedContactsCard(
   onToggle: (TrustedContact, Boolean) -> Unit,
   onDelete: (TrustedContact) -> Unit,
 ) {
+  val style = LocalLauncherStyle.current
   Column(
     modifier = Modifier
       .fillMaxWidth()
@@ -844,6 +855,7 @@ private fun TrustedContactsCard(
         showBrackets = true,
         bracketScale = 0.52f,
         plateAlpha = 0.88f,
+        style = style,
       )
       .padding(10.dp),
     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -918,7 +930,7 @@ private fun TrustedContactsCard(
           Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             ActionChip(
               text = if (contact.autoReplyEnabled) "TRUSTED" else "OFF",
-              tint = if (contact.autoReplyEnabled) accent else WarmSunAccent,
+              tint = if (contact.autoReplyEnabled) accent else style.semanticWarn,
               enabled = true,
               onClick = { onToggle(contact, !contact.autoReplyEnabled) },
             )
@@ -945,9 +957,10 @@ private fun StatusPill(
   accent: Color,
   onClick: () -> Unit,
 ) {
+  val style = LocalLauncherStyle.current
   val tint = when (state) {
     PillState.OK -> accent
-    PillState.WARN -> WarmSunAccent
+    PillState.WARN -> style.semanticWarn
     PillState.FAULT -> CrimsonBright
   }
   val plateAccent = if (state == PillState.FAULT) Crimson else tint
@@ -959,6 +972,7 @@ private fun StatusPill(
         showBrackets = true,
         bracketScale = 0.36f,
         plateAlpha = 0.86f,
+        style = style,
       )
       .clickable(onClick = onClick)
       .padding(horizontal = 9.dp, vertical = 5.dp),
@@ -992,6 +1006,7 @@ private fun ApiKeyVaultCard(
   onSave: () -> Unit,
   onClear: () -> Unit,
 ) {
+  val style = LocalLauncherStyle.current
   Column(
     modifier = Modifier
       .fillMaxWidth()
@@ -1001,6 +1016,7 @@ private fun ApiKeyVaultCard(
         showBrackets = true,
         bracketScale = 0.52f,
         plateAlpha = 0.88f,
+        style = style,
       )
       .padding(10.dp),
     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1019,7 +1035,7 @@ private fun ApiKeyVaultCard(
       )
       Text(
         text = if (uiState.hasApiKey) "SEALED ${uiState.maskedApiKey}" else "UNSET",
-        color = if (uiState.hasApiKey) accent else WarmSunAccent,
+        color = if (uiState.hasApiKey) accent else style.semanticWarn,
         fontFamily = FontFamily.Monospace,
         fontSize = 9.5.sp,
         fontWeight = FontWeight.Bold,
@@ -1108,9 +1124,10 @@ private fun JarvisEventCard(
     TriageStatus.FAILED -> "FAULT"
     TriageStatus.TRIAGED -> event.triage?.urgency?.uppercase() ?: "LOW"
   }
+  val style = LocalLauncherStyle.current
   val urgencyColor = when (urgencyLabel) {
     "CRITICAL", "FAULT" -> CrimsonBright
-    "HIGH", "NO KEY" -> WarmSunAccent
+    "HIGH", "NO KEY" -> style.semanticWarn
     "MEDIUM" -> accent
     else -> TextSilver
   }
@@ -1128,6 +1145,7 @@ private fun JarvisEventCard(
         showBrackets = true,
         bracketScale = 0.48f,
         plateAlpha = 0.88f,
+        style = style,
       )
       .padding(10.dp),
     verticalArrangement = Arrangement.spacedBy(5.dp),
@@ -1279,6 +1297,8 @@ private fun SavedPlacesContextDebugCard(
   onSimStallMaps: () -> Unit,
   onSimDiningQr: () -> Unit,
 ) {
+  val style = LocalLauncherStyle.current
+  val warnAccent = style.semanticWarn
   val ambient = uiState.ambientContext
   val currentSsid = ambient.wifiSsid?.trim().orEmpty()
   val awayMins = ambient.awayDwellSinceMs?.let { ((System.currentTimeMillis() - it) / 60_000L).coerceAtLeast(0L) }
@@ -1287,11 +1307,12 @@ private fun SavedPlacesContextDebugCard(
     modifier = Modifier
       .fillMaxWidth()
       .starkHudPlate(
-        accent = if (ambient.focusQuietActive) WarmSunAccent else accent,
+        accent = if (ambient.focusQuietActive) warnAccent else accent,
         focused = ambient.focusQuietActive,
         showBrackets = true,
         bracketScale = 0.56f,
         plateAlpha = 0.88f,
+        style = style,
       )
       .padding(10.dp),
     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1310,7 +1331,7 @@ private fun SavedPlacesContextDebugCard(
       )
       Text(
         text = if (ambient.focusQuietActive) "${ambient.placeTag.name} · QUIET" else "${ambient.motionState.name}",
-        color = if (ambient.focusQuietActive) WarmSunAccent else accent,
+        color = if (ambient.focusQuietActive) warnAccent else accent,
         fontFamily = FontFamily.Monospace,
         fontSize = 9.sp,
         fontWeight = FontWeight.Bold,
@@ -1320,8 +1341,8 @@ private fun SavedPlacesContextDebugCard(
     Column(
       modifier = Modifier
         .fillMaxWidth()
-        .background(Color(0xD9050508))
-        .border(0.7.dp, accent.copy(alpha = 0.25f))
+        .background(style.voidTop.copy(alpha = 0.88f))
+        .border(0.7.dp, accent.copy(alpha = 0.30f))
         .padding(8.dp),
       verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
@@ -1382,7 +1403,7 @@ private fun SavedPlacesContextDebugCard(
         )
         ActionChip(
           text = "TAG '${currentSsid.take(12)}' CAMPUS",
-          tint = WarmSunAccent,
+          tint = warnAccent,
           enabled = true,
           onClick = { onTagPlace(currentSsid, PlaceTag.CAMPUS) },
         )
@@ -1435,7 +1456,7 @@ private fun SavedPlacesContextDebugCard(
       )
       ActionChip(
         text = "+CAMPUS",
-        tint = WarmSunAccent,
+        tint = warnAccent,
         enabled = draftSsid.isNotBlank(),
         onClick = { onTagPlace(draftSsid, PlaceTag.CAMPUS) },
       )
@@ -1450,7 +1471,7 @@ private fun SavedPlacesContextDebugCard(
         uiState.savedPlaces.forEach { place ->
           ActionChip(
             text = "${place.placeTag.name}:${place.displaySsid} ×",
-            tint = if (place.placeTag == PlaceTag.HOME) accent else WarmSunAccent,
+            tint = if (place.placeTag == PlaceTag.HOME) accent else warnAccent,
             enabled = true,
             onClick = { onDeletePlace(place.ssidNormalized) },
           )
@@ -1477,7 +1498,7 @@ private fun SavedPlacesContextDebugCard(
       )
       ActionChip(
         text = "SIM DINING -> QR",
-        tint = WarmSunAccent,
+        tint = warnAccent,
         enabled = true,
         onClick = onSimDiningQr,
       )
@@ -1485,10 +1506,13 @@ private fun SavedPlacesContextDebugCard(
   }
 }
 
-private fun Modifier.jarvisInputPlate(accent: Color): Modifier =
-  this
-    .background(Color(0xF0050505))
-    .border(0.8.dp, accent.copy(alpha = 0.45f))
+@Composable
+private fun Modifier.jarvisInputPlate(accent: Color): Modifier {
+  val style = LocalLauncherStyle.current
+  return this
+    .background(style.voidTop.copy(alpha = 0.94f))
+    .border(0.8.dp, accent.copy(alpha = style.idleBorderAlpha))
+}
 
 @Composable
 private fun ActionChip(
@@ -1497,13 +1521,14 @@ private fun ActionChip(
   enabled: Boolean,
   onClick: () -> Unit,
 ) {
+  val style = LocalLauncherStyle.current
   val borderTint = if (tint == CrimsonBright) Crimson else tint
   Box(
     modifier = Modifier
-      .background(if (enabled) Color(0xE60A0D12) else Color(0x99050505))
+      .background(if (enabled) style.voidBottom.copy(alpha = 0.92f) else style.voidTop.copy(alpha = 0.65f))
       .border(
         0.8.dp,
-        if (enabled) borderTint.copy(alpha = 0.72f) else Color.White.copy(alpha = 0.14f),
+        if (enabled) borderTint.copy(alpha = style.focusedBorderAlpha * 0.85f) else Color.White.copy(alpha = 0.16f),
       )
       .clickable(enabled = enabled, onClick = onClick)
       .padding(horizontal = 8.dp, vertical = 6.dp),

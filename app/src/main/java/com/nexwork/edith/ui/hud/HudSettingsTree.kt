@@ -82,6 +82,7 @@ import com.nexwork.edith.jarvis.core.PlaceTag
 import com.nexwork.edith.jarvis.core.TriageStatus
 import com.nexwork.edith.jarvis.security.BiometricPromptHelper
 import com.nexwork.edith.model.DeviceTelemetry
+import com.nexwork.edith.model.HudIntensityPreset
 import com.nexwork.edith.model.JarvisSettingsSection
 import com.nexwork.edith.model.LauncherAccentPreset
 import com.nexwork.edith.model.LauncherFontStyle
@@ -90,11 +91,10 @@ import com.nexwork.edith.model.LauncherSettingsSection
 import com.nexwork.edith.model.LiveWeather
 import com.nexwork.edith.model.SettingsStage
 import com.nexwork.edith.theme.CrimsonBright
+import com.nexwork.edith.theme.LauncherStyleTokens
 import com.nexwork.edith.theme.LocalLauncherStyle
-import com.nexwork.edith.theme.ObsidianBgTop
 import com.nexwork.edith.theme.TextPureWhite
 import com.nexwork.edith.theme.TextSilver
-import com.nexwork.edith.theme.WarmSunAccent
 import com.nexwork.edith.theme.toColor
 import java.util.Date
 import kotlin.math.abs
@@ -104,11 +104,6 @@ import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.tan
-
-private val TreeRailColor = Color(0xFF64748B)
-private val FocusedPlateBrush = Brush.verticalGradient(listOf(Color(0xD9050505), Color(0xD9111111)))
-private val UnfocusedPlateBrush = Brush.verticalGradient(listOf(Color(0xB8050505), Color(0xB8111111)))
-private val ContainerPlateBrush = Brush.verticalGradient(listOf(Color(0xE0050505), Color(0xE0111111)))
 
 /**
  * Shared pixel-exact geometry derived from screen dimensions and the orbital globe horizon
@@ -229,6 +224,7 @@ fun HudSettingsTree(
   onSelectSection: (LauncherSettingsSection?) -> Unit,
   onBackStep: () -> Unit,
   onAccentChange: (LauncherAccentPreset) -> Unit,
+  onIntensityChange: (HudIntensityPreset) -> Unit = {},
   onFontChange: (LauncherFontStyle) -> Unit,
   onFontScaleChange: (Float) -> Unit,
   onUse24HourChange: (Boolean) -> Unit,
@@ -285,6 +281,7 @@ fun HudSettingsTree(
       onOpenJarvisDrawer = onOpenJarvisDrawer,
       onBackStep = onBackStep,
       onAccentChange = onAccentChange,
+      onIntensityChange = onIntensityChange,
       onFontChange = onFontChange,
       onFontScaleChange = onFontScaleChange,
       onUse24HourChange = onUse24HourChange,
@@ -315,7 +312,8 @@ fun HudSettingsRootLayer(
   choreographer: HudSettingsChoreographyController = rememberHudSettingsChoreographer(stage),
   modifier: Modifier = Modifier,
 ) {
-  val accent = LocalLauncherStyle.current.accent
+  val style = LocalLauncherStyle.current
+  val accent = style.accent
   val haptic = LocalHapticFeedback.current
   val geo = rememberSettingsGeometry(screenWidth, screenHeight)
 
@@ -357,7 +355,7 @@ fun HudSettingsRootLayer(
         val sweepDeg = geo.maxThetaDeg * arcP
 
         drawArc(
-          color = accent.copy(alpha = 0.76f * arcAlpha),
+          color = style.graphicAccent.copy(alpha = style.railAlpha * arcAlpha),
           startAngle = -90f - geo.maxThetaDeg,
           sweepAngle = sweepDeg,
           useCenter = false,
@@ -366,7 +364,7 @@ fun HudSettingsRootLayer(
           style = arcStroke,
         )
         drawArc(
-          color = accent.copy(alpha = 0.76f * arcAlpha),
+          color = style.graphicAccent.copy(alpha = style.railAlpha * arcAlpha),
           startAngle = -90f + geo.maxThetaDeg,
           sweepAngle = -sweepDeg,
           useCenter = false,
@@ -403,7 +401,7 @@ fun HudSettingsRootLayer(
       if (stemP > 0.005f) {
         val curY = geo.arcZenithY + (geo.rootStemSplitY - geo.arcZenithY) * stemP
         drawLine(
-          color = accent.copy(alpha = 0.85f),
+          color = style.graphicAccent.copy(alpha = style.focusedBorderAlpha),
           start = Offset(geo.cx, geo.arcZenithY),
           end = Offset(geo.cx, curY),
           strokeWidth = 1.2f.dp.toPx(),
@@ -430,9 +428,9 @@ fun HudSettingsRootLayer(
           )
           if (branchP > 0.005f) {
             val lineColor = if (spec.isBuilt) {
-              accent.copy(alpha = 0.86f)
+              style.graphicAccent.copy(alpha = style.focusedBorderAlpha)
             } else {
-              TreeRailColor.copy(alpha = 0.72f)
+              style.orbitalMuted.copy(alpha = style.railAlpha)
             }
             val tip = drawOrthogonalPolyline(
               points = listOf(
@@ -463,7 +461,7 @@ fun HudSettingsRootLayer(
           CompactHudCard(
             eyebrow = spec.eyebrow,
             title = spec.title,
-            pipColor = if (spec.isBuilt) accent else TreeRailColor.copy(alpha = 0.65f),
+            pipColor = if (spec.isBuilt) accent else style.orbitalMuted.copy(alpha = style.railAlpha),
             focused = spec.isBuilt,
             accent = accent,
             titleSizeSp = 11.5f,
@@ -502,6 +500,7 @@ fun HudSettingsOverlayLayer(
   onSelectSection: (LauncherSettingsSection?) -> Unit,
   onBackStep: () -> Unit,
   onAccentChange: (LauncherAccentPreset) -> Unit,
+  onIntensityChange: (HudIntensityPreset) -> Unit = {},
   onFontChange: (LauncherFontStyle) -> Unit,
   onFontScaleChange: (Float) -> Unit,
   onUse24HourChange: (Boolean) -> Unit,
@@ -518,7 +517,8 @@ fun HudSettingsOverlayLayer(
   onSelectJarvisSection: (JarvisSettingsSection?) -> Unit = {},
   onOpenJarvisDrawer: () -> Unit = {},
 ) {
-  val accent = LocalLauncherStyle.current.accent
+  val style = LocalLauncherStyle.current
+  val accent = style.accent
   val haptic = LocalHapticFeedback.current
   val density = LocalDensity.current
   val geo = rememberSettingsGeometry(screenWidth, screenHeight)
@@ -566,6 +566,10 @@ fun HudSettingsOverlayLayer(
           onAccentChange = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             onAccentChange(it)
+          },
+          onIntensityChange = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onIntensityChange(it)
           },
           onFontChange = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -678,7 +682,8 @@ fun HudSettingsOverlayLayer(
             width = cardWPx,
             height = cardHPx,
             progress = boxP,
-            accent = accent,
+            accent = style.graphicAccent,
+            style = style,
           )
         }
       }
@@ -732,6 +737,7 @@ private fun <T> OrthogonalBranchTreeStage(
   onSelectSection: (T?) -> Unit,
   detailContent: @Composable (section: T, reveal: () -> Float, enabled: Boolean) -> Unit,
 ) {
+  val style = LocalLauncherStyle.current
   val haptic = LocalHapticFeedback.current
   val density = LocalDensity.current
 
@@ -777,7 +783,7 @@ private fun <T> OrthogonalBranchTreeStage(
               Offset(trunkXPx, rowMidY(0)),
             ),
             progress = stemP,
-            color = accent.copy(alpha = 0.88f),
+            color = style.graphicAccent.copy(alpha = style.focusedBorderAlpha),
             strokeWidth = 1.2f.dp.toPx(),
           )
           if (stemP < 0.97f) drawLaserTip(tip, accent)
@@ -795,7 +801,7 @@ private fun <T> OrthogonalBranchTreeStage(
                 Offset(leftCardXPx, midY),
               ),
               progress = branchP,
-              color = if (isSelected) accent else TreeRailColor.copy(alpha = 0.84f),
+              color = if (isSelected) style.graphicAccent else style.orbitalMuted.copy(alpha = style.railAlpha),
               strokeWidth = 1.15f.dp.toPx(),
             )
             if (branchP < 0.96f) drawLaserTip(tip, accent)
@@ -819,7 +825,7 @@ private fun <T> OrthogonalBranchTreeStage(
               Offset(rightCardLeftPx, targetY),
             ),
             progress = linkP,
-            color = accent.copy(alpha = 0.92f),
+            color = style.graphicAccent.copy(alpha = style.focusedBorderAlpha),
             strokeWidth = 1.25f.dp.toPx(),
           )
           if (linkP < 0.97f) drawLaserTip(tip, accent)
@@ -832,7 +838,8 @@ private fun <T> OrthogonalBranchTreeStage(
             width = rightCardWPx,
             height = rightCardHPx,
             progress = boxP,
-            accent = accent,
+            accent = style.graphicAccent,
+            style = style,
           )
         }
       }
@@ -852,7 +859,7 @@ private fun <T> OrthogonalBranchTreeStage(
         CompactHudCard(
           eyebrow = tagOf(section),
           title = titleOf(section),
-          pipColor = if (isSelected) accent else TreeRailColor.copy(alpha = 0.55f),
+          pipColor = if (isSelected) accent else style.orbitalMuted.copy(alpha = style.railAlpha),
           focused = isSelected,
           accent = accent,
           titleSizeSp = 10.6f,
@@ -895,6 +902,7 @@ private fun LauncherDetailCardContent(
   otaState: OtaState,
   accent: Color,
   onAccentChange: (LauncherAccentPreset) -> Unit,
+  onIntensityChange: (HudIntensityPreset) -> Unit,
   onFontChange: (LauncherFontStyle) -> Unit,
   onFontScaleChange: (Float) -> Unit,
   onUse24HourChange: (Boolean) -> Unit,
@@ -923,7 +931,8 @@ private fun LauncherDetailCardContent(
     when (section) {
       LauncherSettingsSection.THEME_COLOR -> {
         val presets = LauncherAccentPreset.entries
-        val totalSteps = presets.size + 1
+        val intensities = HudIntensityPreset.entries
+        val totalSteps = presets.size + 3
         presets.forEachIndexed { idx, preset ->
           val presetColor = preset.toColor()
           val selected = settings.accentPreset == preset
@@ -933,12 +942,36 @@ private fun LauncherDetailCardContent(
             swatchColor = presetColor,
             focused = selected,
             accent = presetColor,
-            titleSizeSp = 10.8f,
-            reveal = { staggeredReveal(reveal(), idx + 1, totalSteps, stagger = 0.16f) },
+            titleSizeSp = 10.0f,
+            reveal = { staggeredReveal(reveal(), idx + 1, totalSteps, stagger = 0.12f) },
             enabled = enabled,
-            modifier = Modifier.fillMaxWidth().height(46.dp),
+            modifier = Modifier.fillMaxWidth().height(38.dp),
             onClick = { onAccentChange(preset) },
           )
+        }
+        Spacer(Modifier.height(1.dp))
+        HudMicroLabel(
+          text = "GLOW INTENSITY",
+          reveal = { staggeredReveal(reveal(), presets.size + 1, totalSteps, stagger = 0.12f) },
+        )
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+          intensities.forEachIndexed { iIdx, preset ->
+            val selected = settings.hudIntensity == preset
+            CompactHudCard(
+              title = preset.code,
+              focused = selected,
+              accent = accent,
+              titleSizeSp = 9.5f,
+              centerText = true,
+              reveal = { staggeredReveal(reveal(), presets.size + 2, totalSteps, stagger = 0.12f) },
+              enabled = enabled,
+              modifier = Modifier.weight(1f).height(34.dp),
+              onClick = { onIntensityChange(preset) },
+            )
+          }
         }
       }
 
@@ -1200,15 +1233,16 @@ private fun JarvisDetailCardContent(
       accent = accent,
     )
 
+    val warnAccent = LocalLauncherStyle.current.semanticWarn
     val pendingTier3 = uiState.pendingTier3Approval
     if (pendingTier3 != null) {
       CompactHudCard(
         eyebrow = pendingTier3.actionTitle,
         title = pendingTier3.actionSummary.uppercase(),
         badge = "BIO",
-        pipColor = WarmSunAccent,
+        pipColor = warnAccent,
         focused = true,
-        accent = WarmSunAccent,
+        accent = warnAccent,
         titleSizeSp = 9.4f,
         reveal = { staggeredReveal(reveal(), 1, 5, stagger = 0.14f) },
         enabled = enabled,
@@ -1289,9 +1323,9 @@ private fun JarvisDetailCardContent(
           eyebrow = "AMBIENT // ${ambient.placeTag.name}${if (ambient.focusQuietActive) " · QUIET" else ""}",
           title = "${ambient.motionState.name} · ${currentSsid.ifEmpty { "NO WIFI" }.uppercase()}",
           badge = "${uiState.upcomingDestinations.size}D",
-          pipColor = if (ambient.focusQuietActive) WarmSunAccent else accent,
+          pipColor = if (ambient.focusQuietActive) warnAccent else accent,
           focused = ambient.focusQuietActive,
-          accent = if (ambient.focusQuietActive) WarmSunAccent else accent,
+          accent = if (ambient.focusQuietActive) warnAccent else accent,
           titleSizeSp = 9.6f,
           reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.12f) },
           enabled = enabled,
@@ -1359,7 +1393,7 @@ private fun JarvisDetailCardContent(
           title = "BIOMETRIC CHECK",
           badge = "TEST",
           focused = uiState.pendingTier3Approval != null,
-          accent = WarmSunAccent,
+          accent = warnAccent,
           titleSizeSp = 9.8f,
           reveal = { staggeredReveal(reveal(), 4, totalSteps, stagger = 0.12f) },
           enabled = enabled,
@@ -1437,7 +1471,7 @@ private fun JarvisDetailCardContent(
         }
         val listenerTint = when {
           listenerOk -> accent
-          uiState.notificationListenerEnabled -> WarmSunAccent
+          uiState.notificationListenerEnabled -> warnAccent
           else -> CrimsonBright
         }
         CompactHudCard(
@@ -1464,7 +1498,7 @@ private fun JarvisDetailCardContent(
         }
         val a11yTint = when {
           a11yOk -> accent
-          uiState.accessibilityEnabled -> WarmSunAccent
+          uiState.accessibilityEnabled -> warnAccent
           else -> CrimsonBright
         }
         CompactHudCard(
@@ -1495,7 +1529,7 @@ private fun JarvisDetailCardContent(
         }
         val ctxTint = when {
           ctxAllOk -> accent
-          ctxAnyOk -> WarmSunAccent
+          ctxAnyOk -> warnAccent
           else -> CrimsonBright
         }
         CompactHudCard(
@@ -1515,9 +1549,9 @@ private fun JarvisDetailCardContent(
           eyebrow = "DOZE POLICY",
           title = if (uiState.batteryUnrestricted) "UNRESTRICTED" else "OPTIMIZED",
           badge = if (uiState.batteryUnrestricted) "OK" else "ALLOW",
-          pipColor = if (uiState.batteryUnrestricted) accent else WarmSunAccent,
+          pipColor = if (uiState.batteryUnrestricted) accent else warnAccent,
           focused = uiState.batteryUnrestricted,
-          accent = if (uiState.batteryUnrestricted) accent else WarmSunAccent,
+          accent = if (uiState.batteryUnrestricted) accent else warnAccent,
           titleSizeSp = 10.2f,
           reveal = { staggeredReveal(reveal(), 4, totalSteps, stagger = 0.14f) },
           enabled = enabled,
@@ -1550,9 +1584,9 @@ private fun JarvisDetailCardContent(
           eyebrow = "AES-256 VAULT",
           title = if (uiState.hasApiKey) uiState.maskedApiKey else "UNCONFIGURED",
           badge = if (uiState.hasApiKey) "SEALED" else "UNSET",
-          pipColor = if (uiState.hasApiKey) accent else WarmSunAccent,
+          pipColor = if (uiState.hasApiKey) accent else warnAccent,
           focused = uiState.hasApiKey,
-          accent = if (uiState.hasApiKey) accent else WarmSunAccent,
+          accent = if (uiState.hasApiKey) accent else warnAccent,
           titleSizeSp = 10.0f,
           reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.14f) },
           enabled = false,
@@ -1735,9 +1769,9 @@ private fun JarvisDetailCardContent(
             eyebrow = contact.packageName.substringAfterLast('.').ifBlank { "ANY APP" }.uppercase(),
             title = contact.displayName.uppercase(),
             badge = if (contact.autoReplyEnabled) "TRUST" else "OFF",
-            pipColor = if (contact.autoReplyEnabled) accent else WarmSunAccent,
+            pipColor = if (contact.autoReplyEnabled) accent else warnAccent,
             focused = contact.autoReplyEnabled,
-            accent = if (contact.autoReplyEnabled) accent else WarmSunAccent,
+            accent = if (contact.autoReplyEnabled) accent else warnAccent,
             titleSizeSp = 9.8f,
             reveal = { staggeredReveal(reveal(), (idx + 2).coerceAtMost(totalSteps - 1), totalSteps, stagger = 0.12f) },
             enabled = enabled,
@@ -1805,14 +1839,15 @@ private fun HudSharpTextInput(
   passwordMask: Boolean = false,
   onDone: (() -> Unit)? = null,
 ) {
+  val style = LocalLauncherStyle.current
   val p = reveal().coerceIn(0f, 1f)
   if (p <= 0.01f) return
   Box(
     modifier = Modifier
       .fillMaxWidth()
       .graphicsLayer { alpha = phase(p, 0.08f, 0.45f) }
-      .background(ObsidianBgTop.copy(alpha = 0.90f))
-      .border(1.dp, accent.copy(alpha = 0.48f))
+      .background(style.voidTop.copy(alpha = 0.92f))
+      .border(1.dp, accent.copy(alpha = style.idleBorderAlpha))
       .drawWithCache {
         val bar = 1.dp.toPx()
         val halfPerim = (size.width + size.height).coerceAtLeast(1f)
@@ -1884,9 +1919,10 @@ private fun HudJarvisEventCard(
     TriageStatus.FAILED -> "FAULT"
     TriageStatus.TRIAGED -> event.triage?.urgency?.uppercase() ?: "LOW"
   }
+  val style = LocalLauncherStyle.current
   val urgencyColor = when (urgencyLabel) {
     "CRITICAL", "FAULT" -> CrimsonBright
-    "HIGH", "NO KEY" -> WarmSunAccent
+    "HIGH", "NO KEY" -> style.semanticWarn
     "MEDIUM" -> accent
     else -> TextSilver
   }
@@ -1903,14 +1939,17 @@ private fun HudJarvisEventCard(
         val bar = 1.dp.toPx()
         val halfPerim = (size.width + size.height).coerceAtLeast(1f)
         val cornerAt = floatArrayOf(0f, size.width / halfPerim, 0f, size.width / halfPerim)
+        val plateBrush = Brush.verticalGradient(
+          listOf(style.voidTop.copy(alpha = 0.78f), style.voidBottom.copy(alpha = 0.78f)),
+        )
         onDrawBehind {
           val pr = reveal().coerceIn(0f, 1f)
           if (pr <= 0.005f) return@onDrawBehind
           val clip = hudEaseOutCubic(phase(pr, 0f, 0.30f))
           if (clip < 0.999f) {
-            clipRect(right = size.width * clip) { drawRect(brush = UnfocusedPlateBrush) }
+            clipRect(right = size.width * clip) { drawRect(brush = plateBrush) }
           } else {
-            drawRect(brush = UnfocusedPlateBrush)
+            drawRect(brush = plateBrush)
           }
           drawCompactHudBrackets(
             trace = pr,
@@ -2058,6 +2097,8 @@ private fun CompactHudCard(
   onClick: (() -> Unit)? = null,
 ) {
   val density = LocalDensity.current
+  val style = LocalLauncherStyle.current
+  val curStyle = rememberUpdatedState(style)
   val curAccent = rememberUpdatedState(accent)
   val curFocused = rememberUpdatedState(focused)
   val curSwatch = rememberUpdatedState(swatchColor)
@@ -2166,6 +2207,7 @@ private fun CompactHudCard(
           if (p <= 0.001f) return@onDrawBehind
 
           val isFocused = curFocused.value
+          val activeStyle = curStyle.value
           val activeAccent = curAccent.value
           val trace = phase(p, 0f, 1.00f)
           val plateClip = hudEaseOutCubic(phase(p, 0f, 0.30f))
@@ -2174,13 +2216,24 @@ private fun CompactHudCard(
           val badgeP = phase(p, 0.18f, 0.64f)
           val pipP = phase(p, 0.06f, 0.38f)
 
-          val plateBrush = if (isFocused) FocusedPlateBrush else UnfocusedPlateBrush
+          val plateAlpha = if (isFocused) 0.90f else 0.78f
+          val plateBrush = Brush.verticalGradient(
+            listOf(activeStyle.voidTop.copy(alpha = plateAlpha), activeStyle.voidBottom.copy(alpha = plateAlpha)),
+          )
+          val sheenBrush = Brush.verticalGradient(
+            listOf(
+              activeAccent.copy(alpha = if (isFocused) activeStyle.plateTintAlpha * 1.45f else activeStyle.plateTintAlpha * 0.55f),
+              Color.Transparent,
+            ),
+          )
           if (plateClip < 0.999f) {
             clipRect(right = size.width * plateClip) {
               drawRect(brush = plateBrush)
+              drawRect(brush = sheenBrush)
             }
           } else {
             drawRect(brush = plateBrush)
+            drawRect(brush = sheenBrush)
           }
 
           curSwatch.value?.let { sw ->
@@ -2247,15 +2300,15 @@ private fun CompactHudCard(
             drawDecrypt(bText, badgeP, seed + 43, badgePaint, badgeX, badgeBaseline)
           }
 
-          val bracketTint = Color.White.copy(alpha = if (isFocused) 0.96f else 0.44f)
+          val bracketTint = Color.White.copy(alpha = if (isFocused) 0.96f else 0.56f)
           drawCompactHudBrackets(
             trace = trace,
             cornerAt = cornerAt,
             barPx = bar,
             scale = bracketScale,
             tint = bracketTint,
-            trTint = if (isFocused) activeAccent.copy(alpha = 0.90f) else bracketTint,
-            blTint = if (isFocused) activeAccent.copy(alpha = 0.48f) else bracketTint,
+            trTint = if (isFocused) activeAccent.copy(alpha = activeStyle.focusedBorderAlpha) else activeAccent.copy(alpha = activeStyle.idleBorderAlpha),
+            blTint = if (isFocused) activeAccent.copy(alpha = activeStyle.idleBorderAlpha) else bracketTint,
           )
 
           drawDualTracedRect(
@@ -2263,7 +2316,11 @@ private fun CompactHudCard(
             height = keylineH,
             progress = trace,
             strokeWidth = stroke,
-            color = if (isFocused) activeAccent.copy(alpha = 0.88f) else Color.White.copy(alpha = 0.30f),
+            color = if (isFocused) {
+              activeAccent.copy(alpha = activeStyle.focusedBorderAlpha)
+            } else {
+              activeAccent.copy(alpha = activeStyle.idleBorderAlpha * 0.72f)
+            },
             head = if (trace in 0.02f..0.98f) 1f else 0f,
           )
         }
@@ -2279,6 +2336,8 @@ private fun HudHeaderDecryptBlock(
   accent: Color,
 ) {
   val density = LocalDensity.current
+  val style = LocalLauncherStyle.current
+  val curStyle = rememberUpdatedState(style)
   val curAccent = rememberUpdatedState(accent)
   val curEyebrow = rememberUpdatedState(eyebrow)
   val curTitle = rememberUpdatedState(title)
@@ -2361,6 +2420,7 @@ private fun DrawScope.drawHudContainerFrame(
   height: Float,
   progress: Float,
   accent: Color,
+  style: LauncherStyleTokens,
 ) {
   if (width <= 2f || height <= 2f || progress <= 0.005f) return
   val stroke = 1.dp.toPx()
@@ -2369,23 +2429,31 @@ private fun DrawScope.drawHudContainerFrame(
   val midCorner = width / halfPerim
   val cornerAt = floatArrayOf(0f, midCorner, 0f, midCorner)
   val plateClip = hudEaseOutCubic(phase(progress, 0f, 0.28f))
+  val plateBrush = Brush.verticalGradient(
+    listOf(style.voidTop.copy(alpha = 0.92f), style.voidBottom.copy(alpha = 0.92f)),
+  )
+  val sheenBrush = Brush.verticalGradient(
+    listOf(accent.copy(alpha = style.plateTintAlpha * 0.85f), Color.Transparent),
+  )
 
   withTransform({ translate(left, top) }) {
     if (plateClip < 0.999f) {
       clipRect(right = width * plateClip) {
-        drawRect(brush = ContainerPlateBrush, size = Size(width, height))
+        drawRect(brush = plateBrush, size = Size(width, height))
+        drawRect(brush = sheenBrush, size = Size(width, height))
       }
     } else {
-      drawRect(brush = ContainerPlateBrush, size = Size(width, height))
+      drawRect(brush = plateBrush, size = Size(width, height))
+      drawRect(brush = sheenBrush, size = Size(width, height))
     }
     drawCompactHudBrackets(
       trace = progress,
       cornerAt = cornerAt,
       barPx = bar,
       scale = 0.85f,
-      tint = Color.White.copy(alpha = 0.92f),
-      trTint = accent.copy(alpha = 0.88f),
-      blTint = accent.copy(alpha = 0.45f),
+      tint = Color.White.copy(alpha = 0.94f),
+      trTint = accent.copy(alpha = style.focusedBorderAlpha),
+      blTint = accent.copy(alpha = style.idleBorderAlpha),
       wOverride = width,
       hOverride = height,
     )
@@ -2394,7 +2462,7 @@ private fun DrawScope.drawHudContainerFrame(
       height = (height - stroke).coerceAtLeast(1f),
       progress = progress,
       strokeWidth = stroke,
-      color = accent.copy(alpha = 0.82f),
+      color = accent.copy(alpha = style.focusedBorderAlpha * 0.92f),
       head = if (progress in 0.02f..0.98f) 1f else 0f,
     )
   }

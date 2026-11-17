@@ -45,8 +45,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-private val OrbitalSlate = Color(0xFF64748B)
-
 private val Months = arrayOf(
   "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
 )
@@ -335,7 +333,11 @@ fun HudClock(
               }
               drawPath(
                 path = arcPath,
-                color = if (isCrimsonPreset) Crimson.copy(alpha = 0.62f * arcAlpha) else accentColor.copy(alpha = 0.42f * arcAlpha),
+                color = if (isCrimsonPreset) {
+                  style.graphicAccent.copy(alpha = style.railAlpha * arcAlpha)
+                } else {
+                  accentColor.copy(alpha = style.railAlpha * 0.88f * arcAlpha)
+                },
                 style = arcStroke,
               )
 
@@ -385,7 +387,7 @@ fun HudClock(
               val spineMidY = Y(33.5f)
               val spineHalf = Y(14.5f) * timeP
               drawLine(
-                color = OrbitalSlate.copy(alpha = 0.35f * timeAlpha),
+                color = style.orbitalMuted.copy(alpha = (style.railAlpha * 0.72f).coerceAtMost(0.82f) * timeAlpha),
                 start = Offset(cx, spineMidY - spineHalf),
                 end = Offset(cx, spineMidY + spineHalf),
                 strokeWidth = spineStroke,
@@ -438,7 +440,7 @@ fun HudClock(
                 val tickColor = when {
                   isHead -> accentColor.copy(alpha = localPop)
                   isPassed -> Color.White.copy(alpha = (if (isMajor) 0.65f else 0.34f) * localPop)
-                  else -> OrbitalSlate.copy(alpha = (if (isMajor) 0.24f else 0.12f) * localPop)
+                  else -> style.orbitalMuted.copy(alpha = (if (isMajor) 0.42f else 0.22f) * localPop)
                 }
 
                 drawLine(

@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nexwork.edith.theme.LauncherStyleTokens
 import kotlin.math.sin
 
 /**
@@ -229,23 +230,37 @@ fun Modifier.starkHudPlate(
   focused: Boolean = false,
   showBrackets: Boolean = true,
   bracketScale: Float = 0.56f,
-  plateAlpha: Float = 0.88f,
+  plateAlpha: Float = 0.90f,
+  style: LauncherStyleTokens? = null,
 ): Modifier = drawWithCache {
-  val strokePx = 0.9f.dp.toPx()
-  val barPx = 1.15f.dp.toPx()
-  val keylineColor = if (focused) accent.copy(alpha = 0.85f) else accent.copy(alpha = 0.34f)
-  val bracketWhite = Color.White.copy(alpha = if (focused) 0.94f else 0.56f)
-  val trColor = if (focused) accent.copy(alpha = 0.92f) else accent.copy(alpha = 0.62f)
-  val blColor = if (focused) accent.copy(alpha = 0.54f) else accent.copy(alpha = 0.35f)
+  val strokePx = 0.95f.dp.toPx()
+  val barPx = 1.2f.dp.toPx()
+  val resolvedVoidTop = style?.voidTop ?: Color(0xFF05070B)
+  val resolvedVoidBot = style?.voidBottom ?: Color(0xFF0C121B)
+  val idleBorderA = style?.idleBorderAlpha ?: 0.54f
+  val focusedBorderA = style?.focusedBorderAlpha ?: 0.94f
+  val tintAlpha = style?.plateTintAlpha ?: 0.07f
+  val borderBase = if (style != null && accent == style.accent) style.graphicAccent else accent
+  val keylineColor = borderBase.copy(alpha = if (focused) focusedBorderA else idleBorderA)
+  val bracketWhite = Color.White.copy(alpha = if (focused) 0.96f else 0.64f)
+  val trColor = borderBase.copy(alpha = if (focused) focusedBorderA else (idleBorderA + 0.14f).coerceAtMost(0.95f))
+  val blColor = borderBase.copy(alpha = if (focused) (focusedBorderA * 0.62f) else (idleBorderA * 0.72f))
   val corners = floatArrayOf(0f, 0f, 0f, 0f)
   val bgBrush = Brush.verticalGradient(
     listOf(
-      Color(0xFF050505).copy(alpha = plateAlpha),
-      Color(0xFF111111).copy(alpha = plateAlpha),
+      resolvedVoidTop.copy(alpha = plateAlpha),
+      resolvedVoidBot.copy(alpha = plateAlpha),
+    ),
+  )
+  val sheenBrush = Brush.verticalGradient(
+    listOf(
+      borderBase.copy(alpha = if (focused) tintAlpha * 1.45f else tintAlpha * 0.75f),
+      Color.Transparent,
     ),
   )
   onDrawBehind {
     drawRect(brush = bgBrush)
+    drawRect(brush = sheenBrush)
     drawRect(
       color = keylineColor,
       topLeft = Offset(strokePx * 0.5f, strokePx * 0.5f),

@@ -39,6 +39,7 @@ import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.CrimsonDim
 import com.nexwork.edith.theme.LocalCrimsonMonetActive
+import com.nexwork.edith.theme.LocalLauncherStyle
 import kotlin.math.roundToInt
 
 /**
@@ -58,6 +59,8 @@ fun HudGroupCard(
 ) {
   val density = LocalDensity.current
   val crimsonMonetActive = rememberUpdatedState(LocalCrimsonMonetActive.current)
+  val style = LocalLauncherStyle.current
+  val styleState = rememberUpdatedState(style)
   val monochrome = remember { ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }) }
   val label = remember(group.name) { group.name.uppercase() }
   val count = group.apps.size
@@ -70,8 +73,12 @@ fun HudGroupCard(
   val hasEssential = remember(group) { group.apps.any { it.isEssentialQuickAccess } }
   val members = remember(group) { group.apps.take(4) }
   val iconRise = remember(density) { with(density) { 2.dp.toPx() } }
-  val leaderBrush = remember { Brush.verticalGradient(listOf(Color(0xD9050505), Color(0xD9111111))) }
-  val stackBrush = remember { Brush.verticalGradient(listOf(Color(0xB8050505), Color(0xB8111111))) }
+  val leaderBrush = remember(style.voidTop, style.voidBottom) {
+    Brush.verticalGradient(listOf(style.voidTop.copy(alpha = 0.88f), style.voidBottom.copy(alpha = 0.88f)))
+  }
+  val stackBrush = remember(style.voidTop, style.voidBottom) {
+    Brush.verticalGradient(listOf(style.voidTop.copy(alpha = 0.72f), style.voidBottom.copy(alpha = 0.72f)))
+  }
 
   val labelPaint = remember(density) { monoPaint(density, 17f, 1.6f, Paint.Align.LEFT, 255) }
   val metaPaint = remember(density) { monoPaint(density, 9.5f, 1f, Paint.Align.LEFT, 140) }
@@ -169,18 +176,20 @@ fun HudGroupCard(
             val tickP = phase(progress, 0.7f, 1f)
             val fineP = phase(progress, 0.82f, 1f)
 
+            val activeStyle = styleState.value
+            val leaderTint = activeStyle.graphicAccent
             fun drawPlateAndGrid() {
               val isMonet = crimsonMonetActive.value
               val plateColor = when {
                 isMonet && leader -> Color(0xD90A0A0A)
                 isMonet -> Color(0xB80A0A0A)
-                leader -> Color(0xD90F141E)
-                else -> Color(0xB80F141E)
+                leader -> activeStyle.voidBottom.copy(alpha = 0.88f)
+                else -> activeStyle.voidBottom.copy(alpha = 0.72f)
               }
               drawPath(platePath, plateColor)
               drawPath(
                 platePath,
-                if (leader) CrimsonBright.copy(alpha = if (isMonet) 0.72f else 0.5f) else CrimsonDim,
+                if (leader) leaderTint.copy(alpha = activeStyle.focusedBorderAlpha * 0.82f) else leaderTint.copy(alpha = activeStyle.idleBorderAlpha * 0.65f),
                 style = plateStroke,
               )
               gridBitmap?.let { drawImage(it) }
@@ -195,7 +204,7 @@ fun HudGroupCard(
 
             if (crossP > 0f) {
               crosses.forEachIndexed { idx, (centre, alpha) ->
-                val color = if (idx == 0 && leader) CrimsonBright.copy(alpha * crossP) else Color.White.copy(alpha * crossP)
+                val color = if (idx == 0 && leader) activeStyle.accent.copy(alpha * crossP) else Color.White.copy(alpha * crossP)
                 drawCross(centre.x, centre.y, crossArm, crossStroke, color)
               }
             }
@@ -281,12 +290,12 @@ fun HudGroupCard(
               cornerAt = cornerAt,
               barPx = bar,
               tint = bracketTint,
-              trTint = if (leader) CrimsonBright.copy(alpha = 0.85f) else bracketTint,
-              blTint = if (leader) CrimsonDim else bracketTint,
+              trTint = if (leader) activeStyle.accent.copy(alpha = activeStyle.focusedBorderAlpha) else bracketTint,
+              blTint = if (leader) activeStyle.graphicAccent.copy(alpha = activeStyle.idleBorderAlpha) else bracketTint,
             )
 
             drawRect(
-              color = if (hasEssential) CrimsonBright.copy(alpha = 0.82f * meterP) else Color.White.copy(alpha = 0.22f * meterP),
+              color = if (hasEssential) activeStyle.accent.copy(alpha = 0.88f * meterP) else Color.White.copy(alpha = 0.22f * meterP),
               topLeft = Offset(X(283.5f), Y(110f)),
               size = Size(3f * ux, 3f * uy),
             )
@@ -296,7 +305,7 @@ fun HudGroupCard(
               height = keylineH,
               progress = trace,
               strokeWidth = stroke,
-              color = Color.White.copy(if (leader) 0.85f else 0.3f),
+              color = if (leader) activeStyle.graphicAccent.copy(alpha = activeStyle.focusedBorderAlpha) else activeStyle.graphicAccent.copy(alpha = activeStyle.idleBorderAlpha * 0.72f),
               head = if (trace in 0.02f..0.98f) 1f else 0f,
             )
           }

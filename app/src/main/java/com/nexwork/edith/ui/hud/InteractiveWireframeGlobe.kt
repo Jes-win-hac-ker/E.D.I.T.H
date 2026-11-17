@@ -39,6 +39,11 @@ class GlobeController {
   private var lastSearchActive = false
   private var lastAmbientCentered = false
   private var lastSettingsBackdropActive = false
+  private var lastAccentHex: Int = 0x38BDF8
+  private var lastWaveR: Float = 0.22f
+  private var lastWaveG: Float = 0.98f
+  private var lastWaveB: Float = 1.58f
+  private var lastGraticuleHex: Int = 0x2C5470
   private val _isGlobeAtHorizon = MutableStateFlow(true)
   val isGlobeAtHorizon: StateFlow<Boolean> = _isGlobeAtHorizon.asStateFlow()
   private val _isStartupComplete = MutableStateFlow(false)
@@ -152,6 +157,25 @@ class GlobeController {
     )
   }
 
+  fun setAccentTheme(
+    accentHex: Int,
+    waveR: Float,
+    waveG: Float,
+    waveB: Float,
+    graticuleHex: Int,
+  ) {
+    lastAccentHex = accentHex
+    lastWaveR = waveR
+    lastWaveG = waveG
+    lastWaveB = waveB
+    lastGraticuleHex = graticuleHex
+    flushPending()
+    webViewRef?.evaluateJavascript(
+      "if(window.setHudAccentColor) window.setHudAccentColor($accentHex, $waveR, $waveG, $waveB, $graticuleHex);",
+      null,
+    )
+  }
+
   fun markHorizonSettled() {
     _isGlobeAtHorizon.value = true
   }
@@ -160,7 +184,8 @@ class GlobeController {
     webView?.evaluateJavascript(
       "if(window.setAmbientCentered) window.setAmbientCentered($lastAmbientCentered);" +
         "if(window.setSearchActive) window.setSearchActive($lastSearchActive);" +
-        "if(window.setSettingsBackdropActive) window.setSettingsBackdropActive($lastSettingsBackdropActive);",
+        "if(window.setSettingsBackdropActive) window.setSettingsBackdropActive($lastSettingsBackdropActive);" +
+        "if(window.setHudAccentColor) window.setHudAccentColor($lastAccentHex, $lastWaveR, $lastWaveG, $lastWaveB, $lastGraticuleHex);",
       null,
     )
   }
