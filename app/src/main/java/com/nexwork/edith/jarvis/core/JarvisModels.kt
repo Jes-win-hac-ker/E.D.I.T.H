@@ -322,6 +322,51 @@ data class JarvisServiceStatus(
 )
 
 /**
+ * Notification held in [com.nexwork.edith.jarvis.voice.DeferredParkQueue] when arriving
+ * while walking/riding with earbuds and unclaimed during the 5-second whisper window.
+ */
+data class ParkedMessage(
+  val id: String,
+  val sbnKey: String,
+  val appLabel: String,
+  val sender: String,
+  val preview: String,
+  val summary: String,
+  val urgency: String,
+  val arrivedAtMs: Long,
+  val hasReplyHandle: Boolean,
+)
+
+enum class VoiceSessionMode(val label: String) {
+  IDLE("IDLE"),
+  WAKE_LISTENING("WAKE ARMED"),
+  LIVE_STREAMING("LIVE"),
+  ENROLLING("ENROLLING"),
+  PAUSED("PAUSED"),
+}
+
+/**
+ * Live Milestone 4 voice gate, VAD, routing, and Gemini Live state for [JarvisUiState].
+ */
+data class VoiceStatus(
+  val hasMicPermission: Boolean = false,
+  val voiceprintEnrolled: Boolean = false,
+  val speakerModelReady: Boolean = false,
+  val speakerModelDownloadPct: Int? = null,
+  val wakeWordEnabled: Boolean = false,
+  val mode: VoiceSessionMode = VoiceSessionMode.IDLE,
+  val earbudsConnected: Boolean = false,
+  val routeLabel: String = "PHONE MIC",
+  val pauseReason: String? = null,
+  val enrollmentStep: Int = 0,
+  val lastConfidenceScore: Float = 0f,
+  val lastConfidenceAccepted: Boolean = false,
+  val lastTranscriptOrStatus: String = "",
+  val activeWhisper: ParkedMessage? = null,
+  val parkedMessages: List<ParkedMessage> = emptyList(),
+)
+
+/**
  * Aggregated state consumed by the Jarvis Baseplate Compose UI.
  */
 data class JarvisUiState(
@@ -357,4 +402,5 @@ data class JarvisUiState(
   val rules: List<JarvisRule> = emptyList(),
   val playbooks: List<UiPlaybook> = emptyList(),
   val trustedContacts: List<TrustedContact> = emptyList(),
+  val voiceStatus: VoiceStatus = VoiceStatus(),
 )

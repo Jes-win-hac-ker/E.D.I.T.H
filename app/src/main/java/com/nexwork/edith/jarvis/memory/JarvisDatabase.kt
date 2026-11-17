@@ -101,6 +101,7 @@ class JarvisDatabase(
     createV2Tables(db)
     createV3Tables(db)
     createV4Tables(db)
+    createV5Tables(db)
   }
 
   override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -113,6 +114,109 @@ class JarvisDatabase(
     if (oldVersion < 4) {
       upgradeToV4(db)
     }
+    if (oldVersion < 5) {
+      createV5Tables(db)
+    }
+  }
+
+  private fun createV5Tables(db: SQLiteDatabase) {
+    db.execSQL(
+      """
+      CREATE TABLE IF NOT EXISTS $TABLE_VOICEPRINT (
+        $COL_ID INTEGER PRIMARY KEY CHECK ($COL_ID = 1),
+        $COL_EMBEDDING_BLOB BLOB NOT NULL,
+        $COL_EMBEDDING_DIM INTEGER NOT NULL,
+        $COL_MODEL_ID TEXT NOT NULL,
+        $COL_UPDATED_AT_MS INTEGER NOT NULL
+      )
+      """.trimIndent()
+    )
+  }
+
+  /** Stores the (already Keystore-encrypted) enrolled speaker centroid. Single-row table. */
+  fun saveVoiceprint(encryptedBlob: ByteArray, dim: Int, modelId: String, nowMs: Long = System.currentTimeMillis()) {
+    val values = ContentValues().apply {
+      put(COL_ID, 1)
+      put(COL_EMBEDDING_BLOB, encryptedBlob)
+      put(COL_EMBEDDING_DIM, dim)
+      put(COL_MODEL_ID, modelId)
+      put(COL_UPDATED_AT_MS, nowMs)
+    }
+    writableDatabase.insertWithOnConflict(TABLE_VOICEPRINT, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+  }
+
+  fun getVoiceprintBlob(): ByteArray? =
+    readableDatabase.query(TABLE_VOICEPRINT, arrayOf(COL_EMBEDDING_BLOB), "$COL_ID = 1", null, null, null, null)
+      .use { c -> if (c.moveToFirst()) c.getBlob(0) else null }
+
+  fun clearVoiceprint() {
+    writableDatabase.delete(TABLE_VOICEPRINT, null, null)
+  }
+
+  /**
+   * Keyword search across recent notifications/messages, active user rules, saved places,
+   * and upcoming destinations for Gemini Live's `search_memory` tool.
+   */
+  fun searchMemory(query: String, limit: Int = 6): List<String> {
+    val clean = query.trim().lowercase()
+    if (clean.isEmpty()) return emptyList()
+    val likeArg = "%$clean%"
+    val hits = mutableListOf<String>()
+
+    readableDatabase.query(
+      TABLE_EVENT_LOG,
+      arrayOf(COL_APP_LABEL, COL_SENDER, COL_TITLE, COL_BODY, COL_TRIAGE_INTENT, COL_CREATED_AT_MS),
+      "LOWER($COL_SENDER) LIKE ? OR LOWER($COL_TITLE) LIKE ? OR LOWER($COL_BODY) LIKE ? OR LOWER(COALESCE($COL_TRIAGE_INTENT,'')) LIKE ?",
+      arrayOf(likeArg, likeArg, likeArg, likeArg),
+      null,
+      null,
+      "$COL_CREATED_AT_MS DESC",
+      limit.coerceAtLeast(1).toString(),
+    ).use { c ->
+      while (c.moveToNext()) {
+        val app = c.getString(0).orEmpty()
+        val sender = c.getString(1).orEmpty().ifBlank { c.getString(2).orEmpty() }
+        val body = c.getString(3).orEmpty().take(120)
+        val intent = c.getString(4).orEmpty()
+        hits += if (intent.isNotBlank()) "[$app] $sender ($intent): $body" else "[$app] $sender: $body"
+      }
+    }
+
+    if (hits.size < limit) {
+      readableDatabase.query(
+        TABLE_USER_RULEBOOK,
+        arrayOf(COL_RULE_TYPE, COL_PATTERN, COL_INSTRUCTION),
+        "$COL_ENABLED = 1 AND (LOWER($COL_PATTERN) LIKE ? OR LOWER($COL_INSTRUCTION) LIKE ?)",
+        arrayOf(likeArg, likeArg),
+        null,
+        null,
+        "$COL_UPDATED_AT_MS DESC",
+        (limit - hits.size).toString(),
+      ).use { c ->
+        while (c.moveToNext()) {
+          hits += "[RULE:${c.getString(0)}] ${c.getString(1)} -> ${c.getString(2)}"
+        }
+      }
+    }
+
+    if (hits.size < limit) {
+      readableDatabase.query(
+        TABLE_UPCOMING_DESTINATIONS,
+        arrayOf(COL_PLACE_NAME, COL_SOURCE_SUMMARY),
+        "LOWER($COL_PLACE_NAME) LIKE ? OR LOWER($COL_SOURCE_SUMMARY) LIKE ?",
+        arrayOf(likeArg, likeArg),
+        null,
+        null,
+        "$COL_CREATED_AT_MS DESC",
+        (limit - hits.size).toString(),
+      ).use { c ->
+        while (c.moveToNext()) {
+          hits += "[DEST] ${c.getString(0)} (${c.getString(1)})"
+        }
+      }
+    }
+
+    return hits.take(limit)
   }
 
   private fun createV2Tables(db: SQLiteDatabase) {
@@ -1075,7 +1179,7 @@ class JarvisDatabase(
 
   companion object {
     const val DB_NAME = "jarvis_memory.db"
-    const val DB_VERSION = 4
+    const val DB_VERSION = 5
     const val DESTINATION_TTL_24H_MS = 24L * 60L * 60L * 1000L
     const val FUTURE_EVENT_DEFAULT_WINDOW_MS = 6L * 60L * 60L * 1000L
     private const val DEFAULT_FEED_LIMIT = 50
@@ -1091,6 +1195,11 @@ class JarvisDatabase(
     const val TABLE_SAVED_PLACES = "saved_places"
     const val TABLE_CONTACT_PERSONAS = "contact_personas"
     const val TABLE_GROUP_ENGAGEMENT = "group_engagement"
+    const val TABLE_VOICEPRINT = "voiceprint"
+
+    private const val COL_EMBEDDING_BLOB = "embedding_blob"
+    private const val COL_EMBEDDING_DIM = "embedding_dim"
+    private const val COL_MODEL_ID = "model_id"
 
     private const val COL_ID = "id"
     private const val COL_SBN_KEY = "sbn_key"

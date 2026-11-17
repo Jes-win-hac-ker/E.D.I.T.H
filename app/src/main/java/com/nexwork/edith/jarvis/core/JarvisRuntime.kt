@@ -21,8 +21,10 @@ import com.nexwork.edith.MainActivity
 import com.nexwork.edith.R
 import com.nexwork.edith.jarvis.brain.GeminiClient
 import com.nexwork.edith.jarvis.brain.JarvisLanguagePrompt
+import com.nexwork.edith.jarvis.brain.LiveToolBridge
 import com.nexwork.edith.jarvis.brain.PlannerClient
 import com.nexwork.edith.jarvis.memory.JarvisDatabase
+import com.nexwork.edith.jarvis.voice.VoiceCoordinator
 import com.nexwork.edith.jarvis.reflex.CommandExecutionResult
 import com.nexwork.edith.jarvis.reflex.DestinationStore
 import com.nexwork.edith.jarvis.reflex.GatekeeperCandidate
@@ -67,6 +69,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * Isolated Milestone 1 Jarvis coordinator.
@@ -81,6 +91,7 @@ object JarvisRuntime {
   private const val PROACTIVE_NOTIFICATION_ID = 4110
   private const val JARVIS_PREFS_NAME = "jarvis_runtime_prefs"
   private const val KEY_OPUS_VOICE_READER = "opus_voice_reader_enabled"
+  private const val KEY_WAKE_WORD_VOICE = "wake_word_voice_enabled"
 
   private val firstFrameScheduled = AtomicBoolean(false)
   private val initialized = AtomicBoolean(false)
@@ -130,6 +141,9 @@ object JarvisRuntime {
 
   @Volatile
   private var voiceNoteObserver: VoiceNoteObserver? = null
+
+  @Volatile
+  private var voiceCoordinator: VoiceCoordinator? = null
 
   private val suppressedGroupCount = AtomicInteger(0)
 
@@ -381,6 +395,17 @@ object JarvisRuntime {
             }
             val quietPrefix = if (passiveContextEngine?.contextState?.value?.focusQuietActive == true) "[QUIET] " else ""
             val voicePrefix = if (audioBytes != null) "[VOICE] " else ""
+            val motionNow = passiveContextEngine?.contextState?.value?.motionState ?: MotionState.UNKNOWN
+            voiceCoordinator?.onNotificationTriaged(
+              sbnKey = captured.sbnKey,
+              appLabel = captured.appLabel,
+              sender = triageResult.triage.sender.ifBlank { captured.sender },
+              bodyPreview = captured.body,
+              summary = "${triageResult.triage.intent}: ${triageResult.triage.suggestedReply.ifBlank { captured.body }}",
+              urgency = triageResult.triage.urgency,
+              hasReplyHandle = remoteInputCache.hasHandle(captured.sbnKey),
+              motionState = motionNow,
+            )
             JarvisForegroundService.recordProcessed(
               "$quietPrefix$voicePrefix${triageResult.triage.urgency} · ${triageResult.triage.sender}: ${triageResult.triage.intent}",
             )
@@ -639,6 +664,7 @@ object JarvisRuntime {
     activeCommandJob?.isActive == true ||
       activeTriageJobs.any { it.isActive } ||
       synchronized(approvalLock) { pendingApprovalPair != null } ||
+      voiceCoordinator?.isAnyVoiceJobActive() == true ||
       isOtaBusy
   }
 
@@ -681,6 +707,7 @@ object JarvisRuntime {
     cmdJob?.cancel(CancellationException(reason))
     triageSnapshot.forEach { it.cancel(CancellationException(reason)) }
     burstAggregator?.cancelAll()
+    voiceCoordinator?.stopAllVoiceWork(reason)
     cancelPendingTier3Approval()
     recomputeAutomationActive()
     ShizukuControlService.clearNodeCache()
@@ -1111,6 +1138,95 @@ object JarvisRuntime {
     }
   }
 
+  fun hasRecordAudioPermission(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+      PackageManager.PERMISSION_GRANTED
+
+  fun startVoiceprintEnrollment(context: Context) {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      voiceCoordinator?.startEnrollment()
+    }
+  }
+
+  fun clearVoiceprint(context: Context) {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      voiceCoordinator?.clearVoiceprint()
+    }
+  }
+
+  fun togglePushToTalkVoice(context: Context) {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      val vc = voiceCoordinator ?: return@launch
+      if (vc.status.value.mode == VoiceSessionMode.LIVE_STREAMING ||
+        vc.status.value.mode == VoiceSessionMode.ENROLLING
+      ) {
+        vc.stopAllVoiceWork("Voice session ended by user")
+      } else {
+        vc.startPushToTalk()
+      }
+      recomputeAutomationActive()
+    }
+  }
+
+  fun setWakeWordVoiceEnabled(context: Context, enabled: Boolean) {
+    val appCtx = context.applicationContext
+    appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
+      .edit()
+      .putBoolean(KEY_WAKE_WORD_VOICE, enabled)
+      .apply()
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      voiceCoordinator?.setWakeWordEnabled(enabled)
+      recomputeAutomationActive()
+    }
+  }
+
+  fun claimWhisperNow(context: Context) {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      voiceCoordinator?.claimActiveWhisperAndSpeak()
+    }
+  }
+
+  fun playParkedMessage(context: Context, id: String) {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      voiceCoordinator?.playParkedMessage(id)
+    }
+  }
+
+  fun playAllParkedMessages(context: Context) {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      voiceCoordinator?.playAllParkedMessages()
+    }
+  }
+
+  fun dismissParkedMessage(context: Context, id: String) {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      voiceCoordinator?.dismissParkedMessage(id)
+    }
+  }
+
+  fun clearParkedMessages(context: Context) {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      voiceCoordinator?.clearParkedMessages()
+    }
+  }
+
   fun isBatteryUnrestricted(context: Context): Boolean {
     return runCatching {
       val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return false
@@ -1356,11 +1472,31 @@ object JarvisRuntime {
           },
         )
       }
+      if (voiceCoordinator == null) {
+        val db = database!!
+        val gw = securityGateway!!
+        val bridge = object : LiveToolBridge {
+          override suspend fun executeLiveTool(name: String, args: JsonObject): JsonObject {
+            return executeLiveToolCall(appCtx, db, gw, name, args)
+          }
+        }
+        voiceCoordinator = VoiceCoordinator(
+          context = appCtx,
+          scope = scope,
+          db = db,
+          apiKeyProvider = { keyVault?.getApiKey() },
+          toolBridge = bridge,
+          onUiFault = { msg -> recordFault(msg) },
+        )
+      }
     }
 
     val engine = passiveContextEngine ?: return
     val savedPlaces = runCatching { database?.getSavedPlaces().orEmpty() }.getOrDefault(emptyList())
     engine.start(appCtx, savedPlaces)
+    val wakeSaved = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
+      .getBoolean(KEY_WAKE_WORD_VOICE, false)
+    voiceCoordinator?.refreshEnvironment(wakeSaved)
     if (contextCollectorsStarted.compareAndSet(false, true)) {
       scope.launch {
         engine.contextState.collect { ambient ->
@@ -1372,7 +1508,181 @@ object JarvisRuntime {
           proactiveEngine?.onSignal(signal)
         }
       }
+      voiceCoordinator?.let { vc ->
+        scope.launch {
+          vc.status.collect { vs ->
+            _uiState.update { it.copy(voiceStatus = vs) }
+            recomputeAutomationActive()
+          }
+        }
+      }
     }
+  }
+
+  private suspend fun executeLiveToolCall(
+    appCtx: Context,
+    db: JarvisDatabase,
+    gw: SecurityGateway,
+    name: String,
+    args: JsonObject,
+  ): JsonObject {
+    return when (name.trim().lowercase()) {
+      "reply_notification" -> {
+        val target = args["target"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
+        val replyText = args["reply_text"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
+        if (target.isEmpty() || replyText.isEmpty()) {
+          return buildJsonObject {
+            put("ok", false)
+            put("error", "reply_notification requires non-empty target and reply_text")
+          }
+        }
+        val recent = db.getRecentEvents(limit = 40, canReplyChecker = remoteInputCache::hasHandle)
+        val matched = recent.firstOrNull { ev ->
+          ev.canReplyNow && (
+            ev.sbnKey == target ||
+              ev.sender.contains(target, ignoreCase = true) ||
+              ev.title.contains(target, ignoreCase = true)
+            )
+        } ?: return buildJsonObject {
+          put("ok", false)
+          put("error", "No active reply handle matching '$target'")
+        }
+        val trusted = db.isContactTrusted(matched.sender.ifBlank { matched.title }, matched.packageName)
+        val verdict = gw.evaluateAndConsume(
+          SecurityActionRequest(
+            actionType = JarvisActionType.REPLY_NOTIFICATION,
+            activePackage = matched.packageName,
+            targetPackage = matched.packageName,
+            targetLabel = matched.sender,
+            outboundText = replyText,
+            contactName = matched.sender,
+            isTrustedContact = trusted,
+            reason = "Gemini Live voice reply",
+          ),
+        )
+        when (verdict) {
+          is SecurityVerdict.Deny -> buildJsonObject {
+            put("ok", false)
+            put("error", verdict.reason)
+          }
+          is SecurityVerdict.RequireBiometric -> {
+            val approved = awaitTier3Approval(
+              actionTitle = "Authorize Voice Reply",
+              actionSummary = verdict.actionSummary,
+              reason = verdict.reason,
+              targetPackage = matched.packageName,
+              contactName = matched.sender,
+            )
+            if (!approved) {
+              buildJsonObject {
+                put("ok", false)
+                put("error", "User denied Tier 3 biometric approval for reply to ${matched.sender}")
+              }
+            } else {
+              sendVerifiedReply(appCtx, db, gw, matched, replyText, recordTrusted = false)
+            }
+          }
+          is SecurityVerdict.Allow ->
+            sendVerifiedReply(appCtx, db, gw, matched, replyText, recordTrusted = trusted)
+        }
+      }
+
+      "shizuku_ui_action" -> {
+        val command = args["command"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
+        if (command.isEmpty()) {
+          return buildJsonObject { put("ok", false); put("error", "Missing command") }
+        }
+        val executor = playbookExecutor ?: return buildJsonObject {
+          put("ok", false); put("error", "PlaybookExecutor not ready")
+        }
+        val result = executor.executeCommand(commandText = command, apiKey = keyVault?.getApiKey())
+        database?.let { syncPlaybooksAndContacts(it) }
+        buildJsonObject {
+          put("ok", result.ok)
+          put("summary", result.summary)
+        }
+      }
+
+      "open_maps" -> {
+        val destination = args["destination"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
+        if (destination.isEmpty()) {
+          return buildJsonObject { put("ok", false); put("error", "Missing destination") }
+        }
+        val verdict = gw.evaluateAndConsume(
+          SecurityActionRequest(
+            actionType = JarvisActionType.OPEN_APP,
+            activePackage = "com.google.android.apps.maps",
+            targetPackage = "com.google.android.apps.maps",
+            targetLabel = destination,
+            reason = "Gemini Live open_maps",
+          ),
+        )
+        if (verdict is SecurityVerdict.Deny) {
+          return buildJsonObject { put("ok", false); put("error", verdict.reason) }
+        }
+        runCatching {
+          appCtx.startActivity(buildMapsNavigationIntent(appCtx, destination))
+          buildJsonObject { put("ok", true); put("summary", "Started Maps navigation to $destination") }
+        }.getOrElse { err ->
+          buildJsonObject { put("ok", false); put("error", err.message ?: "Failed to launch Maps") }
+        }
+      }
+
+      "search_memory" -> {
+        val query = args["query"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
+        val limit = (args["limit"]?.jsonPrimitive?.intOrNull ?: 5).coerceIn(1, 12)
+        val verdict = gw.evaluateAndConsume(
+          SecurityActionRequest(
+            actionType = JarvisActionType.GET_SCREEN_TREE,
+            activePackage = "",
+            targetLabel = query,
+            reason = "Gemini Live search_memory",
+          ),
+        )
+        if (verdict is SecurityVerdict.Deny) {
+          return buildJsonObject { put("ok", false); put("error", verdict.reason) }
+        }
+        val hits = db.searchMemory(query, limit)
+        buildJsonObject {
+          put("ok", true)
+          put("count", hits.size)
+          put("matches", buildJsonArray { hits.forEach { add(JsonPrimitive(it)) } })
+        }
+      }
+
+      else -> buildJsonObject {
+        put("ok", false)
+        put("error", "Unknown live tool: $name")
+      }
+    }
+  }
+
+  private fun sendVerifiedReply(
+    appCtx: Context,
+    db: JarvisDatabase,
+    gw: SecurityGateway,
+    matched: JarvisEventRecord,
+    replyText: String,
+    recordTrusted: Boolean,
+  ): JsonObject {
+    return remoteInputCache.sendReply(appCtx, matched.sbnKey, replyText).fold(
+      onSuccess = {
+        if (recordTrusted) gw.recordTrustedAutoReply(matched.packageName, matched.sender)
+        db.markReplySent(matched.id, replyText)
+        syncEventsSnapshot(db)
+        JarvisForegroundService.recordProcessed("Voice reply -> ${matched.sender}")
+        buildJsonObject {
+          put("ok", true)
+          put("summary", "Replied to ${matched.sender}: $replyText")
+        }
+      },
+      onFailure = { err ->
+        buildJsonObject {
+          put("ok", false)
+          put("error", err.message ?: "RemoteInput dispatch failed")
+        }
+      },
+    )
   }
 
   private fun syncStateSnapshot(appCtx: Context) {
@@ -1389,6 +1699,9 @@ object JarvisRuntime {
     val personaTotal = runCatching { db.getContactPersonaCount() }.getOrDefault(0)
     val opusEnabled = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
       .getBoolean(KEY_OPUS_VOICE_READER, false)
+    val wakeEnabled = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
+      .getBoolean(KEY_WAKE_WORD_VOICE, false)
+    voiceCoordinator?.refreshEnvironment(wakeEnabled)
     val ambient = passiveContextEngine?.contextState?.value ?: _uiState.value.ambientContext
 
     _uiState.update { current ->
@@ -1419,6 +1732,7 @@ object JarvisRuntime {
         rules = rules,
         playbooks = playbooks,
         trustedContacts = contacts,
+        voiceStatus = voiceCoordinator?.status?.value ?: current.voiceStatus,
       )
     }
   }
@@ -1427,6 +1741,9 @@ object JarvisRuntime {
     val vault = keyVault
     val opusEnabled = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
       .getBoolean(KEY_OPUS_VOICE_READER, false)
+    val wakeEnabled = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
+      .getBoolean(KEY_WAKE_WORD_VOICE, false)
+    voiceCoordinator?.refreshEnvironment(wakeEnabled)
     val ambient = passiveContextEngine?.contextState?.value ?: _uiState.value.ambientContext
     _uiState.update { current ->
       current.copy(
@@ -1447,6 +1764,7 @@ object JarvisRuntime {
         activeReplyHandleCount = remoteInputCache.activeCount(),
         ambientContext = ambient,
         proactiveSuggestion = _proactiveSuggestion.value,
+        voiceStatus = voiceCoordinator?.status?.value ?: current.voiceStatus,
       )
     }
   }

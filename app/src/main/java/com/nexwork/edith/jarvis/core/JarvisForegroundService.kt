@@ -51,7 +51,7 @@ class JarvisForegroundService : Service() {
     }
 
     ensureChannel()
-    enterForeground()
+    enterForeground(includeMicrophone = intent?.action == ACTION_PROMOTE_MIC)
 
     val now = System.currentTimeMillis()
     _status.update { current ->
@@ -82,34 +82,49 @@ class JarvisForegroundService : Service() {
 
   override fun onBind(intent: Intent?): IBinder? = null
 
-  private fun enterForeground() {
-    runCatching {
-      val notification = buildStickyNotification()
-      val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-        var mask = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-        val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
-          PackageManager.PERMISSION_GRANTED
-        val hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
-          PackageManager.PERMISSION_GRANTED
-        if (hasFine || hasCoarse) {
-          mask = mask or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-        }
-        val hasBtConnect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-          ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) ==
-            PackageManager.PERMISSION_GRANTED
-        } else {
-          true
-        }
-        if (hasBtConnect) {
-          mask = mask or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-        }
-        mask
-      } else {
-        0
+  private fun enterForeground(includeMicrophone: Boolean = false) {
+    val notification = buildStickyNotification()
+    val baseMask = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+      var mask = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+      val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+        PackageManager.PERMISSION_GRANTED
+      val hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+        PackageManager.PERMISSION_GRANTED
+      if (hasFine || hasCoarse) {
+        mask = mask or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
       }
-      ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, fgsType)
-    }.onFailure { err ->
-      _status.update { it.copy(lastError = err.message ?: "Foreground promotion failed") }
+      val hasBtConnect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) ==
+          PackageManager.PERMISSION_GRANTED
+      } else {
+        true
+      }
+      if (hasBtConnect) {
+        mask = mask or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+      }
+      mask
+    } else {
+      0
+    }
+    val hasMicPerm = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+      PackageManager.PERMISSION_GRANTED
+    val fullMask = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && includeMicrophone && hasMicPerm) {
+      baseMask or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+    } else {
+      baseMask
+    }
+    runCatching {
+      ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, fullMask)
+    }.onFailure { outerErr ->
+      if (fullMask != baseMask) {
+        runCatching {
+          ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, baseMask)
+        }.onFailure { err ->
+          _status.update { it.copy(lastError = err.message ?: "Foreground promotion failed") }
+        }
+      } else {
+        _status.update { it.copy(lastError = outerErr.message ?: "Foreground promotion failed") }
+      }
     }
   }
 
@@ -160,6 +175,7 @@ class JarvisForegroundService : Service() {
     private const val REQUEST_STOP_SERVICE = 4112
 
     const val ACTION_START = "com.nexwork.edith.jarvis.action.START"
+    const val ACTION_PROMOTE_MIC = "com.nexwork.edith.jarvis.action.PROMOTE_MIC"
     const val ACTION_STOP = "com.nexwork.edith.jarvis.action.STOP"
     const val ACTION_EMERGENCY_ABORT = "com.nexwork.edith.jarvis.action.EMERGENCY_ABORT"
 
@@ -176,6 +192,14 @@ class JarvisForegroundService : Service() {
       }.onFailure { err ->
         _status.update { it.copy(lastError = err.message ?: "Unable to start foreground service") }
       }
+    }
+
+    fun promoteForMicrophone(context: Context) {
+      val appCtx = context.applicationContext
+      val intent = Intent(appCtx, JarvisForegroundService::class.java).apply {
+        action = ACTION_PROMOTE_MIC
+      }
+      runCatching { ContextCompat.startForegroundService(appCtx, intent) }
     }
 
     fun stop(context: Context) {
