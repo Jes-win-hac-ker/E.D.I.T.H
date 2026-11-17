@@ -295,7 +295,7 @@ fun JarvisBaseplatePanel(
         .weight(1f),
       verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-      // Live Status Pills: FGS, LISTENER, ACCESSIBILITY HANDS, BATTERY
+      // Live Status Pills: FGS, LISTENER, SHIZUKU HANDS, BATTERY
       item(key = "status_pills") {
         FlowRow(
           modifier = Modifier.fillMaxWidth(),
@@ -338,24 +338,24 @@ fun JarvisBaseplatePanel(
             },
           )
 
-          val a11yState = when {
-            uiState.accessibilityEnabled && uiState.accessibilityConnected -> PillState.OK
-            uiState.accessibilityEnabled -> PillState.WARN
+          val shizukuState = when {
+            uiState.shizukuRunning && uiState.shizukuAuthorized -> PillState.OK
+            uiState.shizukuRunning -> PillState.WARN
             else -> PillState.FAULT
           }
-          val a11yValue = when {
-            uiState.accessibilityEnabled && uiState.accessibilityConnected -> "LIVE"
-            uiState.accessibilityEnabled -> "BINDING"
-            else -> "GRANT"
+          val shizukuValue = when {
+            uiState.shizukuRunning && uiState.shizukuAuthorized -> "UID 2000"
+            uiState.shizukuRunning -> "GRANT"
+            else -> "OFFLINE"
           }
           StatusPill(
-            label = "A11Y HANDS",
-            value = a11yValue,
-            state = a11yState,
+            label = "SHIZUKU HANDS",
+            value = shizukuValue,
+            state = shizukuState,
             accent = accent,
             onClick = {
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              JarvisRuntime.openAccessibilitySettings(context)
+              JarvisRuntime.requestOrOpenShizukuHands(context)
             },
           )
 

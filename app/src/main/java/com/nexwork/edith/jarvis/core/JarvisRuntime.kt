@@ -40,8 +40,9 @@ import com.nexwork.edith.jarvis.security.JarvisActionType
 import com.nexwork.edith.jarvis.security.SecurityActionRequest
 import com.nexwork.edith.jarvis.security.SecurityGateway
 import com.nexwork.edith.jarvis.security.SecurityVerdict
+import com.nexwork.edith.data.ShizukuControlManager
+import com.nexwork.edith.data.ShizukuControlService
 import com.nexwork.edith.jarvis.senses.ExtractedNotification
-import com.nexwork.edith.jarvis.senses.JarvisAccessibilityService
 import com.nexwork.edith.jarvis.senses.JarvisNotificationService
 import com.nexwork.edith.jarvis.senses.PassiveContextEngine
 import com.nexwork.edith.jarvis.senses.RemoteInputCache
@@ -515,8 +516,9 @@ object JarvisRuntime {
     }
   }
 
-  fun openAccessibilitySettings(context: Context) {
-    JarvisAccessibilityService.openAccessibilitySettings(context)
+  fun requestOrOpenShizukuHands(context: Context) {
+    ShizukuControlManager.requestOrOpenShizuku(context)
+    refreshEnvironmentStatus(context)
   }
 
   fun addOrUpdateTrustedContact(
@@ -650,7 +652,7 @@ object JarvisRuntime {
     cmdToCancel?.cancel(CancellationException(reason))
     cancelPendingTier3Approval()
     recomputeAutomationActive()
-    JarvisAccessibilityService.instance()?.abortActiveAutomation(bounceHome = false)
+    ShizukuControlService.clearNodeCache()
     _uiState.update { current ->
       current.copy(
         isExecutingCommand = false,
@@ -681,7 +683,16 @@ object JarvisRuntime {
     burstAggregator?.cancelAll()
     cancelPendingTier3Approval()
     recomputeAutomationActive()
-    JarvisAccessibilityService.instance()?.abortActiveAutomation(bounceHome = bounceHome)
+    ShizukuControlService.clearNodeCache()
+    if (bounceHome) {
+      runCatching {
+        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+          addCategory(Intent.CATEGORY_HOME)
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        appCtx.startActivity(homeIntent)
+      }
+    }
     _uiState.update { current ->
       current.copy(
         isExecutingCommand = false,
@@ -1162,11 +1173,6 @@ object JarvisRuntime {
         _uiState.update { it.copy(notificationListenerConnected = connected) }
       }
     }
-    scope.launch {
-      JarvisAccessibilityService.isConnected.collect { connected ->
-        _uiState.update { it.copy(accessibilityConnected = connected) }
-      }
-    }
   }
 
   private fun ensureComponentsLocked(appCtx: Context) {
@@ -1182,6 +1188,7 @@ object JarvisRuntime {
         val db = database!!
         val gw = securityGateway!!
         val pc = plannerClient!!
+        val shizukuHands = ShizukuControlManager(appCtx)
         val store = object : PlaybookStore {
           override fun findPlaybooksForIntent(triggerIntent: String, targetPackage: String?): List<UiPlaybook> =
             db.findPlaybooksForIntent(triggerIntent, targetPackage)
@@ -1198,31 +1205,28 @@ object JarvisRuntime {
         }
         val env = object : PlaybookEnvironment {
           override fun currentForegroundPackage(): String =
-            JarvisAccessibilityService.instance()?.currentForegroundPackage().orEmpty()
+            ShizukuControlService.lastKnownForegroundPackage()
 
-          override fun dumpCompactUiTree(): CompactUiTree {
-            val svc = JarvisAccessibilityService.instance()
-              ?: return CompactUiTree("", blockedReason = "Accessibility service not connected")
-            return svc.dumpCompactUiTree()
-          }
+          override suspend fun dumpCompactUiTree(): CompactUiTree =
+            shizukuHands.dumpCompactUiTree()
 
-          override suspend fun clickNode(id: Int): Result<String> {
-            val svc = JarvisAccessibilityService.instance()
-              ?: return Result.failure(IllegalStateException("Accessibility service not connected"))
-            return svc.clickNode(id)
-          }
+          override suspend fun clickNode(id: Int): Result<String> =
+            shizukuHands.clickNode(id)
 
-          override fun inputText(id: Int, text: String): Result<String> {
-            val svc = JarvisAccessibilityService.instance()
-              ?: return Result.failure(IllegalStateException("Accessibility service not connected"))
-            return svc.inputText(id, text)
-          }
+          override suspend fun tap(x: Int, y: Int): Result<String> =
+            shizukuHands.tap(x, y)
 
-          override suspend fun scrollNode(id: Int?, forward: Boolean): Result<String> {
-            val svc = JarvisAccessibilityService.instance()
-              ?: return Result.failure(IllegalStateException("Accessibility service not connected"))
-            return svc.scrollNode(id, forward)
-          }
+          override suspend fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int): Result<String> =
+            shizukuHands.swipe(x1, y1, x2, y2, durationMs)
+
+          override suspend fun inputText(id: Int, text: String): Result<String> =
+            shizukuHands.inputText(id, text)
+
+          override suspend fun scrollNode(id: Int?, forward: Boolean): Result<String> =
+            shizukuHands.scrollNode(id, forward)
+
+          override suspend fun pressKey(keyCode: Int): Result<String> =
+            shizukuHands.pressKey(keyCode)
 
           override fun openApp(packageName: String): Result<String> {
             val cleanPkg = packageName.trim()
@@ -1343,8 +1347,8 @@ object JarvisRuntime {
         serviceStatus = JarvisForegroundService.status.value,
         notificationListenerEnabled = JarvisNotificationService.isAccessGranted(appCtx),
         notificationListenerConnected = JarvisNotificationService.isConnected.value,
-        accessibilityEnabled = JarvisAccessibilityService.isEnabledInSettings(appCtx),
-        accessibilityConnected = JarvisAccessibilityService.isConnected.value,
+        shizukuRunning = ShizukuControlManager.isShizukuBinderAlive(),
+        shizukuAuthorized = ShizukuControlManager.isShizukuPermissionGranted(),
         hasLocationPermission = hasFineOrCoarseLocation(appCtx),
         hasBackgroundLocationPermission = hasBackgroundLocation(appCtx),
         hasBluetoothConnectPermission = hasBluetoothConnect(appCtx),
@@ -1379,8 +1383,8 @@ object JarvisRuntime {
         serviceStatus = JarvisForegroundService.status.value,
         notificationListenerEnabled = JarvisNotificationService.isAccessGranted(appCtx),
         notificationListenerConnected = JarvisNotificationService.isConnected.value,
-        accessibilityEnabled = JarvisAccessibilityService.isEnabledInSettings(appCtx),
-        accessibilityConnected = JarvisAccessibilityService.isConnected.value,
+        shizukuRunning = ShizukuControlManager.isShizukuBinderAlive(),
+        shizukuAuthorized = ShizukuControlManager.isShizukuPermissionGranted(),
         hasLocationPermission = hasFineOrCoarseLocation(appCtx),
         hasBackgroundLocationPermission = hasBackgroundLocation(appCtx),
         hasBluetoothConnectPermission = hasBluetoothConnect(appCtx),

@@ -22,15 +22,19 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /**
- * Abstraction over Accessibility Hands, App Launcher, RemoteInput, Storage, and Biometric approval
- * so [PlaybookExecutor] runs natively on-device and tests deterministically on JVM without mocks.
+ * Abstraction over Shizuku (`uid 2000`) UI Hands, App Launcher, RemoteInput, Storage, and Biometric
+ * approval so [PlaybookExecutor] runs natively on-device and tests deterministically on JVM without mocks.
  */
 interface PlaybookEnvironment {
   fun currentForegroundPackage(): String
-  fun dumpCompactUiTree(): CompactUiTree
+  suspend fun dumpCompactUiTree(): CompactUiTree
   suspend fun clickNode(id: Int): Result<String>
-  fun inputText(id: Int, text: String): Result<String>
+  suspend fun tap(x: Int, y: Int): Result<String> = Result.success("Tapped ($x,$y)")
+  suspend fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int = 240): Result<String> =
+    Result.success("Swiped ($x1,$y1)->($x2,$y2)")
+  suspend fun inputText(id: Int, text: String): Result<String>
   suspend fun scrollNode(id: Int?, forward: Boolean): Result<String>
+  suspend fun pressKey(keyCode: Int): Result<String> = Result.success("Sent keyevent $keyCode")
   fun openApp(packageName: String): Result<String>
   fun sendNotificationReply(sbnKey: String, replyText: String): Result<String>
   fun isContactTrusted(contactName: String, packageName: String): Boolean
@@ -332,6 +336,7 @@ class PlaybookExecutor(
         "click_node" -> handleClickNode(args)
         "input_text" -> handleInputText(args)
         "scroll_node" -> handleScrollNode(args)
+        "press_key" -> handlePressKey(args)
         "reply_notification" -> handleReplyNotification(args)
         "ask_user_confirmation" -> handleAskUserConfirmation(args)
         else -> PlannerToolOutcome(
@@ -342,7 +347,7 @@ class PlaybookExecutor(
       }
     }
 
-    private fun handleGetScreenTree(): PlannerToolOutcome {
+    private suspend fun handleGetScreenTree(): PlannerToolOutcome {
       val fg = env.currentForegroundPackage()
       val verdict = security.evaluateAndConsume(
         SecurityActionRequest(
@@ -595,6 +600,47 @@ class PlaybookExecutor(
         },
         onFailure = { err ->
           val m = err.message ?: "Scroll failed"
+          PlannerToolOutcome(ok = false, summary = m, payload = errorJson(m))
+        },
+      )
+    }
+
+    private suspend fun handlePressKey(args: JsonObject): PlannerToolOutcome {
+      val keyCode = args["key_code"]?.jsonPrimitive?.intOrNull
+        ?: return PlannerToolOutcome(ok = false, summary = "Missing key_code", payload = errorJson("Missing key_code"))
+      val fg = env.currentForegroundPackage()
+      val verdict = security.evaluateAndConsume(
+        SecurityActionRequest(
+          actionType = JarvisActionType.CLICK_NODE,
+          activePackage = fg,
+          expectedPackage = expectedPkg,
+          targetPackage = fg,
+          targetLabel = "keyevent:$keyCode",
+          runStepIndex = uiStepCount,
+          reason = args["reason"]?.jsonPrimitive?.content.orEmpty(),
+        ),
+      )
+      if (verdict is SecurityVerdict.Deny) {
+        return PlannerToolOutcome(
+          ok = false,
+          summary = verdict.reason,
+          payload = errorJson(verdict.reason),
+          securityBlocked = true,
+        )
+      }
+      val res = env.pressKey(keyCode)
+      return res.fold(
+        onSuccess = { msg ->
+          uiStepCount++
+          PlannerToolOutcome(
+            ok = true,
+            summary = msg,
+            payload = buildJsonObject { put("status", "ok"); put("detail", msg) },
+            resolvedTargetPackage = fg,
+          )
+        },
+        onFailure = { err ->
+          val m = err.message ?: "Keyevent failed"
           PlannerToolOutcome(ok = false, summary = m, payload = errorJson(m))
         },
       )

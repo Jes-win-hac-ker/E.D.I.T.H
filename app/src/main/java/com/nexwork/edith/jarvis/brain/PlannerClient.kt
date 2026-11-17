@@ -246,6 +246,7 @@ class PlannerClient(
       "click_node",
       "input_text",
       "scroll_node",
+      "press_key",
       "open_app",
       "reply_notification",
       "ask_user_confirmation",
@@ -311,6 +312,17 @@ class PlannerClient(
                     put("direction", prop("STRING", "forward or backward"))
                     put("reason", prop("STRING", "Brief intent for audit log"))
                   },
+                ),
+              )
+              add(
+                fnDecl(
+                  name = "press_key",
+                  description = "Send an Android keyCode via Shizuku input keyevent (e.g. 66 for ENTER, 4 for BACK).",
+                  properties = buildJsonObject {
+                    put("key_code", prop("INTEGER", "Android KeyEvent keyCode (e.g. 66 for ENTER)"))
+                    put("reason", prop("STRING", "Brief intent for audit log"))
+                  },
+                  required = listOf("key_code"),
                 ),
               )
               add(

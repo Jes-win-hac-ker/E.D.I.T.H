@@ -1542,31 +1542,31 @@ private fun JarvisDetailCardContent(
             JarvisRuntime.openNotificationListenerSettings(context)
           },
         )
-        val a11yOk = uiState.accessibilityEnabled && uiState.accessibilityConnected
-        val a11yTag = when {
-          a11yOk -> "LIVE"
-          uiState.accessibilityEnabled -> "BIND"
-          else -> "GRANT"
+        val shizukuOk = uiState.shizukuRunning && uiState.shizukuAuthorized
+        val shizukuTag = when {
+          shizukuOk -> "UID 2000"
+          uiState.shizukuRunning -> "GRANT"
+          else -> "OFFLINE"
         }
-        val a11yTint = when {
-          a11yOk -> accent
-          uiState.accessibilityEnabled -> warnAccent
+        val shizukuTint = when {
+          shizukuOk -> accent
+          uiState.shizukuRunning -> warnAccent
           else -> CrimsonBright
         }
         CompactHudCard(
-          eyebrow = "UI HANDS",
-          title = "ACCESSIBILITY",
-          badge = a11yTag,
-          pipColor = a11yTint,
-          focused = a11yOk,
-          accent = a11yTint,
+          eyebrow = "UI HANDS // SHELL",
+          title = "SHIZUKU SERVICE",
+          badge = shizukuTag,
+          pipColor = shizukuTint,
+          focused = shizukuOk,
+          accent = shizukuTint,
           titleSizeSp = 10.2f,
           reveal = { staggeredReveal(reveal(), 2, totalSteps, stagger = 0.14f) },
           enabled = enabled,
           modifier = Modifier.fillMaxWidth().height(44.dp),
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            JarvisRuntime.openAccessibilitySettings(context)
+            JarvisRuntime.requestOrOpenShizukuHands(context)
           },
         )
         val ctxAllOk = uiState.hasLocationPermission &&

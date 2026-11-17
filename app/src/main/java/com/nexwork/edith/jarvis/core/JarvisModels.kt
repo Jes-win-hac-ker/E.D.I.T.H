@@ -101,7 +101,7 @@ data class JarvisRule(
 )
 
 /**
- * Filtered UI node captured on-demand by [com.nexwork.edith.jarvis.senses.JarvisAccessibilityService].
+ * Filtered UI node captured on-demand by [com.nexwork.edith.data.ShizukuControlService] (`uid 2000`).
  */
 data class CompactUiNode(
   val id: Int,
@@ -329,8 +329,8 @@ data class JarvisUiState(
   val serviceStatus: JarvisServiceStatus = JarvisServiceStatus(),
   val notificationListenerEnabled: Boolean = false,
   val notificationListenerConnected: Boolean = false,
-  val accessibilityEnabled: Boolean = false,
-  val accessibilityConnected: Boolean = false,
+  val shizukuRunning: Boolean = false,
+  val shizukuAuthorized: Boolean = false,
   val hasLocationPermission: Boolean = false,
   val hasBackgroundLocationPermission: Boolean = false,
   val hasBluetoothConnectPermission: Boolean = false,

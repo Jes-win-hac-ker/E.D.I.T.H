@@ -74,7 +74,7 @@ class PlaybookExecutorTest {
 
     override fun currentForegroundPackage(): String = activePkg
 
-    override fun dumpCompactUiTree(): CompactUiTree = CompactUiTree(
+    override suspend fun dumpCompactUiTree(): CompactUiTree = CompactUiTree(
       packageName = activePkg,
       nodes = screenNodes,
       formattedText = screenNodes.joinToString("\n") { "[${it.id}] ${it.viewId}" },
@@ -87,7 +87,7 @@ class PlaybookExecutorTest {
       return Result.success("clicked ${node.viewId}")
     }
 
-    override fun inputText(id: Int, text: String): Result<String> {
+    override suspend fun inputText(id: Int, text: String): Result<String> {
       val node = screenNodes.firstOrNull { it.id == id }
         ?: return Result.failure(IllegalArgumentException("missing node $id"))
       actions += "input:${node.viewId}:$text"

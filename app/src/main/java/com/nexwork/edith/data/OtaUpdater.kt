@@ -220,8 +220,9 @@ class OtaUpdater(private val context: Context) {
   }
 
   /**
-   * Attempts silent in-place installation via Shizuku (`pm install -r -S`), falling back to a
-   * [PackageInstaller.Session] configured for self-update without prompt (`USER_ACTION_NOT_REQUIRED`).
+   * Attempts silent in-place installation via Shizuku (`pm install -r -i com.android.vending -S`),
+   * falling back to a [PackageInstaller.Session] configured for self-update without prompt
+   * (`USER_ACTION_NOT_REQUIRED`) and stamped with `com.android.vending` as the installer package.
    * Returns `true` when installed silently, `false` when handed off to system confirmation/settings UI.
    */
   suspend fun installApk(apkFile: File): Result<Boolean> = withContext(Dispatchers.IO) {
@@ -365,6 +366,7 @@ class OtaUpdater(private val context: Context) {
     val packageInstaller = appCtx.packageManager.packageInstaller
     val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
       setAppPackageName(appCtx.packageName)
+      runCatching { setInstallerPackageName(PLAY_STORE_INSTALLER_PACKAGE) }
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
       }
@@ -494,6 +496,7 @@ class OtaUpdater(private val context: Context) {
   companion object {
     const val DEFAULT_FEED_URL =
       "https://api.github.com/repos/Jes-win-hac-ker/E.D.I.T.H/releases/latest"
+    const val PLAY_STORE_INSTALLER_PACKAGE = "com.android.vending"
     private const val PREFS_NAME = "edith_ota"
     private const val KEY_FEED_URL = "feed_url"
     private const val KEY_LAST_CHECK_MS = "last_check_ms"

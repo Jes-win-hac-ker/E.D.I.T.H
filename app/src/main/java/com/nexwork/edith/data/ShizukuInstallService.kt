@@ -47,7 +47,7 @@ class ShizukuInstallService : Binder {
         "install",
         "-r",
         "-i",
-        "com.android.shell",
+        "com.android.vending",
         "-S",
         size.toString(),
       )
