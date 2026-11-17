@@ -26,8 +26,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -40,7 +38,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -69,14 +66,13 @@ import com.nexwork.edith.jarvis.core.TriageStatus
 import com.nexwork.edith.jarvis.core.TrustedContact
 import com.nexwork.edith.jarvis.core.UpcomingDestination
 import com.nexwork.edith.jarvis.security.BiometricPromptHelper
+import com.nexwork.edith.theme.Crimson
 import com.nexwork.edith.theme.CrimsonBright
-import com.nexwork.edith.theme.GlassSurface
-import com.nexwork.edith.theme.GlassSurfaceElevated
 import com.nexwork.edith.theme.LocalLauncherStyle
-import com.nexwork.edith.theme.ObsidianBgTop
 import com.nexwork.edith.theme.TextPureWhite
 import com.nexwork.edith.theme.TextSilver
 import com.nexwork.edith.theme.WarmSunAccent
+import com.nexwork.edith.ui.hud.starkHudPlate
 import java.util.Date
 
 /**
@@ -90,7 +86,7 @@ fun JarvisDrawerSheet(
   Box(
     modifier = modifier
       .fillMaxSize()
-      .background(Color.Black.copy(alpha = 0.72f))
+      .background(Color.Black.copy(alpha = 0.80f))
       .clickable(onClick = onDismiss),
   ) {
     Box(
@@ -101,9 +97,13 @@ fun JarvisDrawerSheet(
         .statusBarsPadding()
         .navigationBarsPadding()
         .padding(horizontal = 12.dp, vertical = 10.dp)
-        .clip(RoundedCornerShape(18.dp))
-        .background(ObsidianBgTop.copy(alpha = 0.94f))
-        .border(1.dp, LocalLauncherStyle.current.accent.copy(alpha = 0.45f), RoundedCornerShape(18.dp))
+        .starkHudPlate(
+          accent = LocalLauncherStyle.current.accent,
+          focused = true,
+          showBrackets = true,
+          bracketScale = 0.85f,
+          plateAlpha = 0.96f,
+        )
         .clickable(enabled = false) {}
         .padding(14.dp),
     ) {
@@ -218,14 +218,12 @@ fun JarvisBaseplatePanel(
       ) {
         Box(
           modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(
-              if (hasActiveJobs) CrimsonBright.copy(alpha = 0.24f) else CrimsonBright.copy(alpha = 0.08f)
-            )
-            .border(
-              if (hasActiveJobs) 1.2.dp else 0.8.dp,
-              if (hasActiveJobs) CrimsonBright else CrimsonBright.copy(alpha = 0.48f),
-              RoundedCornerShape(6.dp),
+            .starkHudPlate(
+              accent = Crimson,
+              focused = hasActiveJobs,
+              showBrackets = hasActiveJobs,
+              bracketScale = 0.42f,
+              plateAlpha = 0.92f,
             )
             .clickable {
               haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -246,9 +244,13 @@ fun JarvisBaseplatePanel(
 
         Box(
           modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(GlassSurfaceElevated.copy(alpha = 0.85f))
-            .border(0.8.dp, accent.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+            .starkHudPlate(
+              accent = accent,
+              focused = false,
+              showBrackets = true,
+              bracketScale = 0.42f,
+              plateAlpha = 0.90f,
+            )
             .clickable {
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
               keyboardController?.hide()
@@ -535,9 +537,8 @@ fun JarvisBaseplatePanel(
           Row(
             modifier = Modifier
               .fillMaxWidth()
-              .clip(RoundedCornerShape(8.dp))
-              .background(bannerColor.copy(alpha = 0.12f))
-              .border(0.8.dp, bannerColor.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+              .background(Color(0xEB050508))
+              .border(0.8.dp, (if (isErr) Crimson else bannerColor).copy(alpha = 0.72f))
               .clickable { JarvisRuntime.clearBanner() }
               .padding(horizontal = 10.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -593,9 +594,12 @@ fun JarvisBaseplatePanel(
           Box(
             modifier = Modifier
               .fillMaxWidth()
-              .clip(RoundedCornerShape(10.dp))
-              .background(GlassSurface.copy(alpha = 0.55f))
-              .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+              .starkHudPlate(
+                accent = accent.copy(alpha = 0.55f),
+                focused = false,
+                showBrackets = false,
+                plateAlpha = 0.80f,
+              )
               .padding(14.dp),
             contentAlignment = Alignment.Center,
           ) {
@@ -633,13 +637,17 @@ private fun Tier3BiometricApprovalCard(
   onDeny: (Tier3ApprovalRequest) -> Unit,
   onTriggerTest: () -> Unit,
 ) {
-  val borderTint = if (pending != null) WarmSunAccent else accent.copy(alpha = 0.40f)
+  val cardAccent = if (pending != null) WarmSunAccent else accent
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(10.dp))
-      .background(if (pending != null) WarmSunAccent.copy(alpha = 0.10f) else GlassSurface.copy(alpha = 0.68f))
-      .border(0.9.dp, borderTint, RoundedCornerShape(10.dp))
+      .starkHudPlate(
+        accent = cardAccent,
+        focused = pending != null,
+        showBrackets = true,
+        bracketScale = 0.56f,
+        plateAlpha = 0.90f,
+      )
       .padding(10.dp),
     verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
@@ -721,9 +729,13 @@ private fun CommandTestBarCard(
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(10.dp))
-      .background(GlassSurface.copy(alpha = 0.72f))
-      .border(0.8.dp, accent.copy(alpha = 0.28f), RoundedCornerShape(10.dp))
+      .starkHudPlate(
+        accent = accent,
+        focused = isExecuting,
+        showBrackets = true,
+        bracketScale = 0.56f,
+        plateAlpha = 0.88f,
+      )
       .padding(10.dp),
     verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
@@ -755,9 +767,7 @@ private fun CommandTestBarCard(
       Box(
         modifier = Modifier
           .weight(1f)
-          .clip(RoundedCornerShape(7.dp))
-          .background(ObsidianBgTop.copy(alpha = 0.85f))
-          .border(0.8.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(7.dp))
+          .jarvisInputPlate(accent)
           .padding(horizontal = 9.dp, vertical = 7.dp),
       ) {
         if (draftCommand.isEmpty()) {
@@ -828,9 +838,13 @@ private fun TrustedContactsCard(
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(10.dp))
-      .background(GlassSurface.copy(alpha = 0.72f))
-      .border(0.8.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+      .starkHudPlate(
+        accent = accent.copy(alpha = 0.75f),
+        focused = false,
+        showBrackets = true,
+        bracketScale = 0.52f,
+        plateAlpha = 0.88f,
+      )
       .padding(10.dp),
     verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
@@ -849,9 +863,7 @@ private fun TrustedContactsCard(
       Box(
         modifier = Modifier
           .weight(1f)
-          .clip(RoundedCornerShape(7.dp))
-          .background(ObsidianBgTop.copy(alpha = 0.85f))
-          .border(0.8.dp, accent.copy(alpha = 0.30f), RoundedCornerShape(7.dp))
+          .jarvisInputPlate(accent)
           .padding(horizontal = 9.dp, vertical = 7.dp),
       ) {
         if (draftContact.isEmpty()) {
@@ -938,21 +950,25 @@ private fun StatusPill(
     PillState.WARN -> WarmSunAccent
     PillState.FAULT -> CrimsonBright
   }
+  val plateAccent = if (state == PillState.FAULT) Crimson else tint
   Row(
     modifier = Modifier
-      .clip(RoundedCornerShape(999.dp))
-      .background(GlassSurfaceElevated.copy(alpha = 0.78f))
-      .border(0.9.dp, tint.copy(alpha = 0.68f), RoundedCornerShape(999.dp))
+      .starkHudPlate(
+        accent = plateAccent,
+        focused = state != PillState.OK,
+        showBrackets = true,
+        bracketScale = 0.36f,
+        plateAlpha = 0.86f,
+      )
       .clickable(onClick = onClick)
       .padding(horizontal = 9.dp, vertical = 5.dp),
     verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(5.dp),
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
   ) {
     Box(
       modifier = Modifier
-        .size(6.dp)
-        .clip(CircleShape)
-        .background(tint),
+        .size(5.dp)
+        .background(if (state == PillState.FAULT) Crimson else tint),
     )
     Text(
       text = "$label: $value",
@@ -979,9 +995,13 @@ private fun ApiKeyVaultCard(
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(10.dp))
-      .background(GlassSurface.copy(alpha = 0.72f))
-      .border(0.8.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+      .starkHudPlate(
+        accent = accent.copy(alpha = 0.75f),
+        focused = false,
+        showBrackets = true,
+        bracketScale = 0.52f,
+        plateAlpha = 0.88f,
+      )
       .padding(10.dp),
     verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
@@ -1014,9 +1034,7 @@ private fun ApiKeyVaultCard(
       Box(
         modifier = Modifier
           .weight(1f)
-          .clip(RoundedCornerShape(7.dp))
-          .background(ObsidianBgTop.copy(alpha = 0.85f))
-          .border(0.8.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(7.dp))
+          .jarvisInputPlate(accent)
           .padding(horizontal = 9.dp, vertical = 7.dp),
       ) {
         if (draftKey.isEmpty()) {
@@ -1100,12 +1118,17 @@ private fun JarvisEventCard(
     DateFormat.format("HH:mm:ss", Date(event.createdAtMs)).toString()
   }
 
+  val borderUrgencyAccent = if (urgencyColor == CrimsonBright) Crimson else urgencyColor
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(10.dp))
-      .background(GlassSurface.copy(alpha = 0.78f))
-      .border(0.8.dp, urgencyColor.copy(alpha = 0.42f), RoundedCornerShape(10.dp))
+      .starkHudPlate(
+        accent = borderUrgencyAccent,
+        focused = urgencyLabel == "CRITICAL" || urgencyLabel == "HIGH",
+        showBrackets = true,
+        bracketScale = 0.48f,
+        plateAlpha = 0.88f,
+      )
       .padding(10.dp),
     verticalArrangement = Arrangement.spacedBy(5.dp),
   ) {
@@ -1121,9 +1144,8 @@ private fun JarvisEventCard(
       ) {
         Box(
           modifier = Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .background(urgencyColor.copy(alpha = 0.16f))
-            .border(0.7.dp, urgencyColor.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+            .background(urgencyColor.copy(alpha = 0.14f))
+            .border(0.7.dp, borderUrgencyAccent.copy(alpha = 0.72f))
             .padding(horizontal = 5.dp, vertical = 2.dp),
         ) {
           Text(
@@ -1206,13 +1228,7 @@ private fun JarvisEventCard(
       Box(
         modifier = Modifier
           .weight(1f)
-          .clip(RoundedCornerShape(6.dp))
-          .background(ObsidianBgTop.copy(alpha = 0.78f))
-          .border(
-            0.7.dp,
-            if (event.canReplyNow) accent.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.1f),
-            RoundedCornerShape(6.dp),
-          )
+          .jarvisInputPlate(if (event.canReplyNow) accent else Color.White.copy(alpha = 0.25f))
           .padding(horizontal = 8.dp, vertical = 6.dp),
       ) {
         if (event.canReplyNow) {
@@ -1270,9 +1286,13 @@ private fun SavedPlacesContextDebugCard(
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(10.dp))
-      .background(GlassSurface.copy(alpha = 0.72f))
-      .border(0.8.dp, accent.copy(alpha = 0.32f), RoundedCornerShape(10.dp))
+      .starkHudPlate(
+        accent = if (ambient.focusQuietActive) WarmSunAccent else accent,
+        focused = ambient.focusQuietActive,
+        showBrackets = true,
+        bracketScale = 0.56f,
+        plateAlpha = 0.88f,
+      )
       .padding(10.dp),
     verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
@@ -1300,8 +1320,8 @@ private fun SavedPlacesContextDebugCard(
     Column(
       modifier = Modifier
         .fillMaxWidth()
-        .clip(RoundedCornerShape(7.dp))
-        .background(ObsidianBgTop.copy(alpha = 0.75f))
+        .background(Color(0xD9050508))
+        .border(0.7.dp, accent.copy(alpha = 0.25f))
         .padding(8.dp),
       verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
@@ -1377,9 +1397,7 @@ private fun SavedPlacesContextDebugCard(
       Box(
         modifier = Modifier
           .weight(1f)
-          .clip(RoundedCornerShape(7.dp))
-          .background(ObsidianBgTop.copy(alpha = 0.85f))
-          .border(0.8.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(7.dp))
+          .jarvisInputPlate(accent)
           .padding(horizontal = 9.dp, vertical = 7.dp),
       ) {
         if (draftSsid.isEmpty()) {
@@ -1467,6 +1485,11 @@ private fun SavedPlacesContextDebugCard(
   }
 }
 
+private fun Modifier.jarvisInputPlate(accent: Color): Modifier =
+  this
+    .background(Color(0xF0050505))
+    .border(0.8.dp, accent.copy(alpha = 0.45f))
+
 @Composable
 private fun ActionChip(
   text: String,
@@ -1474,23 +1497,20 @@ private fun ActionChip(
   enabled: Boolean,
   onClick: () -> Unit,
 ) {
+  val borderTint = if (tint == CrimsonBright) Crimson else tint
   Box(
     modifier = Modifier
-      .clip(RoundedCornerShape(6.dp))
-      .background(
-        if (enabled) GlassSurfaceElevated.copy(alpha = 0.9f) else GlassSurface.copy(alpha = 0.45f)
-      )
+      .background(if (enabled) Color(0xE60A0D12) else Color(0x99050505))
       .border(
         0.8.dp,
-        if (enabled) tint.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.1f),
-        RoundedCornerShape(6.dp),
+        if (enabled) borderTint.copy(alpha = 0.72f) else Color.White.copy(alpha = 0.14f),
       )
       .clickable(enabled = enabled, onClick = onClick)
       .padding(horizontal = 8.dp, vertical = 6.dp),
   ) {
     Text(
       text = text,
-      color = tint,
+      color = if (enabled) tint else tint.copy(alpha = 0.42f),
       fontFamily = FontFamily.Monospace,
       fontSize = 9.5.sp,
       fontWeight = FontWeight.Bold,

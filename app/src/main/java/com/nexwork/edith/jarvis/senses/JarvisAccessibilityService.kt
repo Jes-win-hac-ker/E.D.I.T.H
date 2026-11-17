@@ -7,7 +7,9 @@ import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Rect
@@ -21,6 +23,9 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.util.SparseArray
 import android.view.Gravity
 import android.view.KeyEvent
@@ -179,25 +184,53 @@ class JarvisAccessibilityService : AccessibilityService() {
         ?.let { resources.getDimensionPixelSize(it) }
         ?: (28f * density).toInt()
 
-      val pillBg = GradientDrawable().apply {
+      val strokePx = (1.2f * density).toInt().coerceAtLeast(1)
+      val tickLen = 6f * density
+      val bracketPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#CCF8FAFC")
+        style = Paint.Style.STROKE
+        strokeWidth = 1.2f * density
+      }
+      val pillBg = object : GradientDrawable() {
+        override fun draw(canvas: Canvas) {
+          super.draw(canvas)
+          val b = bounds
+          if (b.width() <= 0 || b.height() <= 0) return
+          val l = b.left.toFloat()
+          val t = b.top.toFloat()
+          val r = b.right.toFloat()
+          val bt = b.bottom.toFloat()
+          canvas.drawLine(l, t + tickLen, l, t, bracketPaint)
+          canvas.drawLine(l, t, l + tickLen, t, bracketPaint)
+          canvas.drawLine(r - tickLen, bt, r, bt, bracketPaint)
+          canvas.drawLine(r, bt, r, bt - tickLen, bracketPaint)
+        }
+      }.apply {
         shape = GradientDrawable.RECTANGLE
-        cornerRadius = 20f * density
-        setColor(Color.parseColor("#EB16090D"))
-        setStroke((1.4f * density).toInt().coerceAtLeast(1), Color.parseColor("#FFFF4D5E"))
+        cornerRadius = 0f
+        setColor(Color.parseColor("#EB050508"))
+        setStroke(strokePx, Color.parseColor("#FFE01432"))
       }
 
       val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
       val pill = TextView(this).apply {
-        text = "■ STOP"
+        text = SpannableString("■ STOP").apply {
+          setSpan(
+            ForegroundColorSpan(Color.parseColor("#FFFF4D5E")),
+            0,
+            1,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+          )
+        }
         setTextColor(Color.parseColor("#FFF8FAFC"))
-        textSize = 12f
+        textSize = 11.5f
         typeface = Typeface.MONOSPACE
         setTypeface(typeface, Typeface.BOLD)
         letterSpacing = 0.08f
         background = pillBg
         elevation = 10f * density
-        val hPad = (14f * density).toInt()
-        val vPad = (9f * density).toInt()
+        val hPad = (12f * density).toInt()
+        val vPad = (8f * density).toInt()
         setPadding(hPad, vPad, hPad, vPad)
       }
 

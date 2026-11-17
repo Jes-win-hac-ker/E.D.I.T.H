@@ -2446,47 +2446,6 @@ private fun DrawScope.drawDualTracedRect(
   }
 }
 
-private fun DrawScope.drawCompactHudBrackets(
-  trace: Float,
-  cornerAt: FloatArray,
-  barPx: Float,
-  scale: Float,
-  tint: Color,
-  trTint: Color,
-  blTint: Color,
-  wOverride: Float = size.width,
-  hOverride: Float = size.height,
-) {
-  val w = wOverride
-  val h = hOverride
-  val maxV = h * 0.42f
-  val maxL = w * 0.36f
-  if (trace >= cornerAt[0]) {
-    val v = (17.5f.dp.toPx() * scale).coerceAtMost(maxV)
-    val l = (18f.dp.toPx() * scale).coerceAtMost(maxL)
-    drawRect(tint, Offset.Zero, Size(barPx, v))
-    drawRect(tint, Offset.Zero, Size(l, barPx))
-  }
-  if (trace >= cornerAt[1]) {
-    val v = (17.5f.dp.toPx() * scale).coerceAtMost(maxV)
-    val l = (32.5f.dp.toPx() * scale).coerceAtMost(maxL)
-    drawRect(trTint, Offset(w - barPx, 0f), Size(barPx, v))
-    drawRect(trTint, Offset(w - l, 0f), Size(l, barPx))
-  }
-  if (trace >= cornerAt[2]) {
-    val v = (6f.dp.toPx() * scale).coerceAtMost(maxV)
-    val l = (39f.dp.toPx() * scale).coerceAtMost(maxL)
-    drawRect(tint, Offset(w - barPx, h - v), Size(barPx, v))
-    drawRect(tint, Offset(w - l, h - barPx), Size(l, barPx))
-  }
-  if (trace >= cornerAt[3]) {
-    val v = (11.5f.dp.toPx() * scale).coerceAtMost(maxV)
-    val l = (44.5f.dp.toPx() * scale).coerceAtMost(maxL)
-    drawRect(blTint, Offset(0f, h - v), Size(barPx, v))
-    drawRect(blTint, Offset(0f, h - barPx), Size(l, barPx))
-  }
-}
-
 private fun DrawScope.drawLaserTip(pos: Offset, accent: Color) {
   drawCircle(accent.copy(alpha = 0.36f), 4.2f.dp.toPx(), pos)
   drawCircle(Color.White.copy(alpha = 0.95f), 1.5f.dp.toPx(), pos)

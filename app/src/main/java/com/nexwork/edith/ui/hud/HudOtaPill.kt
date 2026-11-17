@@ -137,9 +137,49 @@ fun HudOtaPill(
   if (otaState !is OtaState.Idle) {
     lastNonIdleState = otaState
   }
+  val renderState = if (otaState !is OtaState.Idle) otaState else lastNonIdleState
+  val copy = renderState.toHudCopy()
 
+  HudTelemetryRail(
+    visible = shouldShow && renderState !is OtaState.Idle,
+    eyebrow = copy.eyebrow,
+    label = copy.label,
+    badge = copy.badge,
+    dismissible = copy.dismissible,
+    clickEnabled = renderState is OtaState.Available || renderState is OtaState.ReadyToInstall,
+    isError = copy.isError,
+    isScanning = copy.isScanning,
+    progressFraction = if (renderState is OtaState.Downloading) renderState.progress / 100f else null,
+    onClick = onClick,
+    onDismiss = onDismiss,
+    onMountedChange = onMountedChange,
+    modifier = modifier,
+  )
+}
+
+/**
+ * Shared frameless Stark HUD orbital telemetry rail matching [HudClock] horizon geometry:
+ * center-out laser-traced baseline, zenith pip, `drawDecrypt` monospace decode, optional
+ * progress/sweep bar, bold accent action badge, and `×` dismiss.
+ */
+@Composable
+fun HudTelemetryRail(
+  visible: Boolean,
+  eyebrow: String,
+  label: String,
+  badge: String?,
+  dismissible: Boolean,
+  onClick: () -> Unit,
+  onDismiss: () -> Unit,
+  modifier: Modifier = Modifier,
+  clickEnabled: Boolean = true,
+  isError: Boolean = false,
+  isScanning: Boolean = false,
+  progressFraction: Float? = null,
+  onMountedChange: (Boolean) -> Unit = {},
+) {
   val revealAnim = remember { Animatable(0f) }
-  var mounted by remember { mutableStateOf(shouldShow) }
+  var mounted by remember { mutableStateOf(visible) }
   var isDismissing by remember { mutableStateOf(false) }
   val currentOnMountedChange = rememberUpdatedState(onMountedChange)
 
@@ -147,8 +187,8 @@ fun HudOtaPill(
     currentOnMountedChange.value(mounted)
   }
 
-  LaunchedEffect(shouldShow) {
-    if (shouldShow) {
+  LaunchedEffect(visible) {
+    if (visible) {
       isDismissing = false
       mounted = true
       val showMs = ((1f - revealAnim.value).coerceIn(0f, 1f) * 420f).roundToInt().coerceAtLeast(1)
@@ -164,23 +204,18 @@ fun HudOtaPill(
 
   if (!mounted) return
 
-  val renderState = if (otaState !is OtaState.Idle) otaState else lastNonIdleState
-  if (renderState is OtaState.Idle) return
-  val copy = renderState.toHudCopy()
-
   val density = LocalDensity.current
   val haptic = LocalHapticFeedback.current
   val launcherStyle = LocalLauncherStyle.current
   val accentColor = rememberUpdatedState(launcherStyle.accent)
 
-  val rawProgress = if (renderState is OtaState.Downloading) renderState.progress / 100f else 0f
   val animatedProgress by animateFloatAsState(
-    targetValue = rawProgress.coerceIn(0f, 1f),
+    targetValue = (progressFraction ?: 0f).coerceIn(0f, 1f),
     animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
-    label = "otaProgress",
+    label = "hudRailProgress",
   )
 
-  val sweepTransition = rememberInfiniteTransition(label = "otaSweep")
+  val sweepTransition = rememberInfiniteTransition(label = "hudRailSweep")
   val sweepPhase by sweepTransition.animateFloat(
     initialValue = 0f,
     targetValue = 1f,
@@ -188,7 +223,7 @@ fun HudOtaPill(
       animation = tween(durationMillis = 1150, easing = FastOutSlowInEasing),
       repeatMode = RepeatMode.Reverse,
     ),
-    label = "otaSweepPhase",
+    label = "hudRailSweepPhase",
   )
 
   val eyebrowPaint = remember(density) { monoPaint(density, 7.5f, 1.1f, Paint.Align.LEFT, 180) }
@@ -221,7 +256,7 @@ fun HudOtaPill(
       .clickable(
         interactionSource = rowInteraction,
         indication = null,
-        enabled = !isDismissing && (renderState is OtaState.Available || renderState is OtaState.ReadyToInstall),
+        enabled = !isDismissing && clickEnabled,
       ) {
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         onClick()
@@ -264,7 +299,7 @@ fun HudOtaPill(
         if (trace > 0.01f) {
           val leftX = cx - halfSpan * trace
           val rightX = cx + halfSpan * trace
-          val baseColor = if (copy.isError) {
+          val baseColor = if (isError) {
             Crimson.copy(alpha = 0.62f * lineAlpha)
           } else {
             activeAccent.copy(alpha = 0.45f * lineAlpha)
@@ -282,7 +317,7 @@ fun HudOtaPill(
             drawCircle(Color.White.copy(alpha = 0.92f * lineAlpha), 1.4f.dp.toPx(), Offset(leftX, baselineY))
             drawCircle(activeAccent.copy(alpha = 0.35f * lineAlpha), 4.0f.dp.toPx(), Offset(rightX, baselineY))
             drawCircle(Color.White.copy(alpha = 0.92f * lineAlpha), 1.4f.dp.toPx(), Offset(rightX, baselineY))
-          } else if (renderState is OtaState.Downloading && trace >= 0.985f) {
+          } else if (progressFraction != null && trace >= 0.985f) {
             // Left-to-right laser progress bar
             val fillX = (size.width * animatedProgress).coerceAtLeast(2.dp.toPx())
             drawLine(
@@ -294,12 +329,12 @@ fun HudOtaPill(
             )
             drawCircle(activeAccent.copy(alpha = 0.38f * lineAlpha), 4.2f.dp.toPx(), Offset(fillX, baselineY))
             drawCircle(TextPureWhite.copy(alpha = 0.95f * lineAlpha), 1.5f.dp.toPx(), Offset(fillX, baselineY))
-          } else if (copy.isScanning && trace >= 0.985f) {
+          } else if (isScanning && trace >= 0.985f) {
             // Sweeping laser pulse along the baseline during scan/apply
             val pulseCenter = size.width * sweepPhase
             val pulseHalf = size.width * 0.14f
             val pStart = (pulseCenter - pulseHalf).coerceIn(0f, size.width)
-            val pEnd = (pulseCenter + pulseHalf).coerceIn(0f, size.width)
+            val pEnd = (pulseCenter + pulseHalf).coerceAtInCompat(0f, size.width)
             drawLine(
               color = activeAccent.copy(alpha = 0.9f * lineAlpha),
               start = Offset(pStart, baselineY),
@@ -329,9 +364,9 @@ fun HudOtaPill(
         // 2. Left-aligned micro-eyebrow and primary readout matching HudClock monospace style
         if (textAlpha > 0.005f) {
           val rightReserve = when {
-            copy.badge != null && copy.dismissible -> 96.dp.toPx()
-            copy.badge != null -> 56.dp.toPx()
-            copy.dismissible -> 40.dp.toPx()
+            badge != null && dismissible -> 96.dp.toPx()
+            badge != null -> 56.dp.toPx()
+            dismissible -> 40.dp.toPx()
             else -> 0f
           }
           val availWidth = (size.width - rightReserve).coerceAtLeast(48.dp.toPx())
@@ -344,19 +379,19 @@ fun HudOtaPill(
           )
           val eyebrowBaseline = centerBaseline(eyebrowPaint, 8.dp.toPx()) + textSlideY
           if (isDismissing) {
-            drawContext.canvas.nativeCanvas.drawText(copy.eyebrow, 0f, eyebrowBaseline, eyebrowPaint)
+            drawContext.canvas.nativeCanvas.drawText(eyebrow, 0f, eyebrowBaseline, eyebrowPaint)
           } else {
-            drawDecrypt(copy.eyebrow, decryptP, 31, eyebrowPaint, 0f, eyebrowBaseline)
+            drawDecrypt(eyebrow, decryptP, 31, eyebrowPaint, 0f, eyebrowBaseline)
           }
 
           val fittedLabel = TextUtils.ellipsize(
-            copy.label,
+            label,
             labelPaint,
             availWidth,
             TextUtils.TruncateAt.END,
           ).toString()
           val alphaInt = (255f * textAlpha).roundToInt().coerceIn(0, 255)
-          labelPaint.color = if (copy.isError) {
+          labelPaint.color = if (isError) {
             android.graphics.Color.argb(alphaInt, 255, 77, 94)
           } else {
             android.graphics.Color.argb(alphaInt, 248, 250, 252)
@@ -380,17 +415,17 @@ fun HudOtaPill(
         },
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      if (copy.badge != null) {
+      if (badge != null) {
         Text(
-          text = copy.badge,
-          color = if (copy.isError) CrimsonBright else launcherStyle.accent,
+          text = badge,
+          color = if (isError) CrimsonBright else launcherStyle.accent,
           fontFamily = FontFamily.Monospace,
           fontSize = 11.sp,
           fontWeight = FontWeight.Bold,
           letterSpacing = 1.sp,
         )
       }
-      if (copy.dismissible) {
+      if (dismissible) {
         Spacer(Modifier.size(4.dp))
         Box(
           modifier = Modifier
@@ -417,3 +452,5 @@ fun HudOtaPill(
     }
   }
 }
+
+private fun Float.coerceAtInCompat(min: Float, max: Float): Float = coerceIn(min, max)

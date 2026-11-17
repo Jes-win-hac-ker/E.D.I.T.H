@@ -2,12 +2,18 @@ package com.nexwork.edith.ui.hud
 
 import android.graphics.Paint
 import android.graphics.Typeface
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.sin
 
@@ -165,3 +171,97 @@ internal fun frameProgress(reveal: Float): Float = (reveal * 2.6f).coerceIn(0f, 
 
 /** Back of the reveal: text and icon, arriving after the frame is drawn. */
 internal fun contentProgress(reveal: Float): Float = ((reveal - 0.3f) / 0.7f).coerceIn(0f, 1f)
+
+internal val HudPlateDarkBrush: Brush = Brush.verticalGradient(
+  listOf(Color(0xDC050505), Color(0xDC111111)),
+)
+
+/**
+ * Draws the four asymmetric HUD corner L-brackets matching [CompactHudCard] and container frames.
+ */
+fun DrawScope.drawCompactHudBrackets(
+  trace: Float,
+  cornerAt: FloatArray,
+  barPx: Float,
+  scale: Float,
+  tint: Color,
+  trTint: Color,
+  blTint: Color,
+  wOverride: Float = size.width,
+  hOverride: Float = size.height,
+) {
+  val w = wOverride
+  val h = hOverride
+  val maxV = h * 0.42f
+  val maxL = w * 0.36f
+  if (trace >= cornerAt[0]) {
+    val v = (17.5f.dp.toPx() * scale).coerceAtMost(maxV)
+    val l = (18f.dp.toPx() * scale).coerceAtMost(maxL)
+    drawRect(tint, Offset.Zero, Size(barPx, v))
+    drawRect(tint, Offset.Zero, Size(l, barPx))
+  }
+  if (trace >= cornerAt[1]) {
+    val v = (17.5f.dp.toPx() * scale).coerceAtMost(maxV)
+    val l = (32.5f.dp.toPx() * scale).coerceAtMost(maxL)
+    drawRect(trTint, Offset(w - barPx, 0f), Size(barPx, v))
+    drawRect(trTint, Offset(w - l, 0f), Size(l, barPx))
+  }
+  if (trace >= cornerAt[2]) {
+    val v = (6f.dp.toPx() * scale).coerceAtMost(maxV)
+    val l = (39f.dp.toPx() * scale).coerceAtMost(maxL)
+    drawRect(tint, Offset(w - barPx, h - v), Size(barPx, v))
+    drawRect(tint, Offset(w - l, h - barPx), Size(l, barPx))
+  }
+  if (trace >= cornerAt[3]) {
+    val v = (11.5f.dp.toPx() * scale).coerceAtMost(maxV)
+    val l = (44.5f.dp.toPx() * scale).coerceAtMost(maxL)
+    drawRect(blTint, Offset(0f, h - v), Size(barPx, v))
+    drawRect(blTint, Offset(0f, h - barPx), Size(l, barPx))
+  }
+}
+
+/**
+ * Applies E.D.I.T.H's sharp zero-radius Stark HUD void plate with perimeter keyline and corner
+ * L-brackets, keeping overlays and drawer cards consistent with [CompactHudCard].
+ */
+fun Modifier.starkHudPlate(
+  accent: Color,
+  focused: Boolean = false,
+  showBrackets: Boolean = true,
+  bracketScale: Float = 0.56f,
+  plateAlpha: Float = 0.88f,
+): Modifier = drawWithCache {
+  val strokePx = 0.9f.dp.toPx()
+  val barPx = 1.15f.dp.toPx()
+  val keylineColor = if (focused) accent.copy(alpha = 0.85f) else accent.copy(alpha = 0.34f)
+  val bracketWhite = Color.White.copy(alpha = if (focused) 0.94f else 0.56f)
+  val trColor = if (focused) accent.copy(alpha = 0.92f) else accent.copy(alpha = 0.62f)
+  val blColor = if (focused) accent.copy(alpha = 0.54f) else accent.copy(alpha = 0.35f)
+  val corners = floatArrayOf(0f, 0f, 0f, 0f)
+  val bgBrush = Brush.verticalGradient(
+    listOf(
+      Color(0xFF050505).copy(alpha = plateAlpha),
+      Color(0xFF111111).copy(alpha = plateAlpha),
+    ),
+  )
+  onDrawBehind {
+    drawRect(brush = bgBrush)
+    drawRect(
+      color = keylineColor,
+      topLeft = Offset(strokePx * 0.5f, strokePx * 0.5f),
+      size = Size((size.width - strokePx).coerceAtLeast(1f), (size.height - strokePx).coerceAtLeast(1f)),
+      style = Stroke(width = strokePx),
+    )
+    if (showBrackets) {
+      drawCompactHudBrackets(
+        trace = 1f,
+        cornerAt = corners,
+        barPx = barPx,
+        scale = bracketScale,
+        tint = bracketWhite,
+        trTint = trColor,
+        blTint = blColor,
+      )
+    }
+  }
+}

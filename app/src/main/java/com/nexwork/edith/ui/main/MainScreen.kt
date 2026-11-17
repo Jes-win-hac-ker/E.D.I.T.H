@@ -589,7 +589,7 @@ fun MainScreen(
         .padding(start = 18.dp, end = 18.dp, top = otaTop),
     )
 
-    val ambientPillTargetTop = (if (isOtaMounted) otaTop - 70.dp else otaTop - 18.dp).coerceAtLeast(36.dp)
+    val ambientPillTargetTop = (if (isOtaMounted) otaTop - 52.dp else otaTop).coerceAtLeast(36.dp)
     val ambientPillTop by animateDpAsState(
       targetValue = ambientPillTargetTop,
       animationSpec = tween(220, easing = FastOutSlowInEasing),
