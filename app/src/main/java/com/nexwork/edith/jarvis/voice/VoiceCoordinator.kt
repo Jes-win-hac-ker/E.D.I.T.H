@@ -176,32 +176,51 @@ class VoiceCoordinator(
           }
         }
 
+        val routeOk = audioRouter.beginVoiceRoute()
+        _status.update {
+          it.copy(
+            routeLabel = audioRouter.routeLabel,
+            earbudsConnected = audioRouter.earbudsConnected(),
+          )
+        }
+        if (!routeOk) {
+          throw IllegalStateException("Bluetooth headset SCO mic failed to connect (${audioRouter.routeLabel})")
+        }
+
         val utterances = mutableListOf<ShortArray>()
         for (step in 1..3) {
           currentCoroutineContext().ensureActive()
-          val prompt = ENROLLMENT_PROMPTS[step - 1]
           _status.update {
             it.copy(
               mode = VoiceSessionMode.ENROLLING,
               enrollmentStep = step,
-              lastTranscriptOrStatus = "Step $step/3: \"$prompt\"",
+              lastTranscriptOrStatus = "Step $step/3: Read prompt aloud (${audioRouter.routeLabel})...",
             )
           }
-          val clip = captureSingleUtterance(maxWaitMs = 7_500L)
+          val clip = captureSingleUtterance(step = step, maxWaitMs = 10_000L)
           if (clip == null || clip.size < VoiceprintGate.MIN_SPEECH_SAMPLES) {
-            throw IllegalStateException("Enrollment step $step captured too little speech. Speak clearly close to the mic.")
+            val heardMs = (clip?.size ?: 0) / 16
+            throw IllegalStateException(
+              "Enrollment step $step heard only ${heardMs}ms via ${audioRouter.routeLabel} (need >=800ms).",
+            )
           }
           utterances += clip
+          if (step < 3) {
+            _status.update { it.copy(lastTranscriptOrStatus = "Step $step/3 captured! Next sentence...") }
+            delay(450)
+          }
         }
 
         _status.update { it.copy(lastTranscriptOrStatus = "Computing encrypted speaker centroid...") }
         voiceprintGate.enroll(utterances)
+        audioRouter.endVoiceRoute()
         _status.update {
           it.copy(
             voiceprintEnrolled = true,
             speakerModelReady = true,
             mode = VoiceSessionMode.IDLE,
             enrollmentStep = 0,
+            routeLabel = if (audioRouter.isBluetoothHeadsetConnected()) "BT HEADSET READY" else audioRouter.routeLabel,
             lastConfidenceScore = 1.0f,
             lastConfidenceAccepted = true,
             lastTranscriptOrStatus = "Voiceprint enrolled (3 sentences) & Keystore-encrypted",
@@ -223,6 +242,8 @@ class VoiceCoordinator(
           )
         }
         onUiFault(msg)
+      } finally {
+        audioRouter.endVoiceRoute()
       }
     }
     synchronized(jobLock) { enrollJob = job }
@@ -326,17 +347,30 @@ class VoiceCoordinator(
   private fun startWakeWordLoop() {
     cancelActiveJobs()
     val job = scope.launch(Dispatchers.IO) {
-      while (currentCoroutineContext().isActive && wakeWordEnabledFlag) {
-        _status.update {
-          it.copy(
-            mode = if (vadEngine.computePauseReason() != null) VoiceSessionMode.PAUSED else VoiceSessionMode.WAKE_LISTENING,
-            lastTranscriptOrStatus = if (voiceprintGate.isEnrolled()) {
-              "Listening with Silero VAD + Speaker Gate (>= 0.72)..."
-            } else {
-              "Wake-Word waiting: enroll voiceprint first for speaker lock"
-            },
-          )
-        }
+      try {
+        while (currentCoroutineContext().isActive && wakeWordEnabledFlag) {
+          if (audioRouter.isBluetoothHeadsetConnected() && !audioRouter.beginVoiceRoute()) {
+            _status.update {
+              it.copy(
+                routeLabel = audioRouter.routeLabel,
+                lastTranscriptOrStatus = "Waiting for BT headset SCO link...",
+              )
+            }
+            delay(1_500)
+            continue
+          }
+          _status.update {
+            it.copy(
+              routeLabel = audioRouter.routeLabel,
+              earbudsConnected = audioRouter.earbudsConnected(),
+              mode = if (vadEngine.computePauseReason() != null) VoiceSessionMode.PAUSED else VoiceSessionMode.WAKE_LISTENING,
+              lastTranscriptOrStatus = if (voiceprintGate.isEnrolled()) {
+                "Listening with Silero VAD + Speaker Gate (>= 0.72)..."
+              } else {
+                "Wake-Word waiting: enroll voiceprint first for speaker lock"
+              },
+            )
+          }
         val speechClip = captureWakeSpeechSegment() ?: continue
         if (!voiceprintGate.isEnrolled()) {
           _status.update { it.copy(lastTranscriptOrStatus = "Speech heard — enroll voiceprint to unlock hands-free Live") }
@@ -378,6 +412,9 @@ class VoiceCoordinator(
             "Message: ${it.summary} (sbnKey=${it.sbnKey})."
         }
         runLiveSession(apiKey = apiKey, seedAudio = speechClip, seedPrompt = seedPrompt)
+        }
+      } finally {
+        audioRouter.endSession()
       }
     }
     synchronized(jobLock) { voiceJob = job }
@@ -410,27 +447,29 @@ class VoiceCoordinator(
     }
   }
 
-  private suspend fun captureSingleUtterance(maxWaitMs: Long): ShortArray? {
-    var captured: ShortArray? = null
+  private suspend fun captureSingleUtterance(step: Int, maxWaitMs: Long): ShortArray? {
+    val speechBuf = mutableListOf<ShortArray>()
+    var totalSamples = 0
+    var silenceTail = 0
+    var announcedHearing = false
     runCatching {
       withTimeoutOrNull(maxWaitMs) {
-        val speechBuf = mutableListOf<ShortArray>()
-        var totalSamples = 0
-        var silenceTail = 0
         vadEngine.frames().collect { frame ->
           if (frame.speaking) {
             speechBuf += frame.pcm
             totalSamples += frame.pcm.size
             silenceTail = 0
+            if (!announcedHearing) {
+              announcedHearing = true
+              _status.update { it.copy(lastTranscriptOrStatus = "Step $step/3: Hearing speech...") }
+            }
             if (totalSamples >= AudioDsp.SAMPLE_RATE * 4) {
-              captured = concatShorts(speechBuf, totalSamples)
-              throw WakeSegmentReadyException(captured!!)
+              throw WakeSegmentReadyException(concatShorts(speechBuf, totalSamples))
             }
           } else if (totalSamples > 0) {
             silenceTail++
-            if (totalSamples >= VoiceprintGate.MIN_SPEECH_SAMPLES && silenceTail >= 12) {
-              captured = concatShorts(speechBuf, totalSamples)
-              throw WakeSegmentReadyException(captured!!)
+            if (totalSamples >= VoiceprintGate.MIN_SPEECH_SAMPLES && silenceTail >= 7) {
+              throw WakeSegmentReadyException(concatShorts(speechBuf, totalSamples))
             }
           }
         }
@@ -440,7 +479,7 @@ class VoiceCoordinator(
       if (err is CancellationException) throw err
       throw err
     }
-    return captured
+    return if (totalSamples > 0) concatShorts(speechBuf, totalSamples) else null
   }
 
   private suspend fun runLiveSession(

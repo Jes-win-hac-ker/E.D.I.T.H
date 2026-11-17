@@ -172,7 +172,7 @@ class VoiceprintGate(
 
   companion object {
     const val THRESHOLD = 0.72f
-    const val MIN_SPEECH_SAMPLES = AudioDsp.SAMPLE_RATE // 1.0 s
+    const val MIN_SPEECH_SAMPLES = (AudioDsp.SAMPLE_RATE * 4) / 5 // 0.8 s (79 fbank frames)
     const val MODEL_FILE = "3dspeaker_campplus_en_voxceleb_16k.onnx"
     const val ASSET_PATH = "models/$MODEL_FILE"
     const val MODEL_URL =

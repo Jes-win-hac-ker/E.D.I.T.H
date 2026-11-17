@@ -133,12 +133,15 @@ class VadEngine(
     check(hasMicPermission()) { "RECORD_AUDIO not granted" }
     ensureSession()
     val proximity = sensorManager?.getDefaultSensor(Sensor.TYPE_PROXIMITY)
-    proximity?.let { sensorManager?.registerListener(proximityListener, it, SensorManager.SENSOR_DELAY_NORMAL) }
+    if (proximity != null && sensorManager != null) {
+      sensorManager.registerListener(proximityListener, proximity, SensorManager.SENSOR_DELAY_NORMAL)
+    }
     var record: AudioRecord? = null
     var aec: AcousticEchoCanceler? = null
     var ns: NoiseSuppressor? = null
     var speaking = false
     var silentFrames = 0
+    var zeroFrames = 0
     val buf = ShortArray(FRAME_SAMPLES)
     try {
       while (currentCoroutineContext().isActive) {
@@ -183,6 +186,15 @@ class VadEngine(
           if (n <= 0) error("AudioRecord read failed ($n)")
           read += n
         }
+        val allZero = buf.all { it == 0.toShort() }
+        if (allZero) {
+          zeroFrames++
+          if (zeroFrames >= MAX_ZERO_FRAMES) {
+            error("Audio input silent (0s) via ${router.routeLabel} — check mic / SCO state")
+          }
+        } else {
+          zeroFrames = 0
+        }
         val prob = probability(buf)
         if (prob >= START_THRESHOLD) {
           speaking = true
@@ -211,9 +223,10 @@ class VadEngine(
     const val FRAME_MS = 32
     private const val CONTEXT_SAMPLES = 64
     private const val STATE_SIZE = 2 * 1 * 128
-    private const val START_THRESHOLD = 0.5f
-    private const val END_THRESHOLD = 0.35f
+    private const val START_THRESHOLD = 0.40f
+    private const val END_THRESHOLD = 0.25f
     private const val MIN_SILENCE_FRAMES = 8 // ~256 ms
+    private const val MAX_ZERO_FRAMES = 60 // ~1.9 s of pure digital zeros -> fail fast
     private const val PAUSE_POLL_MS = 500L
     const val MODEL_ASSET = "models/silero_vad.onnx"
   }
