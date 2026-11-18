@@ -1492,12 +1492,12 @@ object JarvisRuntime {
     }
 
     val engine = passiveContextEngine ?: return
-    val savedPlaces = runCatching { database?.getSavedPlaces().orEmpty() }.getOrDefault(emptyList())
-    engine.start(appCtx, savedPlaces)
-    val wakeSaved = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
-      .getBoolean(KEY_WAKE_WORD_VOICE, false)
-    voiceCoordinator?.refreshEnvironment(wakeSaved)
     if (contextCollectorsStarted.compareAndSet(false, true)) {
+      val savedPlaces = runCatching { database?.getSavedPlaces().orEmpty() }.getOrDefault(emptyList())
+      engine.start(appCtx, savedPlaces)
+      val wakeSaved = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
+        .getBoolean(KEY_WAKE_WORD_VOICE, false)
+      voiceCoordinator?.refreshEnvironment(wakeSaved)
       scope.launch {
         engine.contextState.collect { ambient ->
           _uiState.update { it.copy(ambientContext = ambient) }

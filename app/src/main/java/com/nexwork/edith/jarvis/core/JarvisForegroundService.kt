@@ -33,12 +33,15 @@ class JarvisForegroundService : Service() {
 
   override fun onCreate() {
     super.onCreate()
+    lastAppliedMask = -1
     ensureChannel()
-    enterForeground()
+    enterForeground(includeMicrophone = micPromoted)
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     if (intent?.action == ACTION_STOP) {
+      micPromoted = false
+      lastAppliedMask = -1
       JarvisRuntime.emergencyStop(applicationContext, reason = "Baseplate service stopped", bounceHome = false)
       _status.update { it.copy(isRunning = false, lastEventSummary = "Service stopped") }
       ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -49,20 +52,22 @@ class JarvisForegroundService : Service() {
       JarvisRuntime.emergencyStop(applicationContext, reason = "Notification ABORT tapped", bounceHome = true)
       return START_STICKY
     }
+    if (intent?.action == ACTION_PROMOTE_MIC) {
+      micPromoted = true
+      ensureChannel()
+      enterForeground(includeMicrophone = true)
+      return START_STICKY
+    }
+    if (intent?.action == ACTION_DEMOTE_MIC) {
+      micPromoted = false
+      ensureChannel()
+      enterForeground(includeMicrophone = false)
+      return START_STICKY
+    }
 
     ensureChannel()
-    val includeMic = when (intent?.action) {
-      ACTION_PROMOTE_MIC -> {
-        micPromoted = true
-        true
-      }
-      ACTION_DEMOTE_MIC -> {
-        micPromoted = false
-        false
-      }
-      else -> micPromoted
-    }
-    enterForeground(includeMicrophone = includeMic)
+    val wasAlreadyRunning = _status.value.isRunning
+    enterForeground(includeMicrophone = micPromoted)
 
     val now = System.currentTimeMillis()
     _status.update { current ->
@@ -73,20 +78,24 @@ class JarvisForegroundService : Service() {
       )
     }
 
-    // Rehydrate JarvisRuntime if the OS recreated the sticky service after process eviction.
-    JarvisRuntime.ensureInitialized(applicationContext)
+    // Rehydrate JarvisRuntime only if the OS recreated the sticky service or it has not initialized yet.
+    if (!wasAlreadyRunning) {
+      JarvisRuntime.ensureInitialized(applicationContext)
+    }
     return START_STICKY
   }
 
   override fun onTaskRemoved(rootIntent: Intent?) {
     val now = System.currentTimeMillis()
     _status.update { it.copy(lastTaskRemovedAtMs = now) }
-    enterForeground()
+    enterForeground(includeMicrophone = micPromoted)
     scheduleRestartFallback()
     super.onTaskRemoved(rootIntent)
   }
 
   override fun onDestroy() {
+    micPromoted = false
+    lastAppliedMask = -1
     _status.update { it.copy(isRunning = false) }
     super.onDestroy()
   }
@@ -94,7 +103,6 @@ class JarvisForegroundService : Service() {
   override fun onBind(intent: Intent?): IBinder? = null
 
   private fun enterForeground(includeMicrophone: Boolean = false) {
-    val notification = buildStickyNotification()
     val baseMask = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
       var mask = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
       val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
@@ -124,12 +132,18 @@ class JarvisForegroundService : Service() {
     } else {
       baseMask
     }
+    if (fullMask == lastAppliedMask && _status.value.isRunning) {
+      return
+    }
+    val notification = buildStickyNotification()
     runCatching {
       ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, fullMask)
+      lastAppliedMask = fullMask
     }.onFailure { outerErr ->
       if (fullMask != baseMask) {
         runCatching {
           ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, baseMask)
+          lastAppliedMask = baseMask
         }.onFailure { err ->
           _status.update { it.copy(lastError = err.message ?: "Foreground promotion failed") }
         }
@@ -194,6 +208,11 @@ class JarvisForegroundService : Service() {
     @Volatile
     private var micPromoted: Boolean = false
 
+    @Volatile
+    private var lastAppliedMask: Int = -1
+
+    fun isMicPromoted(): Boolean = micPromoted
+
     private val _status = MutableStateFlow(JarvisServiceStatus())
     val status: StateFlow<JarvisServiceStatus> = _status.asStateFlow()
 
@@ -210,6 +229,8 @@ class JarvisForegroundService : Service() {
     }
 
     fun promoteForMicrophone(context: Context) {
+      if (micPromoted && _status.value.isRunning) return
+      micPromoted = true
       val appCtx = context.applicationContext
       val intent = Intent(appCtx, JarvisForegroundService::class.java).apply {
         action = ACTION_PROMOTE_MIC
@@ -218,7 +239,9 @@ class JarvisForegroundService : Service() {
     }
 
     fun demoteMicrophone(context: Context) {
-      if (!micPromoted && !_status.value.isRunning) return
+      if (!micPromoted) return
+      micPromoted = false
+      if (!_status.value.isRunning) return
       val appCtx = context.applicationContext
       val intent = Intent(appCtx, JarvisForegroundService::class.java).apply {
         action = ACTION_DEMOTE_MIC

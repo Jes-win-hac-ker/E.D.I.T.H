@@ -102,7 +102,7 @@ class VoiceCoordinator(
     if (wakeWordSaved && vadEngine.hasMicPermission() && !isAnyVoiceJobActive()) {
       JarvisForegroundService.promoteForMicrophone(appCtx)
       startWakeWordLoop()
-    } else if (!wakeWordSaved && !isAnyVoiceJobActive()) {
+    } else if (!wakeWordSaved && !isAnyVoiceJobActive() && JarvisForegroundService.isMicPromoted()) {
       audioRouter.endSession()
       JarvisForegroundService.demoteMicrophone(appCtx)
     }
