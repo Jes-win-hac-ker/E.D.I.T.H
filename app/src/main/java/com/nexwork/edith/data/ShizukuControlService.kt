@@ -1,6 +1,11 @@
 package com.nexwork.edith.data
 
+import android.app.UiAutomation
 import android.content.Context
+import android.graphics.Rect
+import android.os.HandlerThread
+import android.os.Looper
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.annotation.Keep
 import com.nexwork.edith.jarvis.core.CompactUiNode
 import com.nexwork.edith.jarvis.core.CompactUiTree
@@ -9,7 +14,6 @@ import java.io.File
 import java.io.StringReader
 import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
-import kotlinx.coroutines.delay
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -56,6 +60,7 @@ class ShizukuControlService : IShizukuControlService.Stub {
   }
 
   override fun destroy() {
+    disconnectUiAutomation()
     exitProcess(0)
   }
 
@@ -131,11 +136,135 @@ class ShizukuControlService : IShizukuControlService.Stub {
     }.getOrDefault("WIFI:? | --Hz | DND:?")
   }
 
+  private val uiAutoLock = Any()
+  private var uiAutoThread: HandlerThread? = null
+  private var uiAutomation: UiAutomation? = null
+
+  private fun ensureUiAutomation(): UiAutomation? = synchronized(uiAutoLock) {
+    uiAutomation?.let { return it }
+    return runCatching {
+      val thread = uiAutoThread ?: HandlerThread("shizuku-uiauto").apply {
+        isDaemon = true
+        start()
+      }.also { uiAutoThread = it }
+      val connClass = Class.forName("android.app.UiAutomationConnection")
+      val connCtor = connClass.getDeclaredConstructor().apply { isAccessible = true }
+      val conn = connCtor.newInstance()
+      val iConnClass = Class.forName("android.app.IUiAutomationConnection")
+      val uiAutoCtor = UiAutomation::class.java.getDeclaredConstructor(Looper::class.java, iConnClass).apply {
+        isAccessible = true
+      }
+      val instance = uiAutoCtor.newInstance(thread.looper, conn)
+      val connectWithFlags = runCatching {
+        UiAutomation::class.java.getMethod("connect", Int::class.javaPrimitiveType)
+      }.getOrNull()
+      if (connectWithFlags != null) {
+        // FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES = 1
+        connectWithFlags.invoke(instance, 1)
+      } else {
+        UiAutomation::class.java.getMethod("connect").invoke(instance)
+      }
+      uiAutomation = instance
+      instance
+    }.getOrNull()
+  }
+
+  private fun disconnectUiAutomation() = synchronized(uiAutoLock) {
+    uiAutomation?.let { ua ->
+      runCatching { UiAutomation::class.java.getMethod("disconnect").invoke(ua) }
+    }
+    uiAutomation = null
+    uiAutoThread?.quitSafely()
+    uiAutoThread = null
+  }
+
+  private fun dumpViaUiAutomation(): String {
+    val ua = ensureUiAutomation() ?: return ""
+    val root = runCatching { ua.rootInActiveWindow }.getOrNull()
+      ?: runCatching {
+        disconnectUiAutomation()
+        ensureUiAutomation()?.rootInActiveWindow
+      }.getOrNull()
+      ?: return ""
+    return try {
+      val sb = StringBuilder(4096)
+      sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?><hierarchy rotation=\"0\">")
+      val counter = IntArray(1)
+      appendNodeXml(root, sb, depth = 0, counter = counter)
+      sb.append("</hierarchy>")
+      val xml = sb.toString()
+      if (counter[0] > 0) xml else ""
+    } finally {
+      runCatching {
+        @Suppress("DEPRECATION")
+        root.recycle()
+      }
+    }
+  }
+
+  private fun appendNodeXml(
+    node: AccessibilityNodeInfo,
+    sb: StringBuilder,
+    depth: Int,
+    counter: IntArray,
+  ) {
+    if (depth > 38 || counter[0] >= 550) return
+    counter[0]++
+    val rect = Rect()
+    node.getBoundsInScreen(rect)
+    sb.append("<node")
+    appendXmlAttr(sb, "package", node.packageName?.toString().orEmpty())
+    appendXmlAttr(sb, "class", node.className?.toString().orEmpty())
+    appendXmlAttr(sb, "resource-id", node.viewIdResourceName.orEmpty())
+    appendXmlAttr(sb, "text", node.text?.toString().orEmpty())
+    appendXmlAttr(sb, "content-desc", node.contentDescription?.toString().orEmpty())
+    appendXmlAttr(sb, "clickable", node.isClickable.toString())
+    appendXmlAttr(sb, "editable", node.isEditable.toString())
+    appendXmlAttr(sb, "scrollable", node.isScrollable.toString())
+    appendXmlAttr(sb, "bounds", "[${rect.left},${rect.top}][${rect.right},${rect.bottom}]")
+    val childCount = node.childCount
+    if (childCount <= 0) {
+      sb.append("/>")
+    } else {
+      sb.append(">")
+      for (i in 0 until childCount) {
+        val child = node.getChild(i) ?: continue
+        try {
+          appendNodeXml(child, sb, depth + 1, counter)
+        } finally {
+          runCatching {
+            @Suppress("DEPRECATION")
+            child.recycle()
+          }
+        }
+      }
+      sb.append("</node>")
+    }
+  }
+
+  private fun appendXmlAttr(sb: StringBuilder, name: String, value: String) {
+    sb.append(' ').append(name).append("=\"")
+    for (ch in value) {
+      when (ch) {
+        '&' -> sb.append("&amp;")
+        '<' -> sb.append("&lt;")
+        '>' -> sb.append("&gt;")
+        '"' -> sb.append("&quot;")
+        '\n', '\r' -> sb.append(' ')
+        else -> sb.append(ch)
+      }
+    }
+    sb.append('"')
+  }
+
   override fun dumpUiHierarchyXml(): String {
+    val liveXml = dumpViaUiAutomation()
+    if (liveXml.contains("<node")) return liveXml
+
     val dumpFile = File(UI_DUMP_PATH)
     return runCatching {
       runCatching { if (dumpFile.exists()) dumpFile.delete() }
-      runCommand("uiautomator", "dump", UI_DUMP_PATH, timeoutMs = UI_DUMP_TIMEOUT_MS)
+      runCommand("uiautomator", "dump", "--compressed", UI_DUMP_PATH, timeoutMs = UI_DUMP_TIMEOUT_MS)
       val fileXml = if (dumpFile.exists() && dumpFile.length() > 0L) {
         dumpFile.readText()
       } else {
@@ -234,7 +363,7 @@ class ShizukuControlService : IShizukuControlService.Stub {
     private const val COMMAND_TIMEOUT_MS = 4_000L
     private const val UI_DUMP_TIMEOUT_MS = 6_000L
     const val UI_DUMP_PATH = "/data/local/tmp/jarvis_ui.xml"
-    const val MAX_OUTPUT_NODES = 50
+    const val MAX_OUTPUT_NODES = 80
 
     private val BOUNDS_REGEX = Regex("""\[(\d+),(\d+)]\[(\d+),(\d+)]""")
     private val NODE_TAG_REGEX = Regex("""<node\b([^>]*)/?>""")

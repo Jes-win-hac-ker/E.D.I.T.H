@@ -136,68 +136,54 @@ class PlaybookExecutor(
       }
     }
 
-    // 1.5. Zero-Shizuku Direct Intent Fast-Path (YouTube / Spotify / Maps media & search)
-    parseDirectMediaCommand(commandText)?.let { directCmd ->
-      val dlpBlock = SecurityGateway.inspectOutboundText(directCmd.query)
-      if (dlpBlock != null) {
-        return CommandExecutionResult(
-          ok = false,
-          summary = dlpBlock,
-          traceLog = traceLog,
-          securityBlocked = true,
-        )
-      }
-      val verdict = security.evaluateAndConsume(
-        SecurityActionRequest(
-          actionType = JarvisActionType.OPEN_APP,
-          activePackage = env.currentForegroundPackage(),
-          targetPackage = directCmd.targetPackage,
-          targetLabel = directCmd.targetPackage,
-          runStepIndex = 0,
-        ),
-      )
-      if (verdict is SecurityVerdict.Deny) {
-        return CommandExecutionResult(
-          ok = false,
-          summary = verdict.reason,
-          traceLog = traceLog,
-          securityBlocked = true,
-        )
-      }
-      val launchRes = env.launchMediaOrSearchIntent(
-        targetPackage = directCmd.targetPackage,
-        query = directCmd.query,
-        playImmediately = directCmd.playImmediately,
-      )
-      if (launchRes.isSuccess) {
-        val detail = launchRes.getOrDefault("Launched ${directCmd.targetPackage}")
-        traceLog += "Direct intent fast-path: $detail (0 LLM tokens)"
-        if (directCmd.playImmediately && directCmd.targetPackage == "com.google.android.youtube") {
-          if (settleDelayMs > 0L) delay(settleDelayMs * 3)
-          val tree = env.dumpCompactUiTree()
-          if (tree.blockedReason == null && tree.nodes.isNotEmpty()) {
-            val videoNode = tree.nodes.firstOrNull { n ->
-              n.clickable && n.top > 210 && (n.text.length >= 4 || n.contentDesc.length >= 6) &&
-                !n.viewId.contains("search", ignoreCase = true)
-            }
-            if (videoNode != null) {
-              env.clickNode(videoNode.id)
-              traceLog += "Auto-tapped top video result id=${videoNode.id}"
-            }
-          }
-        }
-        return CommandExecutionResult(
-          ok = true,
-          summary = detail,
-          usedLlmPlanner = false,
-          traceLog = traceLog,
-        )
-      }
-    }
-
     // 2. Fallback to PlannerClient (gemini-4-hydrogen Function Calling)
     val resolvedKey = apiKey?.trim().orEmpty()
     if (resolvedKey.isEmpty()) {
+      // Offline / no-key fallback: try direct media/search intent if no API key is set
+      parseDirectMediaCommand(commandText)?.let { directCmd ->
+        val dlpBlock = SecurityGateway.inspectOutboundText(directCmd.query)
+        if (dlpBlock != null) {
+          return CommandExecutionResult(
+            ok = false,
+            summary = dlpBlock,
+            traceLog = traceLog,
+            securityBlocked = true,
+          )
+        }
+        val verdict = security.evaluateAndConsume(
+          SecurityActionRequest(
+            actionType = JarvisActionType.OPEN_APP,
+            activePackage = env.currentForegroundPackage(),
+            targetPackage = directCmd.targetPackage,
+            targetLabel = directCmd.targetPackage,
+            runStepIndex = 0,
+          ),
+        )
+        if (verdict is SecurityVerdict.Deny) {
+          return CommandExecutionResult(
+            ok = false,
+            summary = verdict.reason,
+            traceLog = traceLog,
+            securityBlocked = true,
+          )
+        }
+        val launchRes = env.launchMediaOrSearchIntent(
+          targetPackage = directCmd.targetPackage,
+          query = directCmd.query,
+          playImmediately = directCmd.playImmediately,
+        )
+        if (launchRes.isSuccess) {
+          val detail = launchRes.getOrDefault("Launched ${directCmd.targetPackage}")
+          traceLog += "Offline direct intent fallback: $detail (no API key)"
+          return CommandExecutionResult(
+            ok = true,
+            summary = detail,
+            usedLlmPlanner = false,
+            traceLog = traceLog,
+          )
+        }
+      }
+
       return CommandExecutionResult(
         ok = false,
         summary = if (candidates.isEmpty()) {
@@ -209,12 +195,13 @@ class PlaybookExecutor(
       )
     }
 
-    traceLog += "Invoking gemini-4-hydrogen planner fallback..."
+    traceLog += "Invoking gemini-4-hydrogen planner..."
     val bridge = GuardedPlannerBridge(
       env = env,
       security = security,
       traceLog = traceLog,
       initialExpectedPkg = targetPackageHint,
+      settleDelayMs = settleDelayMs,
     )
 
     val planResult = planner.runPlan(
@@ -387,6 +374,7 @@ class PlaybookExecutor(
     private val security: SecurityGateway,
     private val traceLog: MutableList<String>,
     initialExpectedPkg: String?,
+    private val settleDelayMs: Long = DEFAULT_STEP_DELAY_MS,
   ) : PlannerToolBridge {
 
     private var latestTree: CompactUiTree? = null
@@ -428,7 +416,11 @@ class PlaybookExecutor(
           securityBlocked = true,
         )
       }
-      val tree = env.dumpCompactUiTree()
+      var tree = env.dumpCompactUiTree()
+      if (tree.blockedReason == null && tree.nodes.isEmpty() && settleDelayMs > 0L) {
+        delay(settleDelayMs)
+        tree = env.dumpCompactUiTree()
+      }
       if (tree.blockedReason != null) {
         return PlannerToolOutcome(
           ok = false,
@@ -451,7 +443,7 @@ class PlaybookExecutor(
       )
     }
 
-    private fun handleOpenApp(args: JsonObject): PlannerToolOutcome {
+    private suspend fun handleOpenApp(args: JsonObject): PlannerToolOutcome {
       val pkg = args["package_name"]?.jsonPrimitive?.content?.trim().orEmpty()
       val verdict = security.evaluateAndConsume(
         SecurityActionRequest(
@@ -476,6 +468,7 @@ class PlaybookExecutor(
           expectedPkg = pkg
           latestTree = null
           uiStepCount++
+          if (settleDelayMs > 0L) delay(settleDelayMs * 2)
           PlannerToolOutcome(
             ok = true,
             summary = msg,
@@ -534,6 +527,7 @@ class PlaybookExecutor(
       return res.fold(
         onSuccess = { msg ->
           uiStepCount++
+          if (settleDelayMs > 0L) delay(settleDelayMs)
           val step = PlaybookStep(
             action = "click_node",
             targetText = node?.text?.takeIf { it.isNotBlank() },
@@ -696,6 +690,9 @@ class PlaybookExecutor(
       return res.fold(
         onSuccess = { msg ->
           uiStepCount++
+          if (settleDelayMs > 0L) {
+            delay(if (keyCode == 66) settleDelayMs * 2 else settleDelayMs)
+          }
           PlannerToolOutcome(
             ok = true,
             summary = msg,
