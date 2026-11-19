@@ -1,5 +1,7 @@
 package com.nexwork.edith.ui.hud
 
+import android.graphics.Paint
+import android.graphics.Typeface
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -14,8 +16,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -37,7 +37,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -174,33 +177,64 @@ fun HudKeyboard(
   val dropPx = with(density) { 18.dp.toPx() }
   val keyShiftPx = with(density) { 5.dp.toPx() }
 
-  // Center-out staggered keycap reveal: center columns appear first (~70ms), edges last (~245ms).
-  fun keyReveal(colFraction: Float): Float {
-    val dist = abs(colFraction - 0.5f) * 2f // 0 = center, 1 = outer edge
-    return if (isDismissing) {
-      val d = 1f - r
-      val start = (1f - dist) * 0.14f
-      1f - hudEaseInCubic(phase(d, start, start + 0.48f))
+  // Read revealAnim.value ONLY inside graphicsLayer / drawBehind lambdas -> 0 recompositions/frame.
+  val deckProgress: () -> Float = {
+    val r = revealAnim.value
+    if (isDismissing) 1f - hudEaseInCubic(phase(1f - r, 0.20f, 1.00f))
+    else hudEaseOutCubic(phase(r, 0.00f, 0.42f))
+  }
+  val crownProgress: () -> Float = {
+    val r = revealAnim.value
+    if (isDismissing) 1f - hudEaseInCubic(phase(1f - r, 0.25f, 0.95f))
+    else hudEaseOutCubic(phase(r, 0.00f, 0.42f))
+  }
+  val stripProgress: () -> Float = {
+    val r = revealAnim.value
+    if (isDismissing) 1f - hudEaseInCubic(phase(1f - r, 0.00f, 0.50f))
+    else hudEaseOutCubic(phase(r, 0.30f, 0.76f))
+  }
+  val flareProgress: () -> Float = {
+    val r = revealAnim.value
+    if (!isDismissing && r in 0.62f..0.98f) {
+      val p = phase(r, 0.62f, 0.98f)
+      if (p < 0.5f) p * 2f else (1f - p) * 2f
     } else {
-      val start = 0.20f + dist * 0.24f
-      hudEaseOutCubic(phase(r, start, start + 0.32f))
+      0f
     }
   }
 
-  // Center-out cipher decryption progress per keycap during the 1000ms activation.
-  fun keyDecrypt(colFraction: Float): Float {
-    if (isDismissing || r >= 0.995f) return 1f
+  fun keyRevealFn(colFraction: Float): () -> Float {
+    val dist = abs(colFraction - 0.5f) * 2f
+    return {
+      val r = revealAnim.value
+      if (isDismissing) {
+        val d = 1f - r
+        val start = (1f - dist) * 0.14f
+        1f - hudEaseInCubic(phase(d, start, start + 0.48f))
+      } else {
+        val start = 0.20f + dist * 0.24f
+        hudEaseOutCubic(phase(r, start, start + 0.32f))
+      }
+    }
+  }
+
+  fun keyDecryptFn(colFraction: Float): () -> Float {
     val dist = abs(colFraction - 0.5f) * 2f
     val start = 0.18f + dist * 0.22f
-    return phase(r, start, (start + 0.48f).coerceAtMost(0.98f))
+    val end = (start + 0.48f).coerceAtMost(0.98f)
+    return {
+      val r = revealAnim.value
+      if (isDismissing || r >= 0.995f) 1f else phase(r, start, end)
+    }
   }
 
   Box(
     modifier = modifier
       .fillMaxWidth()
       .graphicsLayer {
-        alpha = deckP.coerceIn(0f, 1f)
-        translationY = (1f - deckP) * dropPx
+        val p = deckProgress()
+        alpha = p.coerceIn(0f, 1f)
+        translationY = (1f - p) * dropPx
       },
   ) {
     Column(
@@ -208,7 +242,7 @@ fun HudKeyboard(
         .fillMaxWidth()
         .background(style.voidTop.copy(alpha = 0.94f))
         .drawBehind {
-          // Phase 1: Center-out 1dp orbital crown laser trace + twin leading sparks
+          val crownTrace = crownProgress()
           val halfW = size.width * 0.5f
           val span = halfW * crownTrace
           if (span > 1f) {
@@ -237,8 +271,9 @@ fun HudKeyboard(
           .fillMaxWidth()
           .height(30.dp)
           .graphicsLayer {
-            alpha = stripP
-            translationY = (1f - stripP) * keyShiftPx
+            val sp = stripProgress()
+            alpha = sp
+            translationY = (1f - sp) * keyShiftPx
           }
           .pointerInput(Unit) {
             awaitEachGesture {
@@ -269,10 +304,14 @@ fun HudKeyboard(
           verticalAlignment = Alignment.CenterVertically,
         ) {
           HudKeyboardLogic.COMMAND_CHIPS.forEachIndexed { idx, chip ->
+            val chipDecrypt: () -> Float = {
+              val r = revealAnim.value
+              if (isDismissing || r >= 0.995f) 1f else phase(r, 0.28f + idx * 0.05f, 0.85f)
+            }
             StripChip(
               label = chip,
               accent = accent,
-              decryptProgress = if (isDismissing || r >= 0.995f) 1f else phase(r, 0.28f + idx * 0.05f, 0.85f),
+              decryptProgress = chipDecrypt,
               onClick = {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onCommandChip(chip)
@@ -283,7 +322,10 @@ fun HudKeyboard(
         StripChip(
           label = "SYS IME",
           accent = TextSilver,
-          decryptProgress = if (isDismissing || r >= 0.995f) 1f else phase(r, 0.45f, 0.92f),
+          decryptProgress = {
+            val r = revealAnim.value
+            if (isDismissing || r >= 0.995f) 1f else phase(r, 0.45f, 0.92f)
+          },
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             onSwitchToSystemIme()
@@ -292,7 +334,7 @@ fun HudKeyboard(
         StripChip(
           label = "v",
           accent = accent,
-          decryptProgress = 1f,
+          decryptProgress = { 1f },
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnHide()
@@ -311,11 +353,12 @@ fun HudKeyboard(
       ) {
         row1.forEachIndexed { idx, ch ->
           val col = (idx + 0.5f) / row1.size
-          val kp = keyReveal(col)
+          val kpFn = remember(col) { keyRevealFn(col) }
+          val kdFn = remember(col) { keyDecryptFn(col) }
           HudKeycap(
             label = ch.uppercase(),
             accent = accent,
-            decryptProgress = keyDecrypt(col),
+            decryptProgress = kdFn,
             onPress = {
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
               currentOnAppend(ch)
@@ -323,6 +366,7 @@ fun HudKeyboard(
             modifier = Modifier
               .weight(1f)
               .graphicsLayer {
+                val kp = kpFn()
                 alpha = kp
                 translationY = (1f - kp) * keyShiftPx
               },
@@ -339,11 +383,12 @@ fun HudKeyboard(
       ) {
         row2.forEachIndexed { idx, ch ->
           val col = (idx + 0.5f) / row2.size
-          val kp = keyReveal(col)
+          val kpFn = remember(col) { keyRevealFn(col) }
+          val kdFn = remember(col) { keyDecryptFn(col) }
           HudKeycap(
             label = ch.uppercase(),
             accent = accent,
-            decryptProgress = keyDecrypt(col),
+            decryptProgress = kdFn,
             onPress = {
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
               currentOnAppend(ch)
@@ -351,6 +396,7 @@ fun HudKeyboard(
             modifier = Modifier
               .weight(1f)
               .graphicsLayer {
+                val kp = kpFn()
                 alpha = kp
                 translationY = (1f - kp) * keyShiftPx
               },
@@ -364,12 +410,13 @@ fun HudKeyboard(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        val symP = keyReveal(0.05f)
+        val symP = remember { keyRevealFn(0.05f) }
+        val symD = remember { keyDecryptFn(0.05f) }
         HudFunctionKey(
           label = if (symbolsLayer) "ABC" else "123",
           accent = accent,
           highlighted = symbolsLayer,
-          decryptProgress = keyDecrypt(0.05f),
+          decryptProgress = symD,
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             symbolsLayer = !symbolsLayer
@@ -377,17 +424,19 @@ fun HudKeyboard(
           modifier = Modifier
             .weight(1.45f)
             .graphicsLayer {
-              alpha = symP
-              translationY = (1f - symP) * keyShiftPx
+              val kp = symP()
+              alpha = kp
+              translationY = (1f - kp) * keyShiftPx
             },
         )
         row3.forEachIndexed { idx, ch ->
           val col = (idx + 1.5f) / 9f
-          val kp = keyReveal(col)
+          val kpFn = remember(col) { keyRevealFn(col) }
+          val kdFn = remember(col) { keyDecryptFn(col) }
           HudKeycap(
             label = ch.uppercase(),
             accent = accent,
-            decryptProgress = keyDecrypt(col),
+            decryptProgress = kdFn,
             onPress = {
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
               currentOnAppend(ch)
@@ -395,15 +444,17 @@ fun HudKeyboard(
             modifier = Modifier
               .weight(1f)
               .graphicsLayer {
+                val kp = kpFn()
                 alpha = kp
                 translationY = (1f - kp) * keyShiftPx
               },
           )
         }
-        val delP = keyReveal(0.95f)
+        val delP = remember { keyRevealFn(0.95f) }
+        val delD = remember { keyDecryptFn(0.95f) }
         BackspaceKey(
           accent = accent,
-          decryptProgress = keyDecrypt(0.95f),
+          decryptProgress = delD,
           onTapDelete = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnBackspace()
@@ -416,8 +467,9 @@ fun HudKeyboard(
           modifier = Modifier
             .weight(1.45f)
             .graphicsLayer {
-              alpha = delP
-              translationY = (1f - delP) * keyShiftPx
+              val kp = delP()
+              alpha = kp
+              translationY = (1f - kp) * keyShiftPx
             },
         )
       }
@@ -429,93 +481,132 @@ fun HudKeyboard(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        val pBang = keyReveal(0.05f)
+        val pBang = remember { keyRevealFn(0.05f) }
+        val dBang = remember { keyDecryptFn(0.05f) }
         HudKeycap(
           label = "!",
           accent = accent,
-          decryptProgress = keyDecrypt(0.05f),
+          decryptProgress = dBang,
           onPress = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnAppend("!")
           },
           modifier = Modifier
             .weight(1f)
-            .graphicsLayer { alpha = pBang; translationY = (1f - pBang) * keyShiftPx },
+            .graphicsLayer { val kp = pBang(); alpha = kp; translationY = (1f - kp) * keyShiftPx },
         )
-        val pComma = keyReveal(0.18f)
+        val pComma = remember { keyRevealFn(0.18f) }
+        val dComma = remember { keyDecryptFn(0.18f) }
         HudKeycap(
           label = ",",
           accent = accent,
-          decryptProgress = keyDecrypt(0.18f),
+          decryptProgress = dComma,
           onPress = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnAppend(",")
           },
           modifier = Modifier
             .weight(0.9f)
-            .graphicsLayer { alpha = pComma; translationY = (1f - pComma) * keyShiftPx },
+            .graphicsLayer { val kp = pComma(); alpha = kp; translationY = (1f - kp) * keyShiftPx },
         )
-        val pSpace = keyReveal(0.50f)
+        val pSpace = remember { keyRevealFn(0.50f) }
+        val dSpace = remember { keyDecryptFn(0.50f) }
         HudKeycap(
           label = "SPACE",
           accent = accent,
           isSubtle = true,
           showPopup = false,
-          decryptProgress = keyDecrypt(0.50f),
+          decryptProgress = dSpace,
           onPress = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnAppend(" ")
           },
           modifier = Modifier
             .weight(4.1f)
-            .graphicsLayer { alpha = pSpace; translationY = (1f - pSpace) * keyShiftPx },
+            .graphicsLayer { val kp = pSpace(); alpha = kp; translationY = (1f - kp) * keyShiftPx },
         )
-        val pDot = keyReveal(0.78f)
+        val pDot = remember { keyRevealFn(0.78f) }
+        val dDot = remember { keyDecryptFn(0.78f) }
         HudKeycap(
           label = ".",
           accent = accent,
-          decryptProgress = keyDecrypt(0.78f),
+          decryptProgress = dDot,
           onPress = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnAppend(".")
           },
           modifier = Modifier
             .weight(0.9f)
-            .graphicsLayer { alpha = pDot; translationY = (1f - pDot) * keyShiftPx },
+            .graphicsLayer { val kp = pDot(); alpha = kp; translationY = (1f - kp) * keyShiftPx },
         )
-        val pAction = keyReveal(0.95f)
+        val pAction = remember { keyRevealFn(0.95f) }
+        val dAction = remember { keyDecryptFn(0.95f) }
         HudFunctionKey(
           label = actionLabel,
           accent = accent,
           highlighted = true,
-          lockFlare = actionLockFlare,
-          decryptProgress = keyDecrypt(0.95f),
+          lockFlare = flareProgress,
+          decryptProgress = dAction,
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             currentOnSubmit()
           },
           modifier = Modifier
             .weight(2.1f)
-            .graphicsLayer { alpha = pAction; translationY = (1f - pAction) * keyShiftPx },
+            .graphicsLayer { val kp = pAction(); alpha = kp; translationY = (1f - kp) * keyShiftPx },
         )
       }
     }
   }
 }
 
-private fun decryptLabel(text: String, progress: Float, seed: Int): String {
-  if (progress >= 1f || text.isEmpty()) return text
+private fun DrawScope.drawCenteredDecrypt(
+  text: String,
+  progress: Float,
+  seed: Int,
+  paint: Paint,
+  settledColor: Color,
+  scramblingColor: Color,
+) {
+  if (text.isEmpty()) return
+  val fm = paint.fontMetrics
+  val baseline = size.height * 0.5f - (fm.ascent + fm.descent) * 0.5f
+  val cx = size.width * 0.5f
+  val canvas = drawContext.canvas.nativeCanvas
+  if (progress >= 0.995f) {
+    paint.color = settledColor.toArgb()
+    canvas.drawText(text, cx, baseline, paint)
+    return
+  }
   val resolved = (progress * (text.length + 1)).toInt().coerceAtMost(text.length)
   val salt = (progress * 18f).toInt()
-  return buildString(text.length) {
-    for (i in text.indices) {
-      append(
-        when {
-          i < resolved -> text[i]
-          text[i] == ' ' -> ' '
-          else -> decryptGlyph(seed, i, salt)
-        },
-      )
+  val chars = CharArray(text.length) { i ->
+    when {
+      i < resolved -> text[i]
+      text[i] == ' ' -> ' '
+      else -> decryptGlyph(seed, i, salt)
+    }
+  }
+  paint.color = (if (resolved >= text.length) settledColor else scramblingColor).toArgb()
+  canvas.drawText(chars, 0, chars.size, cx, baseline, paint)
+}
+
+@Composable
+private fun rememberKeyPaint(
+  sizeSp: Float,
+  typeface: Typeface?,
+  fontScale: Float,
+  bold: Boolean,
+  letterSpacingEm: Float = 0.03f,
+): Paint {
+  val density = LocalDensity.current
+  val baseTf = typeface ?: Typeface.MONOSPACE
+  return remember(density, sizeSp, baseTf, fontScale, bold, letterSpacingEm) {
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      textAlign = Paint.Align.CENTER
+      textSize = with(density) { (sizeSp * fontScale).sp.toPx() }
+      this.typeface = if (bold) Typeface.create(baseTf, Typeface.BOLD) else baseTf
+      letterSpacing = letterSpacingEm
     }
   }
 }
@@ -525,29 +616,31 @@ private fun StripChip(
   label: String,
   accent: Color,
   onClick: () -> Unit,
-  decryptProgress: Float = 1f,
+  decryptProgress: () -> Float = { 1f },
 ) {
   val style = LocalLauncherStyle.current
   val interaction = remember { MutableInteractionSource() }
-  val shown = decryptLabel(label, decryptProgress, label.hashCode())
+  val paint = rememberKeyPaint(9.5f, style.telemetryTypeface, style.fontScale, bold = true, letterSpacingEm = 0.08f)
+  val settledWidth = remember(label, paint) { paint.measureText(label) }
+  val padH = with(LocalDensity.current) { 16.dp }
   Box(
     modifier = Modifier
+      .height(24.dp)
+      .width(with(LocalDensity.current) { settledWidth.toDp() } + padH)
       .background(style.voidBottom.copy(alpha = 0.85f))
       .border(0.7.dp, accent.copy(alpha = 0.42f))
       .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-      .padding(horizontal = 8.dp, vertical = 4.dp),
-    contentAlignment = Alignment.Center,
-  ) {
-    Text(
-      text = shown,
-      color = accent,
-      fontFamily = style.telemetryFontFamily,
-      fontSize = (9.5f * style.fontScale).sp,
-      fontWeight = FontWeight.Bold,
-      letterSpacing = 0.8.sp,
-      maxLines = 1,
-    )
-  }
+      .drawBehind {
+        drawCenteredDecrypt(
+          text = label,
+          progress = decryptProgress(),
+          seed = label.hashCode(),
+          paint = paint,
+          settledColor = accent,
+          scramblingColor = accent.copy(alpha = 0.72f),
+        )
+      },
+  )
 }
 
 @Composable
@@ -558,13 +651,20 @@ private fun HudKeycap(
   modifier: Modifier = Modifier,
   isSubtle: Boolean = false,
   showPopup: Boolean = true,
-  decryptProgress: Float = 1f,
+  decryptProgress: () -> Float = { 1f },
 ) {
   val style = LocalLauncherStyle.current
   val latestPress by rememberUpdatedState(onPress)
   var pressed by remember { mutableStateOf(false) }
-  val isScrambling = decryptProgress < 1f
-  val shownLabel = decryptLabel(label, decryptProgress, label.hashCode())
+  val paint = rememberKeyPaint(
+    sizeSp = if (isSubtle) 10f else 15.5f,
+    typeface = style.telemetryTypeface,
+    fontScale = style.fontScale,
+    bold = false,
+    letterSpacingEm = if (isSubtle) 0.14f else 0.03f,
+  )
+  val settledColor = if (isSubtle) TextSilver.copy(alpha = 0.65f) else TextPureWhite
+  val scramblingColor = accent.copy(alpha = 0.72f)
 
   Box(
     modifier = modifier
@@ -576,6 +676,16 @@ private fun HudKeycap(
         width = if (pressed) 1.dp else 0.7.dp,
         color = if (pressed) accent.copy(alpha = 0.92f) else accent.copy(alpha = 0.24f),
       )
+      .drawBehind {
+        drawCenteredDecrypt(
+          text = label,
+          progress = decryptProgress(),
+          seed = label.hashCode(),
+          paint = paint,
+          settledColor = settledColor,
+          scramblingColor = scramblingColor,
+        )
+      }
       .pointerInput(label) {
         awaitEachGesture {
           val down = awaitFirstDown(requireUnconsumed = false)
@@ -591,20 +701,6 @@ private fun HudKeycap(
       },
     contentAlignment = Alignment.Center,
   ) {
-    Text(
-      text = shownLabel,
-      color = when {
-        isScrambling -> accent.copy(alpha = 0.72f)
-        isSubtle -> TextSilver.copy(alpha = 0.65f)
-        else -> TextPureWhite
-      },
-      fontFamily = style.fontFamily,
-      fontSize = if (isSubtle) (10f * style.fontScale).sp else (15.5f * style.fontScale).sp,
-      fontWeight = FontWeight.Medium,
-      letterSpacing = if (isSubtle) 1.4.sp else 0.4.sp,
-      maxLines = 1,
-    )
-
     if (pressed && showPopup) {
       Box(
         modifier = Modifier
@@ -635,28 +731,47 @@ private fun HudFunctionKey(
   highlighted: Boolean,
   onClick: () -> Unit,
   modifier: Modifier = Modifier,
-  lockFlare: Float = 0f,
-  decryptProgress: Float = 1f,
+  lockFlare: () -> Float = { 0f },
+  decryptProgress: () -> Float = { 1f },
 ) {
   val style = LocalLauncherStyle.current
   val latestClick by rememberUpdatedState(onClick)
   var pressed by remember { mutableStateOf(false) }
-  val shownLabel = decryptLabel(label, decryptProgress, label.hashCode())
+  val paint = rememberKeyPaint(10.5f, style.telemetryTypeface, style.fontScale, bold = true, letterSpacingEm = 0.09f)
+  val settledColor = if (highlighted) accent else TextPureWhite
+  val scramblingColor = accent.copy(alpha = 0.72f)
 
   Box(
     modifier = modifier
       .height(44.dp)
-      .background(
-        when {
-          pressed -> accent.copy(alpha = 0.30f)
-          highlighted -> accent.copy(alpha = 0.16f + lockFlare * 0.20f)
-          else -> style.voidBottom.copy(alpha = 0.88f)
-        },
-      )
-      .border(
-        width = if (highlighted || pressed) 1.dp else 0.7.dp,
-        color = if (highlighted || pressed) accent.copy(alpha = (0.85f + lockFlare * 0.15f).coerceAtMost(1f)) else TextSilver.copy(alpha = 0.30f),
-      )
+      .drawBehind {
+        val flare = lockFlare()
+        val bgAlpha = when {
+          pressed -> 0.30f
+          highlighted -> 0.16f + flare * 0.20f
+          else -> 0.88f
+        }
+        drawRect(if (pressed || highlighted) accent.copy(alpha = bgAlpha) else style.voidBottom.copy(alpha = bgAlpha))
+        val borderColor = if (highlighted || pressed) {
+          accent.copy(alpha = (0.85f + flare * 0.15f).coerceAtMost(1f))
+        } else {
+          TextSilver.copy(alpha = 0.30f)
+        }
+        drawRect(
+          color = borderColor,
+          style = androidx.compose.ui.graphics.drawscope.Stroke(
+            width = (if (highlighted || pressed) 1.dp else 0.7.dp).toPx(),
+          ),
+        )
+        drawCenteredDecrypt(
+          text = label,
+          progress = decryptProgress(),
+          seed = label.hashCode(),
+          paint = paint,
+          settledColor = settledColor,
+          scramblingColor = scramblingColor,
+        )
+      }
       .pointerInput(label) {
         awaitEachGesture {
           val down = awaitFirstDown(requireUnconsumed = false)
@@ -670,18 +785,7 @@ private fun HudFunctionKey(
           pressed = false
         }
       },
-    contentAlignment = Alignment.Center,
-  ) {
-    Text(
-      text = shownLabel,
-      color = if (highlighted) accent else if (decryptProgress < 1f) accent.copy(alpha = 0.72f) else TextPureWhite,
-      fontFamily = style.telemetryFontFamily,
-      fontSize = (10.5f * style.fontScale).sp,
-      fontWeight = FontWeight.Bold,
-      letterSpacing = 1.sp,
-      maxLines = 1,
-    )
-  }
+  )
 }
 
 @Composable
@@ -691,13 +795,13 @@ private fun BackspaceKey(
   onSwipeClear: () -> Unit,
   scope: kotlinx.coroutines.CoroutineScope,
   modifier: Modifier = Modifier,
-  decryptProgress: Float = 1f,
+  decryptProgress: () -> Float = { 1f },
 ) {
   val style = LocalLauncherStyle.current
   val latestDelete by rememberUpdatedState(onTapDelete)
   val latestClear by rememberUpdatedState(onSwipeClear)
   var pressed by remember { mutableStateOf(false) }
-  val shownDel = decryptLabel("DEL", decryptProgress, "DEL".hashCode())
+  val paint = rememberKeyPaint(10.5f, style.telemetryTypeface, style.fontScale, bold = true, letterSpacingEm = 0.09f)
 
   Box(
     modifier = modifier
@@ -709,6 +813,16 @@ private fun BackspaceKey(
         width = if (pressed) 1.dp else 0.7.dp,
         color = if (pressed) Crimson else TextSilver.copy(alpha = 0.30f),
       )
+      .drawBehind {
+        drawCenteredDecrypt(
+          text = "DEL",
+          progress = decryptProgress(),
+          seed = "DEL".hashCode(),
+          paint = paint,
+          settledColor = if (pressed) TextPureWhite else TextSilver,
+          scramblingColor = accent.copy(alpha = 0.72f),
+        )
+      }
       .pointerInput(Unit) {
         awaitEachGesture {
           val down = awaitFirstDown(requireUnconsumed = false)
@@ -742,15 +856,5 @@ private fun BackspaceKey(
           }
         }
       },
-    contentAlignment = Alignment.Center,
-  ) {
-    Text(
-      text = shownDel,
-      color = if (pressed) TextPureWhite else if (decryptProgress < 1f) accent.copy(alpha = 0.72f) else TextSilver,
-      fontFamily = style.telemetryFontFamily,
-      fontSize = (10.5f * style.fontScale).sp,
-      fontWeight = FontWeight.Bold,
-      letterSpacing = 0.9.sp,
-    )
-  }
+  )
 }
