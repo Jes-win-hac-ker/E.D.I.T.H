@@ -162,11 +162,15 @@ class MainActivity : ComponentActivity() {
   }
 
   private fun showStatusBar() {
-    WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.statusBars())
+    WindowCompat.getInsetsController(window, window.decorView).apply {
+      isAppearanceLightStatusBars = true
+      show(WindowInsetsCompat.Type.statusBars())
+    }
   }
 
   private fun hideStatusBar() {
     WindowCompat.getInsetsController(window, window.decorView).apply {
+      isAppearanceLightStatusBars = false
       hide(WindowInsetsCompat.Type.statusBars())
       systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
     }
