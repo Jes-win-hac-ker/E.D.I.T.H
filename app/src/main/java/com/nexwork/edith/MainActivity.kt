@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsAnimationCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.nexwork.edith.jarvis.core.JarvisRuntime
@@ -52,13 +53,41 @@ class MainActivity : ComponentActivity() {
       }
     }
 
-    // Hide status bar on home screen, but show it transparently while IME is open so Gboard's
-    // OPTOUT_EDGE_TO_EDGE window never paints a white status-bar strip over the camera cutout.
+    // Hide status bar on home screen, but show it transparently while IME is open or animating
+    // so Gboard's OPTOUT_EDGE_TO_EDGE window never paints a white strip over the camera cutout.
     hideStatusBar()
+    var imeAnimating = false
+    ViewCompat.setWindowInsetsAnimationCallback(
+      window.decorView,
+      object : WindowInsetsAnimationCompat.Callback(DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+        override fun onPrepare(animation: WindowInsetsAnimationCompat) {
+          if ((animation.typeMask and WindowInsetsCompat.Type.ime()) != 0) {
+            imeAnimating = true
+            showStatusBar()
+          }
+        }
+
+        override fun onProgress(
+          insets: WindowInsetsCompat,
+          runningAnimations: MutableList<WindowInsetsAnimationCompat>,
+        ): WindowInsetsCompat = insets
+
+        override fun onEnd(animation: WindowInsetsAnimationCompat) {
+          if ((animation.typeMask and WindowInsetsCompat.Type.ime()) != 0) {
+            imeAnimating = false
+            val imeVisible = ViewCompat.getRootWindowInsets(window.decorView)
+              ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+            if (!imeVisible) {
+              hideStatusBar()
+            }
+          }
+        }
+      },
+    )
     ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { view, insets ->
       if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
         showStatusBar()
-      } else {
+      } else if (!imeAnimating) {
         hideStatusBar()
       }
       ViewCompat.onApplyWindowInsets(view, insets)
