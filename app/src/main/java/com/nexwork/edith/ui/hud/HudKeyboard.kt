@@ -135,7 +135,7 @@ fun HudKeyboard(
     if (visible) {
       isDismissing = false
       mounted = true
-      val showMs = ((1f - revealAnim.value).coerceIn(0f, 1f) * 340f).roundToInt().coerceAtLeast(1)
+      val showMs = ((1f - revealAnim.value).coerceIn(0f, 1f) * 1000f).roundToInt().coerceAtLeast(1)
       revealAnim.animateTo(1f, tween(showMs, easing = LinearEasing))
       haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     } else if (mounted) {
