@@ -1,12 +1,8 @@
 package com.nexwork.edith.ui.hud
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,8 +37,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -51,6 +50,8 @@ import com.nexwork.edith.theme.Crimson
 import com.nexwork.edith.theme.LocalLauncherStyle
 import com.nexwork.edith.theme.TextPureWhite
 import com.nexwork.edith.theme.TextSilver
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -116,6 +117,7 @@ fun HudKeyboard(
   val style = LocalLauncherStyle.current
   val accent = style.accent
   val haptic = LocalHapticFeedback.current
+  val density = LocalDensity.current
   val scope = rememberCoroutineScope()
   var symbolsLayer by remember { mutableStateOf(false) }
 
@@ -125,30 +127,97 @@ fun HudKeyboard(
   val currentOnSubmit by rememberUpdatedState(onSubmit)
   val currentOnHide by rememberUpdatedState(onHideKeyboard)
 
-  AnimatedVisibility(
-    visible = visible,
-    enter = slideInVertically(
-      animationSpec = tween(durationMillis = 190, easing = FastOutSlowInEasing),
-      initialOffsetY = { it },
-    ) + fadeIn(animationSpec = tween(durationMillis = 140)),
-    exit = slideOutVertically(
-      animationSpec = tween(durationMillis = 170, easing = FastOutSlowInEasing),
-      targetOffsetY = { it },
-    ) + fadeOut(animationSpec = tween(durationMillis = 120)),
-    modifier = modifier.fillMaxWidth(),
+  val revealAnim = remember { Animatable(0f) }
+  var mounted by remember { mutableStateOf(visible) }
+  var isDismissing by remember { mutableStateOf(false) }
+
+  LaunchedEffect(visible) {
+    if (visible) {
+      isDismissing = false
+      mounted = true
+      val showMs = ((1f - revealAnim.value).coerceIn(0f, 1f) * 340f).roundToInt().coerceAtLeast(1)
+      revealAnim.animateTo(1f, tween(showMs, easing = LinearEasing))
+      haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    } else if (mounted) {
+      isDismissing = true
+      val hideMs = (revealAnim.value.coerceIn(0f, 1f) * 200f).roundToInt().coerceAtLeast(1)
+      revealAnim.animateTo(0f, tween(hideMs, easing = LinearEasing))
+      mounted = false
+      isDismissing = false
+    }
+  }
+
+  if (!mounted) return
+
+  val r = revealAnim.value
+  val deckP = if (isDismissing) {
+    1f - hudEaseInCubic(phase(1f - r, 0.20f, 1.00f))
+  } else {
+    hudEaseOutCubic(phase(r, 0.00f, 0.42f))
+  }
+  val crownTrace = if (isDismissing) {
+    1f - hudEaseInCubic(phase(1f - r, 0.25f, 0.95f))
+  } else {
+    hudEaseOutCubic(phase(r, 0.00f, 0.42f))
+  }
+  val stripP = if (isDismissing) {
+    1f - hudEaseInCubic(phase(1f - r, 0.00f, 0.50f))
+  } else {
+    hudEaseOutCubic(phase(r, 0.30f, 0.76f))
+  }
+  val actionLockFlare = if (!isDismissing && r in 0.62f..0.98f) {
+    val p = phase(r, 0.62f, 0.98f)
+    if (p < 0.5f) p * 2f else (1f - p) * 2f
+  } else {
+    0f
+  }
+  val dropPx = with(density) { 18.dp.toPx() }
+  val keyShiftPx = with(density) { 5.dp.toPx() }
+
+  // Center-out staggered keycap reveal: center columns appear first (~70ms), edges last (~245ms).
+  fun keyReveal(colFraction: Float): Float {
+    val dist = abs(colFraction - 0.5f) * 2f // 0 = center, 1 = outer edge
+    return if (isDismissing) {
+      val d = 1f - r
+      val start = (1f - dist) * 0.14f
+      1f - hudEaseInCubic(phase(d, start, start + 0.48f))
+    } else {
+      val start = 0.20f + dist * 0.24f
+      hudEaseOutCubic(phase(r, start, start + 0.32f))
+    }
+  }
+
+  Box(
+    modifier = modifier
+      .fillMaxWidth()
+      .graphicsLayer {
+        alpha = deckP.coerceIn(0f, 1f)
+        translationY = (1f - deckP) * dropPx
+      },
   ) {
     Column(
       modifier = Modifier
         .fillMaxWidth()
         .background(style.voidTop.copy(alpha = 0.94f))
         .drawBehind {
-          // 1dp orbital hairline crowning the HUD keyboard
-          drawLine(
-            color = accent.copy(alpha = 0.55f),
-            start = Offset(0f, 0f),
-            end = Offset(size.width, 0f),
-            strokeWidth = 1.dp.toPx(),
-          )
+          // Phase 1: Center-out 1dp orbital crown laser trace + twin leading sparks
+          val halfW = size.width * 0.5f
+          val span = halfW * crownTrace
+          if (span > 1f) {
+            drawLine(
+              color = accent.copy(alpha = 0.65f * crownTrace),
+              start = Offset(halfW - span, 0f),
+              end = Offset(halfW + span, 0f),
+              strokeWidth = 1.dp.toPx(),
+            )
+            if (crownTrace in 0.03f..0.97f) {
+              val sparkA = (1f - crownTrace) * 0.9f
+              drawCircle(accent.copy(alpha = 0.35f * sparkA), 4.dp.toPx(), Offset(halfW - span, 0f))
+              drawCircle(TextPureWhite.copy(alpha = sparkA), 1.4.dp.toPx(), Offset(halfW - span, 0f))
+              drawCircle(accent.copy(alpha = 0.35f * sparkA), 4.dp.toPx(), Offset(halfW + span, 0f))
+              drawCircle(TextPureWhite.copy(alpha = sparkA), 1.4.dp.toPx(), Offset(halfW + span, 0f))
+            }
+          }
         }
         .navigationBarsPadding()
         .padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 8.dp),
@@ -159,6 +228,10 @@ fun HudKeyboard(
         modifier = Modifier
           .fillMaxWidth()
           .height(30.dp)
+          .graphicsLayer {
+            alpha = stripP
+            translationY = (1f - stripP) * keyShiftPx
+          }
           .pointerInput(Unit) {
             awaitEachGesture {
               val down = awaitFirstDown(requireUnconsumed = false)
@@ -225,7 +298,8 @@ fun HudKeyboard(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
       ) {
-        row1.forEach { ch ->
+        row1.forEachIndexed { idx, ch ->
+          val kp = keyReveal((idx + 0.5f) / row1.size)
           HudKeycap(
             label = ch.uppercase(),
             accent = accent,
@@ -233,7 +307,12 @@ fun HudKeyboard(
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
               currentOnAppend(ch)
             },
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+              .weight(1f)
+              .graphicsLayer {
+                alpha = kp
+                translationY = (1f - kp) * keyShiftPx
+              },
           )
         }
       }
@@ -245,7 +324,8 @@ fun HudKeyboard(
           .padding(horizontal = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
       ) {
-        row2.forEach { ch ->
+        row2.forEachIndexed { idx, ch ->
+          val kp = keyReveal((idx + 0.5f) / row2.size)
           HudKeycap(
             label = ch.uppercase(),
             accent = accent,
@@ -253,7 +333,12 @@ fun HudKeyboard(
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
               currentOnAppend(ch)
             },
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+              .weight(1f)
+              .graphicsLayer {
+                alpha = kp
+                translationY = (1f - kp) * keyShiftPx
+              },
           )
         }
       }
@@ -264,6 +349,7 @@ fun HudKeyboard(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
+        val symP = keyReveal(0.05f)
         HudFunctionKey(
           label = if (symbolsLayer) "ABC" else "123",
           accent = accent,
@@ -272,9 +358,15 @@ fun HudKeyboard(
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             symbolsLayer = !symbolsLayer
           },
-          modifier = Modifier.weight(1.45f),
+          modifier = Modifier
+            .weight(1.45f)
+            .graphicsLayer {
+              alpha = symP
+              translationY = (1f - symP) * keyShiftPx
+            },
         )
-        row3.forEach { ch ->
+        row3.forEachIndexed { idx, ch ->
+          val kp = keyReveal((idx + 1.5f) / 9f)
           HudKeycap(
             label = ch.uppercase(),
             accent = accent,
@@ -282,9 +374,15 @@ fun HudKeyboard(
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
               currentOnAppend(ch)
             },
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+              .weight(1f)
+              .graphicsLayer {
+                alpha = kp
+                translationY = (1f - kp) * keyShiftPx
+              },
           )
         }
+        val delP = keyReveal(0.95f)
         BackspaceKey(
           accent = accent,
           onTapDelete = {
@@ -296,7 +394,12 @@ fun HudKeyboard(
             currentOnClear()
           },
           scope = scope,
-          modifier = Modifier.weight(1.45f),
+          modifier = Modifier
+            .weight(1.45f)
+            .graphicsLayer {
+              alpha = delP
+              translationY = (1f - delP) * keyShiftPx
+            },
         )
       }
 
@@ -307,6 +410,7 @@ fun HudKeyboard(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
+        val pBang = keyReveal(0.05f)
         HudKeycap(
           label = "!",
           accent = accent,
@@ -314,8 +418,11 @@ fun HudKeyboard(
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnAppend("!")
           },
-          modifier = Modifier.weight(1f),
+          modifier = Modifier
+            .weight(1f)
+            .graphicsLayer { alpha = pBang; translationY = (1f - pBang) * keyShiftPx },
         )
+        val pComma = keyReveal(0.18f)
         HudKeycap(
           label = ",",
           accent = accent,
@@ -323,8 +430,11 @@ fun HudKeyboard(
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnAppend(",")
           },
-          modifier = Modifier.weight(0.9f),
+          modifier = Modifier
+            .weight(0.9f)
+            .graphicsLayer { alpha = pComma; translationY = (1f - pComma) * keyShiftPx },
         )
+        val pSpace = keyReveal(0.50f)
         HudKeycap(
           label = "SPACE",
           accent = accent,
@@ -334,8 +444,11 @@ fun HudKeyboard(
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnAppend(" ")
           },
-          modifier = Modifier.weight(4.1f),
+          modifier = Modifier
+            .weight(4.1f)
+            .graphicsLayer { alpha = pSpace; translationY = (1f - pSpace) * keyShiftPx },
         )
+        val pDot = keyReveal(0.78f)
         HudKeycap(
           label = ".",
           accent = accent,
@@ -343,17 +456,23 @@ fun HudKeyboard(
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnAppend(".")
           },
-          modifier = Modifier.weight(0.9f),
+          modifier = Modifier
+            .weight(0.9f)
+            .graphicsLayer { alpha = pDot; translationY = (1f - pDot) * keyShiftPx },
         )
+        val pAction = keyReveal(0.95f)
         HudFunctionKey(
           label = actionLabel,
           accent = accent,
           highlighted = true,
+          lockFlare = actionLockFlare,
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             currentOnSubmit()
           },
-          modifier = Modifier.weight(2.1f),
+          modifier = Modifier
+            .weight(2.1f)
+            .graphicsLayer { alpha = pAction; translationY = (1f - pAction) * keyShiftPx },
         )
       }
     }
@@ -466,6 +585,7 @@ private fun HudFunctionKey(
   highlighted: Boolean,
   onClick: () -> Unit,
   modifier: Modifier = Modifier,
+  lockFlare: Float = 0f,
 ) {
   val style = LocalLauncherStyle.current
   val latestClick by rememberUpdatedState(onClick)
@@ -477,13 +597,13 @@ private fun HudFunctionKey(
       .background(
         when {
           pressed -> accent.copy(alpha = 0.30f)
-          highlighted -> accent.copy(alpha = 0.16f)
+          highlighted -> accent.copy(alpha = 0.16f + lockFlare * 0.20f)
           else -> style.voidBottom.copy(alpha = 0.88f)
         },
       )
       .border(
         width = if (highlighted || pressed) 1.dp else 0.7.dp,
-        color = if (highlighted || pressed) accent.copy(alpha = 0.85f) else TextSilver.copy(alpha = 0.30f),
+        color = if (highlighted || pressed) accent.copy(alpha = (0.85f + lockFlare * 0.15f).coerceAtMost(1f)) else TextSilver.copy(alpha = 0.30f),
       )
       .pointerInput(label) {
         awaitEachGesture {
