@@ -13,12 +13,6 @@ android {
         targetSdk = 36
         versionCode = providers.gradleProperty("versionCode").orNull?.toIntOrNull() ?: 1
         versionName = providers.gradleProperty("versionName").orNull ?: "1.0"
-        // Moto G45 is arm64; keeps ONNX Runtime from shipping 4 native ABIs in every OTA.
-        ndk { abiFilters += "arm64-v8a" }
-    }
-
-    androidResources {
-        noCompress += "onnx"
     }
 
     buildTypes {
@@ -102,7 +96,4 @@ dependencies {
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.androidx.security.crypto)
   implementation(libs.play.services.location)
-
-  // Milestone 4: on-device Silero VAD + speaker-embedding inference
-  implementation(libs.onnxruntime.android)
 }

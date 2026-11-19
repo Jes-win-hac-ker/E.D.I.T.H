@@ -634,7 +634,11 @@ fun MainScreen(
     JarvisAmbientPill(
       suggestion = proactiveSuggestion,
       onAction = { suggestion ->
-        JarvisRuntime.executeProactiveSuggestion(context, suggestion)
+        if (suggestion is com.nexwork.edith.jarvis.core.ProactiveSuggestion.EventClashAlert) {
+          viewModel.openJarvisSheet()
+        } else {
+          JarvisRuntime.executeProactiveSuggestion(context, suggestion)
+        }
       },
       onDismiss = {
         JarvisRuntime.dismissProactiveSuggestion()
@@ -808,14 +812,9 @@ fun MainScreen(
         .align(Alignment.BottomCenter),
     )
 
-    val hasJarvisBusy = jarvisUiState.isExecutingCommand ||
-      jarvisUiState.isProcessing ||
+    val hasJarvisBusy = jarvisUiState.isProcessing ||
       jarvisUiState.pendingTier3Approval != null
-    val busyLabel = when {
-      jarvisUiState.isExecutingCommand -> "PLAYBOOK · VOL-"
-      jarvisUiState.pendingTier3Approval != null -> "TIER 3 GATE"
-      else -> "TRIAGE"
-    }
+    val busyLabel = if (jarvisUiState.pendingTier3Approval != null) "TIER 3 GATE" else "TRIAGE"
     JarvisEmergencyStopHudPill(
       visible = hasJarvisBusy && !jarvisOpen && !settingsOpen && !isSettingsMounted,
       label = busyLabel,

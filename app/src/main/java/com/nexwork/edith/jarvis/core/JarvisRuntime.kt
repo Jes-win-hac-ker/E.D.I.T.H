@@ -21,21 +21,15 @@ import com.nexwork.edith.MainActivity
 import com.nexwork.edith.R
 import com.nexwork.edith.jarvis.brain.GeminiClient
 import com.nexwork.edith.jarvis.brain.JarvisLanguagePrompt
-import com.nexwork.edith.jarvis.brain.LiveToolBridge
-import com.nexwork.edith.jarvis.brain.PlannerClient
 import com.nexwork.edith.jarvis.memory.JarvisDatabase
-import com.nexwork.edith.jarvis.voice.VoiceCoordinator
-import com.nexwork.edith.jarvis.reflex.CommandExecutionResult
 import com.nexwork.edith.jarvis.reflex.DestinationStore
+import com.nexwork.edith.jarvis.reflex.EventPlannerEngine
 import com.nexwork.edith.jarvis.reflex.GatekeeperCandidate
 import com.nexwork.edith.jarvis.reflex.GatekeeperDecision
 import com.nexwork.edith.jarvis.reflex.GroupRelevanceScorer
 import com.nexwork.edith.jarvis.reflex.LocalGatekeeper
 import com.nexwork.edith.jarvis.reflex.MessageBurstAggregator
 import com.nexwork.edith.jarvis.reflex.PlayServicesOneShotLocationVerifier
-import com.nexwork.edith.jarvis.reflex.PlaybookEnvironment
-import com.nexwork.edith.jarvis.reflex.PlaybookExecutor
-import com.nexwork.edith.jarvis.reflex.PlaybookStore
 import com.nexwork.edith.jarvis.reflex.ProactiveEngine
 import com.nexwork.edith.jarvis.security.DenyCode
 import com.nexwork.edith.jarvis.security.JarvisActionType
@@ -43,12 +37,10 @@ import com.nexwork.edith.jarvis.security.SecurityActionRequest
 import com.nexwork.edith.jarvis.security.SecurityGateway
 import com.nexwork.edith.jarvis.security.SecurityVerdict
 import com.nexwork.edith.data.ShizukuControlManager
-import com.nexwork.edith.data.ShizukuControlService
 import com.nexwork.edith.jarvis.senses.ExtractedNotification
 import com.nexwork.edith.jarvis.senses.JarvisNotificationService
 import com.nexwork.edith.jarvis.senses.PassiveContextEngine
 import com.nexwork.edith.jarvis.senses.RemoteInputCache
-import com.nexwork.edith.jarvis.senses.VoiceNoteObserver
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -69,14 +61,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
 
 /**
  * Isolated Milestone 1 Jarvis coordinator.
@@ -89,9 +73,8 @@ object JarvisRuntime {
 
   private const val PROACTIVE_CHANNEL_ID = "jarvis_proactive_channel"
   private const val PROACTIVE_NOTIFICATION_ID = 4110
-  private const val JARVIS_PREFS_NAME = "jarvis_runtime_prefs"
-  private const val KEY_OPUS_VOICE_READER = "opus_voice_reader_enabled"
-  private const val KEY_WAKE_WORD_VOICE = "wake_word_voice_enabled"
+  private const val CLASH_CHANNEL_ID = "jarvis_clash_channel"
+  private const val CLASH_NOTIFICATION_ID = 4111
 
   private val firstFrameScheduled = AtomicBoolean(false)
   private val initialized = AtomicBoolean(false)
@@ -125,12 +108,6 @@ object JarvisRuntime {
   private var securityGateway: SecurityGateway? = null
 
   @Volatile
-  private var plannerClient: PlannerClient? = null
-
-  @Volatile
-  private var playbookExecutor: PlaybookExecutor? = null
-
-  @Volatile
   private var passiveContextEngine: PassiveContextEngine? = null
 
   @Volatile
@@ -139,11 +116,9 @@ object JarvisRuntime {
   @Volatile
   private var burstAggregator: MessageBurstAggregator? = null
 
-  @Volatile
-  private var voiceNoteObserver: VoiceNoteObserver? = null
-
-  @Volatile
-  private var voiceCoordinator: VoiceCoordinator? = null
+  private val clashLock = Any()
+  private val ignoredClashIds = LinkedHashSet<String>()
+  private val alertedClashIds = LinkedHashSet<String>()
 
   private val suppressedGroupCount = AtomicInteger(0)
 
@@ -157,7 +132,6 @@ object JarvisRuntime {
   private var pendingApprovalPair: Pair<String, CompletableDeferred<Boolean>>? = null
 
   private val jobLock = Any()
-  private var activeCommandJob: Job? = null
   private val activeTriageJobs = LinkedHashSet<Job>()
 
   @Volatile
@@ -366,14 +340,12 @@ object JarvisRuntime {
         val rules = db.getActiveRules()
         val persona = db.getContactPersona(captured.sender, captured.packageName)
           ?: db.getContactPersona(captured.title, captured.packageName)
-        val audioBytes = voiceNoteObserver?.resolveAudioBytesForNotification(appCtx, captured)
         val client = geminiClient ?: return@launch
         val result = client.classifyNotificationCancellable(
           apiKey = apiKey,
           notification = captured,
           rules = rules,
           persona = persona,
-          audioOggBytes = audioBytes,
         )
         result
           .onSuccess { triageResult ->
@@ -393,21 +365,24 @@ object JarvisRuntime {
               )
               syncProactiveSnapshot(db)
             }
+            val eventTitle = triageResult.triage.eventTitle.trim()
+            if (eventTitle.isNotEmpty() && triageResult.triage.eventStartEpochMs > 0L) {
+              db.insertOrUpdateEvent(
+                ScheduledEvent(
+                  title = eventTitle,
+                  startEpochMs = triageResult.triage.eventStartEpochMs,
+                  endEpochMs = triageResult.triage.eventEndEpochMs,
+                  location = triageResult.triage.eventLocation.trim(),
+                  source = EventSource.MESSAGE,
+                  sender = triageResult.triage.sender.ifBlank { captured.sender },
+                  sourceSummary = "${captured.appLabel} · ${captured.sender}: ${captured.body.take(72)}",
+                )
+              )
+              recomputeScheduleAndClashes(appCtx, db, notifyNewClashes = true)
+            }
             val quietPrefix = if (passiveContextEngine?.contextState?.value?.focusQuietActive == true) "[QUIET] " else ""
-            val voicePrefix = if (audioBytes != null) "[VOICE] " else ""
-            val motionNow = passiveContextEngine?.contextState?.value?.motionState ?: MotionState.UNKNOWN
-            voiceCoordinator?.onNotificationTriaged(
-              sbnKey = captured.sbnKey,
-              appLabel = captured.appLabel,
-              sender = triageResult.triage.sender.ifBlank { captured.sender },
-              bodyPreview = captured.body,
-              summary = "${triageResult.triage.intent}: ${triageResult.triage.suggestedReply.ifBlank { captured.body }}",
-              urgency = triageResult.triage.urgency,
-              hasReplyHandle = remoteInputCache.hasHandle(captured.sbnKey),
-              motionState = motionNow,
-            )
             JarvisForegroundService.recordProcessed(
-              "$quietPrefix$voicePrefix${triageResult.triage.urgency} · ${triageResult.triage.sender}: ${triageResult.triage.intent}",
+              "$quietPrefix${triageResult.triage.urgency} · ${triageResult.triage.sender}: ${triageResult.triage.intent}",
             )
           }
           .onFailure { err ->
@@ -559,7 +534,7 @@ object JarvisRuntime {
       ensureComponentsLocked(appCtx)
       val db = database ?: return@launch
       db.upsertTrustedContact(cleanName, packageName, autoReplyEnabled)
-      syncPlaybooksAndContacts(db)
+      syncTrustedContacts(db)
       _uiState.update {
         it.copy(
           lastError = null,
@@ -575,7 +550,7 @@ object JarvisRuntime {
       ensureComponentsLocked(appCtx)
       val db = database ?: return@launch
       db.setTrustedContactEnabled(contactKey, enabled)
-      syncPlaybooksAndContacts(db)
+      syncTrustedContacts(db)
     }
   }
 
@@ -585,75 +560,8 @@ object JarvisRuntime {
       ensureComponentsLocked(appCtx)
       val db = database ?: return@launch
       db.deleteTrustedContact(contactKey)
-      syncPlaybooksAndContacts(db)
+      syncTrustedContacts(db)
     }
-  }
-
-  fun executeUiCommand(context: Context, rawCommand: String) {
-    val trimmed = rawCommand.trim()
-    if (trimmed.isEmpty()) return
-    val appCtx = context.applicationContext
-    val job = scope.launch(start = CoroutineStart.LAZY) {
-      ensureComponentsLocked(appCtx)
-      val executor = playbookExecutor ?: return@launch
-      val apiKey = keyVault?.getApiKey()
-      _uiState.update {
-        it.copy(
-          isExecutingCommand = true,
-          lastError = null,
-          lastStatusBanner = "Executing: $trimmed",
-        )
-      }
-      _isAutomationActive.value = true
-      JarvisForegroundService.updateRunningTask(appCtx, "PLAYBOOK // ${trimmed.take(36)}")
-      try {
-        val result: CommandExecutionResult = executor.executeCommand(
-          commandText = trimmed,
-          apiKey = apiKey,
-        )
-        database?.let { syncPlaybooksAndContacts(it) }
-        _uiState.update {
-          it.copy(
-            isExecutingCommand = false,
-            lastExecutionLog = result.traceLog,
-            lastError = if (result.ok) null else result.summary,
-            lastStatusBanner = if (result.ok) result.summary else null,
-          )
-        }
-        JarvisForegroundService.recordProcessed("CMD: ${result.summary.take(64)}")
-      } catch (c: CancellationException) {
-        val reason = c.message?.takeIf { it.isNotBlank() } ?: "Execution stopped by user"
-        _uiState.update {
-          it.copy(
-            isExecutingCommand = false,
-            lastExecutionLog = (it.lastExecutionLog + "[STOP] $reason").takeLast(12),
-            lastError = null,
-            lastStatusBanner = "STOPPED: $reason",
-          )
-        }
-        throw c
-      } finally {
-        synchronized(jobLock) {
-          if (activeCommandJob === coroutineContext[Job]) {
-            activeCommandJob = null
-          }
-        }
-        recomputeAutomationActive()
-        _uiState.update { state ->
-          val cmdStillRunning = synchronized(jobLock) { activeCommandJob?.isActive == true }
-          if (cmdStillRunning) state else state.copy(isExecutingCommand = false)
-        }
-        JarvisForegroundService.updateRunningTask(appCtx, null)
-      }
-    }
-    val previousJob = synchronized(jobLock) {
-      val prev = activeCommandJob
-      activeCommandJob = job
-      prev
-    }
-    previousJob?.cancel(CancellationException("Superseded by new UI command"))
-    recomputeAutomationActive()
-    job.start()
   }
 
   fun setOtaActive(active: Boolean) {
@@ -661,34 +569,9 @@ object JarvisRuntime {
   }
 
   fun isAnyAbortableWorkActive(): Boolean = synchronized(jobLock) {
-    activeCommandJob?.isActive == true ||
-      activeTriageJobs.any { it.isActive } ||
+    activeTriageJobs.any { it.isActive } ||
       synchronized(approvalLock) { pendingApprovalPair != null } ||
-      voiceCoordinator?.isAnyVoiceJobActive() == true ||
       isOtaBusy
-  }
-
-  fun stopCommandExecution(context: Context, reason: String = "Playbook execution stopped") {
-    val appCtx = context.applicationContext
-    val cmdToCancel = synchronized(jobLock) {
-      val job = activeCommandJob
-      activeCommandJob = null
-      job
-    }
-    cmdToCancel?.cancel(CancellationException(reason))
-    cancelPendingTier3Approval()
-    recomputeAutomationActive()
-    ShizukuControlService.clearNodeCache()
-    _uiState.update { current ->
-      current.copy(
-        isExecutingCommand = false,
-        pendingTier3Approval = null,
-        lastExecutionLog = (current.lastExecutionLog + "[STOP] $reason").takeLast(12),
-        lastError = null,
-        lastStatusBanner = "STOPPED: $reason",
-      )
-    }
-    JarvisForegroundService.recordStopped(appCtx, reason)
   }
 
   fun emergencyStop(
@@ -697,24 +580,15 @@ object JarvisRuntime {
     bounceHome: Boolean = false,
   ) {
     val appCtx = context.applicationContext
-    val (cmdJob, triageSnapshot) = synchronized(jobLock) {
-      val cmd = activeCommandJob
-      activeCommandJob = null
+    val triageSnapshot = synchronized(jobLock) {
       val triage = activeTriageJobs.toList()
       activeTriageJobs.clear()
-      cmd to triage
+      triage
     }
-    cmdJob?.cancel(CancellationException(reason))
     triageSnapshot.forEach { it.cancel(CancellationException(reason)) }
     burstAggregator?.cancelAll()
-    appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
-      .edit()
-      .putBoolean(KEY_WAKE_WORD_VOICE, false)
-      .apply()
-    voiceCoordinator?.stopAllVoiceWork(reason, disableWakeWord = true)
     cancelPendingTier3Approval()
     recomputeAutomationActive()
-    ShizukuControlService.clearNodeCache()
     if (bounceHome) {
       runCatching {
         val homeIntent = Intent(Intent.ACTION_MAIN).apply {
@@ -726,7 +600,6 @@ object JarvisRuntime {
     }
     _uiState.update { current ->
       current.copy(
-        isExecutingCommand = false,
         isProcessing = false,
         pendingTier3Approval = null,
         lastExecutionLog = (current.lastExecutionLog + "[E-STOP] $reason").takeLast(12),
@@ -756,9 +629,8 @@ object JarvisRuntime {
   }
 
   private fun recomputeAutomationActive() {
-    val cmdRunning = synchronized(jobLock) { activeCommandJob?.isActive == true }
     val approvalWaiting = synchronized(approvalLock) { pendingApprovalPair != null }
-    _isAutomationActive.value = cmdRunning || approvalWaiting
+    _isAutomationActive.value = approvalWaiting
   }
 
   fun triggerTier3BiometricTest(context: Context, actionLabel: String = "Authorize Tier 3 Sensitive Action") {
@@ -902,6 +774,10 @@ object JarvisRuntime {
           }
         }
       }
+
+      is ProactiveSuggestion.EventClashAlert -> {
+        // Handled by MainScreen opening the Jarvis Drawer to resolve the clash.
+      }
     }
   }
 
@@ -975,43 +851,94 @@ object JarvisRuntime {
       // Re-invoke FGS start so API 34+ dynamically promotes location/connectedDevice FGS types once granted.
       JarvisForegroundService.start(appCtx)
       passiveContextEngine?.refreshSensorsAfterPermissionGrant(appCtx)
-      voiceNoteObserver?.startIfPermitted(appCtx)
+      database?.let { recomputeScheduleAndClashes(appCtx, it, notifyNewClashes = false) }
       syncEnvironmentOnly(appCtx)
     }
   }
 
-  fun audioReadPermission(): String =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-      Manifest.permission.READ_MEDIA_AUDIO
-    } else {
-      Manifest.permission.READ_EXTERNAL_STORAGE
-    }
+  fun hasCalendarPermission(context: Context): Boolean =
+    EventPlannerEngine.hasCalendarPermission(context)
 
-  fun hasMediaAudioPermission(context: Context): Boolean =
-    VoiceNoteObserver.hasAudioReadPermission(context)
-
-  fun setOpusVoiceReaderEnabled(context: Context, enabled: Boolean) {
+  fun syncCalendarAndEvents(context: Context) {
     val appCtx = context.applicationContext
-    appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
-      .edit()
-      .putBoolean(KEY_OPUS_VOICE_READER, enabled)
-      .apply()
     scope.launch {
       ensureComponentsLocked(appCtx)
-      voiceNoteObserver?.setEnabled(appCtx, enabled)
-      val hasPerm = VoiceNoteObserver.hasAudioReadPermission(appCtx)
-      _uiState.update {
-        it.copy(
-          opusVoiceReaderEnabled = enabled,
-          hasMediaAudioPermission = hasPerm,
-          lastError = null,
-          lastStatusBanner = if (enabled) {
-            if (hasPerm) "OPUS voice-note reader ON" else "OPUS reader ON (awaiting audio permission)"
-          } else {
-            "OPUS voice-note reader OFF"
-          },
+      val db = database ?: return@launch
+      recomputeScheduleAndClashes(appCtx, db, notifyNewClashes = true)
+      syncEnvironmentOnly(appCtx)
+    }
+  }
+
+  fun addManualEvent(
+    context: Context,
+    title: String,
+    startEpochMs: Long,
+    endEpochMs: Long,
+    location: String = "",
+  ) {
+    val cleanTitle = title.trim()
+    if (cleanTitle.isEmpty() || startEpochMs <= 0L) return
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      val db = database ?: return@launch
+      db.insertOrUpdateEvent(
+        ScheduledEvent(
+          title = cleanTitle,
+          startEpochMs = startEpochMs,
+          endEpochMs = if (endEpochMs > startEpochMs) endEpochMs else startEpochMs + 3_600_000L,
+          location = location.trim(),
+          source = EventSource.MANUAL,
+          sender = "You",
+          sourceSummary = "Manual event",
         )
+      )
+      recomputeScheduleAndClashes(appCtx, db, notifyNewClashes = true)
+      _uiState.update { it.copy(lastError = null, lastStatusBanner = "Added event: $cleanTitle") }
+    }
+  }
+
+  fun resolveClashKeep(context: Context, clashId: String, keepEventId: Long) {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      val db = database ?: return@launch
+      val currentClash = _uiState.value.eventClashes.firstOrNull { it.clashId == clashId }
+      if (currentClash != null) {
+        val dropEvent = if (currentClash.existingEvent.id == keepEventId) {
+          currentClash.incomingEvent
+        } else {
+          currentClash.existingEvent
+        }
+        if (dropEvent.id > 0L) {
+          db.updateEventStatus(dropEvent.id, EventStatus.RESOLVED)
+        } else {
+          synchronized(clashLock) { ignoredClashIds.add(clashId) }
+        }
       }
+      recomputeScheduleAndClashes(appCtx, db, notifyNewClashes = false)
+      _uiState.update { it.copy(lastError = null, lastStatusBanner = "Schedule clash resolved") }
+    }
+  }
+
+  fun ignoreClash(context: Context, clashId: String) {
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      val db = database ?: return@launch
+      synchronized(clashLock) { ignoredClashIds.add(clashId) }
+      recomputeScheduleAndClashes(appCtx, db, notifyNewClashes = false)
+    }
+  }
+
+  fun dismissScheduledEvent(context: Context, eventId: Long) {
+    if (eventId <= 0L) return
+    val appCtx = context.applicationContext
+    scope.launch {
+      ensureComponentsLocked(appCtx)
+      val db = database ?: return@launch
+      db.updateEventStatus(eventId, EventStatus.DISMISSED)
+      recomputeScheduleAndClashes(appCtx, db, notifyNewClashes = false)
     }
   }
 
@@ -1142,95 +1069,6 @@ object JarvisRuntime {
     }
   }
 
-  fun hasRecordAudioPermission(context: Context): Boolean =
-    ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-      PackageManager.PERMISSION_GRANTED
-
-  fun startVoiceprintEnrollment(context: Context) {
-    val appCtx = context.applicationContext
-    scope.launch {
-      ensureComponentsLocked(appCtx)
-      voiceCoordinator?.startEnrollment()
-    }
-  }
-
-  fun clearVoiceprint(context: Context) {
-    val appCtx = context.applicationContext
-    scope.launch {
-      ensureComponentsLocked(appCtx)
-      voiceCoordinator?.clearVoiceprint()
-    }
-  }
-
-  fun togglePushToTalkVoice(context: Context) {
-    val appCtx = context.applicationContext
-    scope.launch {
-      ensureComponentsLocked(appCtx)
-      val vc = voiceCoordinator ?: return@launch
-      if (vc.status.value.mode == VoiceSessionMode.LIVE_STREAMING ||
-        vc.status.value.mode == VoiceSessionMode.ENROLLING
-      ) {
-        vc.stopAllVoiceWork("Voice session ended by user")
-      } else {
-        vc.startPushToTalk()
-      }
-      recomputeAutomationActive()
-    }
-  }
-
-  fun setWakeWordVoiceEnabled(context: Context, enabled: Boolean) {
-    val appCtx = context.applicationContext
-    appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
-      .edit()
-      .putBoolean(KEY_WAKE_WORD_VOICE, enabled)
-      .apply()
-    scope.launch {
-      ensureComponentsLocked(appCtx)
-      voiceCoordinator?.setWakeWordEnabled(enabled)
-      recomputeAutomationActive()
-    }
-  }
-
-  fun claimWhisperNow(context: Context) {
-    val appCtx = context.applicationContext
-    scope.launch {
-      ensureComponentsLocked(appCtx)
-      voiceCoordinator?.claimActiveWhisperAndSpeak()
-    }
-  }
-
-  fun playParkedMessage(context: Context, id: String) {
-    val appCtx = context.applicationContext
-    scope.launch {
-      ensureComponentsLocked(appCtx)
-      voiceCoordinator?.playParkedMessage(id)
-    }
-  }
-
-  fun playAllParkedMessages(context: Context) {
-    val appCtx = context.applicationContext
-    scope.launch {
-      ensureComponentsLocked(appCtx)
-      voiceCoordinator?.playAllParkedMessages()
-    }
-  }
-
-  fun dismissParkedMessage(context: Context, id: String) {
-    val appCtx = context.applicationContext
-    scope.launch {
-      ensureComponentsLocked(appCtx)
-      voiceCoordinator?.dismissParkedMessage(id)
-    }
-  }
-
-  fun clearParkedMessages(context: Context) {
-    val appCtx = context.applicationContext
-    scope.launch {
-      ensureComponentsLocked(appCtx)
-      voiceCoordinator?.clearParkedMessages()
-    }
-  }
-
   fun isBatteryUnrestricted(context: Context): Boolean {
     return runCatching {
       val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return false
@@ -1303,154 +1141,11 @@ object JarvisRuntime {
       if (gatekeeper == null) gatekeeper = LocalGatekeeper(appCtx.packageName)
       if (geminiClient == null) geminiClient = GeminiClient()
       if (securityGateway == null) securityGateway = SecurityGateway(selfPackageName = appCtx.packageName)
-      if (plannerClient == null) plannerClient = PlannerClient()
-      if (playbookExecutor == null) {
-        val db = database!!
-        val gw = securityGateway!!
-        val pc = plannerClient!!
-        val shizukuHands = ShizukuControlManager(appCtx)
-        val store = object : PlaybookStore {
-          override fun findPlaybooksForIntent(triggerIntent: String, targetPackage: String?): List<UiPlaybook> =
-            db.findPlaybooksForIntent(triggerIntent, targetPackage)
-
-          override fun upsertPlaybook(
-            skillId: String,
-            triggerIntent: String,
-            targetPackage: String,
-            steps: List<PlaybookStep>,
-            incrementSuccess: Boolean,
-          ): Long = db.upsertPlaybook(skillId, triggerIntent, targetPackage, steps, incrementSuccess)
-
-          override fun incrementPlaybookSuccess(skillId: String) = db.incrementPlaybookSuccess(skillId)
-        }
-        val env = object : PlaybookEnvironment {
-          override fun currentForegroundPackage(): String =
-            ShizukuControlService.lastKnownForegroundPackage()
-
-          override suspend fun dumpCompactUiTree(): CompactUiTree =
-            shizukuHands.dumpCompactUiTree()
-
-          override suspend fun clickNode(id: Int): Result<String> =
-            shizukuHands.clickNode(id)
-
-          override suspend fun tap(x: Int, y: Int): Result<String> =
-            shizukuHands.tap(x, y)
-
-          override suspend fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int): Result<String> =
-            shizukuHands.swipe(x1, y1, x2, y2, durationMs)
-
-          override suspend fun inputText(id: Int, text: String): Result<String> =
-            shizukuHands.inputText(id, text)
-
-          override suspend fun scrollNode(id: Int?, forward: Boolean): Result<String> =
-            shizukuHands.scrollNode(id, forward)
-
-          override suspend fun pressKey(keyCode: Int): Result<String> =
-            shizukuHands.pressKey(keyCode)
-
-          override fun openApp(packageName: String): Result<String> {
-            val cleanPkg = packageName.trim()
-            if (SecurityGateway.isRestrictedPackage(cleanPkg, appCtx.packageName)) {
-              return Result.failure(SecurityException("Blocked restricted package: $cleanPkg"))
-            }
-            val launchIntent = appCtx.packageManager.getLaunchIntentForPackage(cleanPkg)
-              ?: return Result.failure(IllegalArgumentException("No launch intent found for package: $cleanPkg"))
-            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            return runCatching {
-              appCtx.startActivity(launchIntent)
-              "Launched $cleanPkg"
-            }
-          }
-
-          override fun launchMediaOrSearchIntent(
-            targetPackage: String,
-            query: String,
-            playImmediately: Boolean,
-          ): Result<String> {
-            val cleanPkg = targetPackage.trim()
-            if (SecurityGateway.isRestrictedPackage(cleanPkg, appCtx.packageName)) {
-              return Result.failure(SecurityException("Blocked restricted package: $cleanPkg"))
-            }
-            return runCatching {
-              val encoded = Uri.encode(query.trim())
-              val primaryIntent = when (cleanPkg) {
-                "com.google.android.youtube" -> Intent(
-                  Intent.ACTION_VIEW,
-                  Uri.parse("https://www.youtube.com/results?search_query=$encoded"),
-                ).apply {
-                  setPackage(cleanPkg)
-                  addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                "com.spotify.music" -> Intent(android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
-                  setPackage(cleanPkg)
-                  putExtra(android.app.SearchManager.QUERY, query.trim())
-                  addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                "com.google.android.apps.maps" -> Intent(
-                  Intent.ACTION_VIEW,
-                  Uri.parse("google.navigation:q=$encoded"),
-                ).apply {
-                  setPackage(cleanPkg)
-                  addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                else -> Intent(Intent.ACTION_SEARCH).apply {
-                  setPackage(cleanPkg)
-                  putExtra(android.app.SearchManager.QUERY, query.trim())
-                  addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-              }
-              try {
-                appCtx.startActivity(primaryIntent)
-              } catch (_: Throwable) {
-                val fallback = Intent(
-                  Intent.ACTION_VIEW,
-                  Uri.parse("https://www.youtube.com/results?search_query=$encoded"),
-                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                appCtx.startActivity(fallback)
-              }
-              "Opened $cleanPkg for '${query.trim()}'"
-            }
-          }
-
-          override fun sendNotificationReply(sbnKey: String, replyText: String): Result<String> {
-            return remoteInputCache.sendReply(appCtx, sbnKey, replyText).map { "Sent notification reply" }
-          }
-
-          override fun isContactTrusted(contactName: String, packageName: String): Boolean =
-            db.isContactTrusted(contactName, packageName)
-
-          override suspend fun requestTier3BiometricApproval(
-            actionTitle: String,
-            actionSummary: String,
-            reason: String,
-            targetPackage: String,
-            contactName: String,
-          ): Boolean = awaitTier3Approval(actionTitle, actionSummary, reason, targetPackage, contactName)
-        }
-        playbookExecutor = PlaybookExecutor(
-          env = env,
-          store = store,
-          security = gw,
-          planner = pc,
-          resolvePersonaContext = { cmdText ->
-            val words = cmdText.split(Regex("""\s+""")).map { it.trim(',', '.', '!', '?') }.filter { it.length >= 2 }
-            val matched = words.firstNotNullOfOrNull { token -> db.getContactPersona(token) }
-            if (matched != null) JarvisLanguagePrompt.formatContactPersona(matched) else ""
-          },
-        )
-      }
       if (burstAggregator == null) {
         burstAggregator = MessageBurstAggregator(
           scope = scope,
           onFlush = { merged -> processDebouncedNotification(appCtx, merged) },
         )
-      }
-      if (voiceNoteObserver == null) {
-        val observer = VoiceNoteObserver()
-        val opusOptIn = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
-          .getBoolean(KEY_OPUS_VOICE_READER, false)
-        observer.setEnabled(appCtx, opusOptIn)
-        voiceNoteObserver = observer
       }
       if (passiveContextEngine == null) {
         passiveContextEngine = PassiveContextEngine(scope = scope)
@@ -1470,27 +1165,18 @@ object JarvisRuntime {
           destinationStore = destStore,
           locationVerifier = PlayServicesOneShotLocationVerifier(appCtx),
           onSuggestionUpdated = { next ->
-            _proactiveSuggestion.value = next
-            _uiState.update { it.copy(proactiveSuggestion = next) }
-            handleFallbackNotification(appCtx, next)
+            val currentClashes = _uiState.value.eventClashes
+            val resolvedSuggestion = next ?: currentClashes.firstOrNull()?.let { clash ->
+              ProactiveSuggestion.EventClashAlert(
+                id = "clash_${clash.clashId}",
+                clash = clash,
+                sourceSummary = "${clash.existingEvent.title} vs ${clash.incomingEvent.title}",
+              )
+            }
+            _proactiveSuggestion.value = resolvedSuggestion
+            _uiState.update { it.copy(proactiveSuggestion = resolvedSuggestion) }
+            handleFallbackNotification(appCtx, resolvedSuggestion)
           },
-        )
-      }
-      if (voiceCoordinator == null) {
-        val db = database!!
-        val gw = securityGateway!!
-        val bridge = object : LiveToolBridge {
-          override suspend fun executeLiveTool(name: String, args: JsonObject): JsonObject {
-            return executeLiveToolCall(appCtx, db, gw, name, args)
-          }
-        }
-        voiceCoordinator = VoiceCoordinator(
-          context = appCtx,
-          scope = scope,
-          db = db,
-          apiKeyProvider = { keyVault?.getApiKey() },
-          toolBridge = bridge,
-          onUiFault = { msg -> recordFault(msg) },
         )
       }
     }
@@ -1498,9 +1184,6 @@ object JarvisRuntime {
     val engine = passiveContextEngine ?: return
     val savedPlaces = runCatching { database?.getSavedPlaces().orEmpty() }.getOrDefault(emptyList())
     engine.start(appCtx, savedPlaces)
-    val wakeSaved = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
-      .getBoolean(KEY_WAKE_WORD_VOICE, false)
-    voiceCoordinator?.refreshEnvironment(wakeSaved)
     if (contextCollectorsStarted.compareAndSet(false, true)) {
       scope.launch {
         engine.contextState.collect { ambient ->
@@ -1512,181 +1195,7 @@ object JarvisRuntime {
           proactiveEngine?.onSignal(signal)
         }
       }
-      voiceCoordinator?.let { vc ->
-        scope.launch {
-          vc.status.collect { vs ->
-            _uiState.update { it.copy(voiceStatus = vs) }
-            recomputeAutomationActive()
-          }
-        }
-      }
     }
-  }
-
-  private suspend fun executeLiveToolCall(
-    appCtx: Context,
-    db: JarvisDatabase,
-    gw: SecurityGateway,
-    name: String,
-    args: JsonObject,
-  ): JsonObject {
-    return when (name.trim().lowercase()) {
-      "reply_notification" -> {
-        val target = args["target"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
-        val replyText = args["reply_text"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
-        if (target.isEmpty() || replyText.isEmpty()) {
-          return buildJsonObject {
-            put("ok", false)
-            put("error", "reply_notification requires non-empty target and reply_text")
-          }
-        }
-        val recent = db.getRecentEvents(limit = 40, canReplyChecker = remoteInputCache::hasHandle)
-        val matched = recent.firstOrNull { ev ->
-          ev.canReplyNow && (
-            ev.sbnKey == target ||
-              ev.sender.contains(target, ignoreCase = true) ||
-              ev.title.contains(target, ignoreCase = true)
-            )
-        } ?: return buildJsonObject {
-          put("ok", false)
-          put("error", "No active reply handle matching '$target'")
-        }
-        val trusted = db.isContactTrusted(matched.sender.ifBlank { matched.title }, matched.packageName)
-        val verdict = gw.evaluateAndConsume(
-          SecurityActionRequest(
-            actionType = JarvisActionType.REPLY_NOTIFICATION,
-            activePackage = matched.packageName,
-            targetPackage = matched.packageName,
-            targetLabel = matched.sender,
-            outboundText = replyText,
-            contactName = matched.sender,
-            isTrustedContact = trusted,
-            reason = "Gemini Live voice reply",
-          ),
-        )
-        when (verdict) {
-          is SecurityVerdict.Deny -> buildJsonObject {
-            put("ok", false)
-            put("error", verdict.reason)
-          }
-          is SecurityVerdict.RequireBiometric -> {
-            val approved = awaitTier3Approval(
-              actionTitle = "Authorize Voice Reply",
-              actionSummary = verdict.actionSummary,
-              reason = verdict.reason,
-              targetPackage = matched.packageName,
-              contactName = matched.sender,
-            )
-            if (!approved) {
-              buildJsonObject {
-                put("ok", false)
-                put("error", "User denied Tier 3 biometric approval for reply to ${matched.sender}")
-              }
-            } else {
-              sendVerifiedReply(appCtx, db, gw, matched, replyText, recordTrusted = false)
-            }
-          }
-          is SecurityVerdict.Allow ->
-            sendVerifiedReply(appCtx, db, gw, matched, replyText, recordTrusted = trusted)
-        }
-      }
-
-      "shizuku_ui_action" -> {
-        val command = args["command"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
-        if (command.isEmpty()) {
-          return buildJsonObject { put("ok", false); put("error", "Missing command") }
-        }
-        val executor = playbookExecutor ?: return buildJsonObject {
-          put("ok", false); put("error", "PlaybookExecutor not ready")
-        }
-        val result = executor.executeCommand(commandText = command, apiKey = keyVault?.getApiKey())
-        database?.let { syncPlaybooksAndContacts(it) }
-        buildJsonObject {
-          put("ok", result.ok)
-          put("summary", result.summary)
-        }
-      }
-
-      "open_maps" -> {
-        val destination = args["destination"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
-        if (destination.isEmpty()) {
-          return buildJsonObject { put("ok", false); put("error", "Missing destination") }
-        }
-        val verdict = gw.evaluateAndConsume(
-          SecurityActionRequest(
-            actionType = JarvisActionType.OPEN_APP,
-            activePackage = "com.google.android.apps.maps",
-            targetPackage = "com.google.android.apps.maps",
-            targetLabel = destination,
-            reason = "Gemini Live open_maps",
-          ),
-        )
-        if (verdict is SecurityVerdict.Deny) {
-          return buildJsonObject { put("ok", false); put("error", verdict.reason) }
-        }
-        runCatching {
-          appCtx.startActivity(buildMapsNavigationIntent(appCtx, destination))
-          buildJsonObject { put("ok", true); put("summary", "Started Maps navigation to $destination") }
-        }.getOrElse { err ->
-          buildJsonObject { put("ok", false); put("error", err.message ?: "Failed to launch Maps") }
-        }
-      }
-
-      "search_memory" -> {
-        val query = args["query"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
-        val limit = (args["limit"]?.jsonPrimitive?.intOrNull ?: 5).coerceIn(1, 12)
-        val verdict = gw.evaluateAndConsume(
-          SecurityActionRequest(
-            actionType = JarvisActionType.GET_SCREEN_TREE,
-            activePackage = "",
-            targetLabel = query,
-            reason = "Gemini Live search_memory",
-          ),
-        )
-        if (verdict is SecurityVerdict.Deny) {
-          return buildJsonObject { put("ok", false); put("error", verdict.reason) }
-        }
-        val hits = db.searchMemory(query, limit)
-        buildJsonObject {
-          put("ok", true)
-          put("count", hits.size)
-          put("matches", buildJsonArray { hits.forEach { add(JsonPrimitive(it)) } })
-        }
-      }
-
-      else -> buildJsonObject {
-        put("ok", false)
-        put("error", "Unknown live tool: $name")
-      }
-    }
-  }
-
-  private fun sendVerifiedReply(
-    appCtx: Context,
-    db: JarvisDatabase,
-    gw: SecurityGateway,
-    matched: JarvisEventRecord,
-    replyText: String,
-    recordTrusted: Boolean,
-  ): JsonObject {
-    return remoteInputCache.sendReply(appCtx, matched.sbnKey, replyText).fold(
-      onSuccess = {
-        if (recordTrusted) gw.recordTrustedAutoReply(matched.packageName, matched.sender)
-        db.markReplySent(matched.id, replyText)
-        syncEventsSnapshot(db)
-        JarvisForegroundService.recordProcessed("Voice reply -> ${matched.sender}")
-        buildJsonObject {
-          put("ok", true)
-          put("summary", "Replied to ${matched.sender}: $replyText")
-        }
-      },
-      onFailure = { err ->
-        buildJsonObject {
-          put("ok", false)
-          put("error", err.message ?: "RemoteInput dispatch failed")
-        }
-      },
-    )
   }
 
   private fun syncStateSnapshot(appCtx: Context) {
@@ -1696,16 +1205,10 @@ object JarvisRuntime {
       db.getRecentEvents(canReplyChecker = remoteInputCache::hasHandle)
     }.getOrDefault(emptyList())
     val rules = runCatching { db.getActiveRules() }.getOrDefault(emptyList())
-    val playbooks = runCatching { db.getAllPlaybooks() }.getOrDefault(emptyList())
     val contacts = runCatching { db.getTrustedContacts() }.getOrDefault(emptyList())
     val savedPlaces = runCatching { db.getSavedPlaces() }.getOrDefault(emptyList())
     val destinations = runCatching { db.getAllUnexpiredDestinations() }.getOrDefault(emptyList())
     val personaTotal = runCatching { db.getContactPersonaCount() }.getOrDefault(0)
-    val opusEnabled = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
-      .getBoolean(KEY_OPUS_VOICE_READER, false)
-    val wakeEnabled = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
-      .getBoolean(KEY_WAKE_WORD_VOICE, false)
-    voiceCoordinator?.refreshEnvironment(wakeEnabled)
     val ambient = passiveContextEngine?.contextState?.value ?: _uiState.value.ambientContext
 
     _uiState.update { current ->
@@ -1720,8 +1223,7 @@ object JarvisRuntime {
         hasBackgroundLocationPermission = hasBackgroundLocation(appCtx),
         hasBluetoothConnectPermission = hasBluetoothConnect(appCtx),
         hasActivityRecognitionPermission = hasActivityRecognition(appCtx),
-        hasMediaAudioPermission = hasMediaAudioPermission(appCtx),
-        opusVoiceReaderEnabled = opusEnabled,
+        hasCalendarPermission = hasCalendarPermission(appCtx),
         batteryUnrestricted = isBatteryUnrestricted(appCtx),
         hasApiKey = vault?.hasApiKey?.value ?: false,
         maskedApiKey = vault?.maskedKeyPreview?.value.orEmpty(),
@@ -1734,20 +1236,14 @@ object JarvisRuntime {
         proactiveSuggestion = _proactiveSuggestion.value,
         events = events,
         rules = rules,
-        playbooks = playbooks,
         trustedContacts = contacts,
-        voiceStatus = voiceCoordinator?.status?.value ?: current.voiceStatus,
       )
     }
+    recomputeScheduleAndClashes(appCtx, db, notifyNewClashes = false)
   }
 
   private fun syncEnvironmentOnly(appCtx: Context) {
     val vault = keyVault
-    val opusEnabled = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
-      .getBoolean(KEY_OPUS_VOICE_READER, false)
-    val wakeEnabled = appCtx.getSharedPreferences(JARVIS_PREFS_NAME, Context.MODE_PRIVATE)
-      .getBoolean(KEY_WAKE_WORD_VOICE, false)
-    voiceCoordinator?.refreshEnvironment(wakeEnabled)
     val ambient = passiveContextEngine?.contextState?.value ?: _uiState.value.ambientContext
     _uiState.update { current ->
       current.copy(
@@ -1760,17 +1256,102 @@ object JarvisRuntime {
         hasBackgroundLocationPermission = hasBackgroundLocation(appCtx),
         hasBluetoothConnectPermission = hasBluetoothConnect(appCtx),
         hasActivityRecognitionPermission = hasActivityRecognition(appCtx),
-        hasMediaAudioPermission = hasMediaAudioPermission(appCtx),
-        opusVoiceReaderEnabled = opusEnabled,
+        hasCalendarPermission = hasCalendarPermission(appCtx),
         batteryUnrestricted = isBatteryUnrestricted(appCtx),
         hasApiKey = vault?.hasApiKey?.value ?: current.hasApiKey,
         maskedApiKey = vault?.maskedKeyPreview?.value ?: current.maskedApiKey,
         activeReplyHandleCount = remoteInputCache.activeCount(),
         ambientContext = ambient,
         proactiveSuggestion = _proactiveSuggestion.value,
-        voiceStatus = voiceCoordinator?.status?.value ?: current.voiceStatus,
       )
     }
+  }
+
+  private fun recomputeScheduleAndClashes(
+    appCtx: Context,
+    db: JarvisDatabase,
+    notifyNewClashes: Boolean,
+  ) {
+    val dbEvents = runCatching { db.getUpcomingEvents() }.getOrDefault(emptyList())
+    val calEvents = runCatching { EventPlannerEngine.readDeviceCalendarEvents(appCtx) }.getOrDefault(emptyList())
+    val combined = (dbEvents + calEvents).sortedBy { it.startEpochMs }
+    val ignored = synchronized(clashLock) { ignoredClashIds.toSet() }
+    val clashes = EventPlannerEngine.detectClashes(combined, ignoredClashIds = ignored)
+
+    val currentSuggestion = _proactiveSuggestion.value
+    val nextSuggestion = when {
+      currentSuggestion is ProactiveSuggestion.OpenMaps || currentSuggestion is ProactiveSuggestion.ScanUpiQr ->
+        currentSuggestion
+      clashes.isNotEmpty() -> {
+        val top = clashes.first()
+        ProactiveSuggestion.EventClashAlert(
+          id = "clash_${top.clashId}",
+          clash = top,
+          sourceSummary = "${top.existingEvent.title} vs ${top.incomingEvent.title}",
+        )
+      }
+      else -> null
+    }
+    _proactiveSuggestion.value = nextSuggestion
+    _uiState.update {
+      it.copy(
+        scheduledEvents = combined,
+        eventClashes = clashes,
+        proactiveSuggestion = nextSuggestion,
+      )
+    }
+
+    if (notifyNewClashes && clashes.isNotEmpty()) {
+      val newlyDetected = synchronized(clashLock) {
+        clashes.filter { alertedClashIds.add(it.clashId) }
+      }
+      newlyDetected.firstOrNull()?.let { postClashAlertNotification(appCtx, it) }
+    }
+  }
+
+  @SuppressLint("MissingPermission")
+  private fun postClashAlertNotification(appCtx: Context, clash: EventClash) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+      ContextCompat.checkSelfPermission(appCtx, Manifest.permission.POST_NOTIFICATIONS) !=
+      PackageManager.PERMISSION_GRANTED
+    ) {
+      return
+    }
+    val nm = appCtx.getSystemService(NotificationManager::class.java) ?: return
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      val channel = NotificationChannel(
+        CLASH_CHANNEL_ID,
+        "Jarvis Schedule Clashes",
+        NotificationManager.IMPORTANCE_HIGH,
+      ).apply {
+        description = "Immediate alerts when incoming message events clash with your schedule"
+      }
+      nm.createNotificationChannel(channel)
+    }
+    val launchIntent = Intent(appCtx, MainActivity::class.java).apply {
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+    }
+    val contentPi = PendingIntent.getActivity(
+      appCtx,
+      CLASH_NOTIFICATION_ID,
+      launchIntent,
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+    val detail = if (clash.severity == ClashSeverity.HARD_OVERLAP) {
+      "${clash.overlapMinutes}m overlap: '${clash.existingEvent.title}' vs '${clash.incomingEvent.title}'"
+    } else {
+      "Only ${clash.gapMinutes}m gap between '${clash.existingEvent.title}' (${clash.existingEvent.location}) and '${clash.incomingEvent.title}' (${clash.incomingEvent.location})"
+    }
+    val notification = NotificationCompat.Builder(appCtx, CLASH_CHANNEL_ID)
+      .setSmallIcon(R.mipmap.ic_launcher)
+      .setContentTitle("Schedule Clash Detected")
+      .setContentText(detail)
+      .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
+      .setPriority(NotificationCompat.PRIORITY_HIGH)
+      .setAutoCancel(true)
+      .setContentIntent(contentPi)
+      .build()
+    runCatching { nm.notify(CLASH_NOTIFICATION_ID, notification) }
   }
 
   private fun syncProactiveSnapshot(db: JarvisDatabase) {
@@ -1804,7 +1385,7 @@ object JarvisRuntime {
         "Jarvis Proactive Context",
         NotificationManager.IMPORTANCE_HIGH,
       ).apply {
-        description = "Anticipatory navigation and UPI scanner actions outside launcher"
+        description = "Anticipatory navigation, schedule clashes, and UPI scanner actions outside launcher"
       }
       nm.createNotificationChannel(channel)
     }
@@ -1812,6 +1393,10 @@ object JarvisRuntime {
       is ProactiveSuggestion.OpenMaps -> buildMapsNavigationIntent(appCtx, suggestion.placeName)
       is ProactiveSuggestion.ScanUpiQr ->
         buildUpiScannerIntent(appCtx) ?: Intent(appCtx, MainActivity::class.java).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+      is ProactiveSuggestion.EventClashAlert ->
+        Intent(appCtx, MainActivity::class.java).apply {
           addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
     }
@@ -1826,6 +1411,8 @@ object JarvisRuntime {
         "Navigate to ${suggestion.placeName}" to suggestion.sourceSummary
       is ProactiveSuggestion.ScanUpiQr ->
         "Scan UPI QR (${suggestion.placeLabel})" to "Dwelt ${suggestion.dwellMinutes}m away · Tap to open scanner"
+      is ProactiveSuggestion.EventClashAlert ->
+        "Schedule Clash" to "${suggestion.clash.existingEvent.title} vs ${suggestion.clash.incomingEvent.title}"
     }
     val notification = NotificationCompat.Builder(appCtx, PROACTIVE_CHANNEL_ID)
       .setSmallIcon(R.mipmap.ic_launcher)
@@ -1846,10 +1433,9 @@ object JarvisRuntime {
     }
   }
 
-  private fun syncPlaybooksAndContacts(db: JarvisDatabase) {
-    val playbooks = runCatching { db.getAllPlaybooks() }.getOrDefault(emptyList())
+  private fun syncTrustedContacts(db: JarvisDatabase) {
     val contacts = runCatching { db.getTrustedContacts() }.getOrDefault(emptyList())
-    _uiState.update { it.copy(playbooks = playbooks, trustedContacts = contacts) }
+    _uiState.update { it.copy(trustedContacts = contacts) }
   }
 
   private fun syncEventsSnapshot(db: JarvisDatabase) {

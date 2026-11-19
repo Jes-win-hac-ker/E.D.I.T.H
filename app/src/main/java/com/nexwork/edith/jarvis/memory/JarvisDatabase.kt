@@ -7,17 +7,18 @@ import android.database.sqlite.SQLiteOpenHelper
 import com.nexwork.edith.jarvis.brain.JarvisLanguagePrompt
 import com.nexwork.edith.jarvis.core.CapturedNotification
 import com.nexwork.edith.jarvis.core.ContactPersona
+import com.nexwork.edith.jarvis.core.EventSource
+import com.nexwork.edith.jarvis.core.EventStatus
 import com.nexwork.edith.jarvis.core.GroupEngagementRecord
 import com.nexwork.edith.jarvis.core.JarvisEventRecord
 import com.nexwork.edith.jarvis.core.JarvisRule
 import com.nexwork.edith.jarvis.core.NotificationTriage
 import com.nexwork.edith.jarvis.core.PlaceTag
-import com.nexwork.edith.jarvis.core.PlaybookStep
 import com.nexwork.edith.jarvis.core.SavedPlaceProfile
+import com.nexwork.edith.jarvis.core.ScheduledEvent
 import com.nexwork.edith.jarvis.core.ThreadMessage
 import com.nexwork.edith.jarvis.core.TriageStatus
 import com.nexwork.edith.jarvis.core.TrustedContact
-import com.nexwork.edith.jarvis.core.UiPlaybook
 import com.nexwork.edith.jarvis.core.UpcomingDestination
 import com.nexwork.edith.jarvis.security.SecurityGateway
 import kotlinx.serialization.encodeToString
@@ -102,6 +103,7 @@ class JarvisDatabase(
     createV3Tables(db)
     createV4Tables(db)
     createV5Tables(db)
+    createV6Tables(db)
   }
 
   override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -117,6 +119,31 @@ class JarvisDatabase(
     if (oldVersion < 5) {
       createV5Tables(db)
     }
+    if (oldVersion < 6) {
+      createV6Tables(db)
+    }
+  }
+
+  private fun createV6Tables(db: SQLiteDatabase) {
+    db.execSQL(
+      """
+      CREATE TABLE IF NOT EXISTS $TABLE_SCHEDULED_EVENTS (
+        $COL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+        $COL_EVENT_TITLE TEXT NOT NULL,
+        $COL_START_EPOCH_MS INTEGER NOT NULL,
+        $COL_END_EPOCH_MS INTEGER NOT NULL,
+        $COL_EVENT_LOCATION TEXT NOT NULL DEFAULT '',
+        $COL_EVENT_SOURCE TEXT NOT NULL DEFAULT 'MESSAGE',
+        $COL_SENDER TEXT NOT NULL DEFAULT '',
+        $COL_SOURCE_SUMMARY TEXT NOT NULL DEFAULT '',
+        $COL_EVENT_STATUS TEXT NOT NULL DEFAULT 'ACTIVE',
+        $COL_CREATED_AT_MS INTEGER NOT NULL
+      )
+      """.trimIndent()
+    )
+    db.execSQL(
+      "CREATE INDEX IF NOT EXISTS idx_scheduled_events_start ON $TABLE_SCHEDULED_EVENTS($COL_START_EPOCH_MS ASC)"
+    )
   }
 
   private fun createV5Tables(db: SQLiteDatabase) {
@@ -577,114 +604,6 @@ class JarvisDatabase(
 
   fun deleteRule(ruleId: Long): Int {
     return writableDatabase.delete(TABLE_USER_RULEBOOK, "$COL_ID = ?", arrayOf(ruleId.toString()))
-  }
-
-  fun upsertPlaybook(
-    skillId: String,
-    triggerIntent: String,
-    targetPackage: String,
-    steps: List<PlaybookStep>,
-    incrementSuccess: Boolean = false,
-    nowMs: Long = System.currentTimeMillis(),
-  ): Long {
-    val db = writableDatabase
-    val encodedSteps = json.encodeToString(steps)
-    val values = ContentValues().apply {
-      put(COL_SKILL_ID, skillId)
-      put(COL_TRIGGER_INTENT, normalizeKey(triggerIntent))
-      put(COL_TARGET_PACKAGE, targetPackage.trim())
-      put(COL_STEPS_JSON, encodedSteps)
-      put(COL_UPDATED_AT_MS, nowMs)
-    }
-
-    val updated = db.update(TABLE_UI_PLAYBOOKS, values, "$COL_SKILL_ID = ?", arrayOf(skillId))
-    if (updated > 0) {
-      if (incrementSuccess) {
-        incrementPlaybookSuccess(skillId, nowMs)
-      }
-      db.query(
-        TABLE_UI_PLAYBOOKS,
-        arrayOf(COL_ID),
-        "$COL_SKILL_ID = ?",
-        arrayOf(skillId),
-        null,
-        null,
-        null,
-      ).use { c -> if (c.moveToFirst()) return c.getLong(0) }
-    }
-
-    values.put(COL_SUCCESS_COUNT, if (incrementSuccess) 1 else 0)
-    values.put(COL_CREATED_AT_MS, nowMs)
-    return db.insertOrThrow(TABLE_UI_PLAYBOOKS, null, values)
-  }
-
-  fun incrementPlaybookSuccess(skillId: String, nowMs: Long = System.currentTimeMillis()) {
-    writableDatabase.execSQL(
-      "UPDATE $TABLE_UI_PLAYBOOKS SET $COL_SUCCESS_COUNT = $COL_SUCCESS_COUNT + 1, $COL_UPDATED_AT_MS = ? WHERE $COL_SKILL_ID = ?",
-      arrayOf<Any>(nowMs, skillId),
-    )
-  }
-
-  fun findPlaybooksForIntent(
-    triggerIntent: String,
-    targetPackage: String? = null,
-  ): List<UiPlaybook> {
-    val normalized = normalizeKey(triggerIntent)
-    if (normalized.isEmpty()) return emptyList()
-    val all = getAllPlaybooks()
-    return all.filter { pb ->
-      val pkgMatches = targetPackage.isNullOrBlank() ||
-        pb.targetPackage.equals(targetPackage, ignoreCase = true)
-      val intentMatches = pb.triggerIntent == normalized ||
-        normalized.contains(pb.triggerIntent) ||
-        pb.triggerIntent.contains(normalized)
-      pkgMatches && intentMatches
-    }.sortedWith(
-      compareByDescending<UiPlaybook> { it.triggerIntent == normalized }
-        .thenByDescending { it.successCount }
-        .thenByDescending { it.updatedAtMs }
-    )
-  }
-
-  fun getAllPlaybooks(limit: Int = 50): List<UiPlaybook> {
-    val list = mutableListOf<UiPlaybook>()
-    readableDatabase.query(
-      TABLE_UI_PLAYBOOKS,
-      null,
-      null,
-      null,
-      null,
-      null,
-      "$COL_SUCCESS_COUNT DESC, $COL_UPDATED_AT_MS DESC",
-      limit.coerceIn(1, 200).toString(),
-    ).use { c ->
-      val idxId = c.getColumnIndexOrThrow(COL_ID)
-      val idxSkill = c.getColumnIndexOrThrow(COL_SKILL_ID)
-      val idxIntent = c.getColumnIndexOrThrow(COL_TRIGGER_INTENT)
-      val idxPkg = c.getColumnIndexOrThrow(COL_TARGET_PACKAGE)
-      val idxSteps = c.getColumnIndexOrThrow(COL_STEPS_JSON)
-      val idxCount = c.getColumnIndexOrThrow(COL_SUCCESS_COUNT)
-      val idxCreated = c.getColumnIndexOrThrow(COL_CREATED_AT_MS)
-      val idxUpdated = c.getColumnIndexOrThrow(COL_UPDATED_AT_MS)
-      while (c.moveToNext()) {
-        val rawSteps = c.getString(idxSteps)
-        val steps = runCatching { json.decodeFromString<List<PlaybookStep>>(rawSteps) }.getOrDefault(emptyList())
-        list.add(
-          UiPlaybook(
-            id = c.getLong(idxId),
-            skillId = c.getString(idxSkill),
-            triggerIntent = c.getString(idxIntent),
-            targetPackage = c.getString(idxPkg),
-            steps = steps,
-            stepsJson = rawSteps,
-            successCount = c.getInt(idxCount),
-            createdAtMs = c.getLong(idxCreated),
-            updatedAtMs = c.getLong(idxUpdated),
-          )
-        )
-      }
-    }
-    return list
   }
 
   fun deletePlaybook(skillId: String): Int {
@@ -1156,6 +1075,97 @@ class JarvisDatabase(
     return list
   }
 
+  fun insertOrUpdateEvent(event: ScheduledEvent): Long {
+    val title = event.title.trim()
+    if (title.isEmpty() || event.startEpochMs <= 0L) return -1L
+    val endMs = if (event.endEpochMs > event.startEpochMs) event.endEpochMs else event.startEpochMs + 3_600_000L
+    // Deduplicate identical title + start window (within 5 min) if still active.
+    readableDatabase.query(
+      TABLE_SCHEDULED_EVENTS,
+      arrayOf(COL_ID),
+      "LOWER($COL_EVENT_TITLE) = ? AND ABS($COL_START_EPOCH_MS - ?) <= 300000 AND $COL_EVENT_STATUS = ?",
+      arrayOf(title.lowercase(), event.startEpochMs.toString(), EventStatus.ACTIVE.name),
+      null,
+      null,
+      null,
+      "1",
+    ).use { c ->
+      if (c.moveToFirst()) {
+        val existingId = c.getLong(0)
+        val cv = ContentValues().apply {
+          put(COL_END_EPOCH_MS, endMs)
+          put(COL_EVENT_LOCATION, event.location.trim())
+          put(COL_SOURCE_SUMMARY, event.sourceSummary.trim())
+        }
+        writableDatabase.update(TABLE_SCHEDULED_EVENTS, cv, "$COL_ID = ?", arrayOf(existingId.toString()))
+        return existingId
+      }
+    }
+    val values = ContentValues().apply {
+      put(COL_EVENT_TITLE, title)
+      put(COL_START_EPOCH_MS, event.startEpochMs)
+      put(COL_END_EPOCH_MS, endMs)
+      put(COL_EVENT_LOCATION, event.location.trim())
+      put(COL_EVENT_SOURCE, event.source.name)
+      put(COL_SENDER, event.sender.trim())
+      put(COL_SOURCE_SUMMARY, event.sourceSummary.trim())
+      put(COL_EVENT_STATUS, event.status.name)
+      put(COL_CREATED_AT_MS, event.createdAtMs)
+    }
+    return writableDatabase.insert(TABLE_SCHEDULED_EVENTS, null, values)
+  }
+
+  fun getUpcomingEvents(nowMs: Long = System.currentTimeMillis(), limit: Int = 50): List<ScheduledEvent> {
+    val cutoffMs = nowMs - 2L * 60L * 60L * 1000L
+    val out = mutableListOf<ScheduledEvent>()
+    readableDatabase.query(
+      TABLE_SCHEDULED_EVENTS,
+      arrayOf(
+        COL_ID,
+        COL_EVENT_TITLE,
+        COL_START_EPOCH_MS,
+        COL_END_EPOCH_MS,
+        COL_EVENT_LOCATION,
+        COL_EVENT_SOURCE,
+        COL_SENDER,
+        COL_SOURCE_SUMMARY,
+        COL_EVENT_STATUS,
+        COL_CREATED_AT_MS,
+      ),
+      "$COL_END_EPOCH_MS >= ? AND $COL_EVENT_STATUS = ?",
+      arrayOf(cutoffMs.toString(), EventStatus.ACTIVE.name),
+      null,
+      null,
+      "$COL_START_EPOCH_MS ASC",
+      limit.coerceAtLeast(1).toString(),
+    ).use { c ->
+      while (c.moveToNext()) {
+        out += ScheduledEvent(
+          id = c.getLong(0),
+          title = c.getString(1).orEmpty(),
+          startEpochMs = c.getLong(2),
+          endEpochMs = c.getLong(3),
+          location = c.getString(4).orEmpty(),
+          source = runCatching { EventSource.valueOf(c.getString(5)) }.getOrDefault(EventSource.MESSAGE),
+          sender = c.getString(6).orEmpty(),
+          sourceSummary = c.getString(7).orEmpty(),
+          status = runCatching { EventStatus.valueOf(c.getString(8)) }.getOrDefault(EventStatus.ACTIVE),
+          createdAtMs = c.getLong(9),
+        )
+      }
+    }
+    return out
+  }
+
+  fun updateEventStatus(id: Long, status: EventStatus): Int {
+    val values = ContentValues().apply { put(COL_EVENT_STATUS, status.name) }
+    return writableDatabase.update(TABLE_SCHEDULED_EVENTS, values, "$COL_ID = ?", arrayOf(id.toString()))
+  }
+
+  fun deleteEvent(id: Long): Int {
+    return writableDatabase.delete(TABLE_SCHEDULED_EVENTS, "$COL_ID = ?", arrayOf(id.toString()))
+  }
+
   fun deleteSavedPlace(ssidNormalized: String): Int {
     return writableDatabase.delete(
       TABLE_SAVED_PLACES,
@@ -1179,7 +1189,7 @@ class JarvisDatabase(
 
   companion object {
     const val DB_NAME = "jarvis_memory.db"
-    const val DB_VERSION = 5
+    const val DB_VERSION = 6
     const val DESTINATION_TTL_24H_MS = 24L * 60L * 60L * 1000L
     const val FUTURE_EVENT_DEFAULT_WINDOW_MS = 6L * 60L * 60L * 1000L
     private const val DEFAULT_FEED_LIMIT = 50
@@ -1196,6 +1206,14 @@ class JarvisDatabase(
     const val TABLE_CONTACT_PERSONAS = "contact_personas"
     const val TABLE_GROUP_ENGAGEMENT = "group_engagement"
     const val TABLE_VOICEPRINT = "voiceprint"
+    const val TABLE_SCHEDULED_EVENTS = "scheduled_events"
+
+    private const val COL_EVENT_TITLE = "event_title"
+    private const val COL_START_EPOCH_MS = "start_epoch_ms"
+    private const val COL_END_EPOCH_MS = "end_epoch_ms"
+    private const val COL_EVENT_LOCATION = "event_location"
+    private const val COL_EVENT_SOURCE = "event_source"
+    private const val COL_EVENT_STATUS = "event_status"
 
     private const val COL_EMBEDDING_BLOB = "embedding_blob"
     private const val COL_EMBEDDING_DIM = "embedding_dim"

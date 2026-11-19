@@ -58,20 +58,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nexwork.edith.jarvis.core.ClashSeverity
+import com.nexwork.edith.jarvis.core.EventClash
 import com.nexwork.edith.jarvis.core.JarvisEventRecord
 import com.nexwork.edith.jarvis.core.JarvisRuntime
 import com.nexwork.edith.jarvis.core.JarvisUiState
 import com.nexwork.edith.jarvis.core.PlaceTag
 import com.nexwork.edith.jarvis.core.SavedPlaceProfile
+import com.nexwork.edith.jarvis.core.ScheduledEvent
 import com.nexwork.edith.jarvis.core.Tier3ApprovalRequest
 import com.nexwork.edith.jarvis.core.TriageStatus
 import com.nexwork.edith.jarvis.core.TrustedContact
 import com.nexwork.edith.jarvis.core.UpcomingDestination
-import com.nexwork.edith.jarvis.core.VoiceSessionMode
-import com.nexwork.edith.jarvis.core.VoiceStatus
 import com.nexwork.edith.jarvis.security.BiometricPromptHelper
-import com.nexwork.edith.jarvis.voice.VoiceCoordinator
-import com.nexwork.edith.jarvis.voice.VoiceprintGate
 import com.nexwork.edith.theme.Crimson
 import com.nexwork.edith.theme.CrimsonBright
 import com.nexwork.edith.theme.LocalLauncherStyle
@@ -151,9 +150,11 @@ fun JarvisBaseplatePanel(
 
   var apiKeyInput by remember { mutableStateOf("") }
   var revealApiKey by remember { mutableStateOf(false) }
-  var commandDraft by remember { mutableStateOf("") }
   var contactDraft by remember { mutableStateOf("") }
   var ssidDraft by remember { mutableStateOf("") }
+  var eventTitleDraft by remember { mutableStateOf("") }
+  var eventTimeDraft by remember { mutableStateOf("") }
+  var eventLocationDraft by remember { mutableStateOf("") }
 
   val bgLocLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.RequestPermission(),
@@ -175,38 +176,10 @@ fun JarvisBaseplatePanel(
       bgLocLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
     }
   }
-  val audioPermLauncher = rememberLauncherForActivityResult(
+  val calPermLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.RequestPermission(),
-  ) { granted ->
-    JarvisRuntime.setOpusVoiceReaderEnabled(context, granted)
-  }
-  var pendingMicAction by remember { mutableStateOf<(() -> Unit)?>(null) }
-  val micPermLauncher = rememberLauncherForActivityResult(
-    contract = ActivityResultContracts.RequestPermission(),
-  ) { granted ->
-    JarvisRuntime.refreshEnvironmentStatus(context)
-    if (granted) {
-      pendingMicAction?.invoke()
-    }
-    pendingMicAction = null
-  }
-  val runWithMicPermission: (() -> Unit) -> Unit = { action ->
-    if (JarvisRuntime.hasRecordAudioPermission(context)) {
-      action()
-    } else {
-      pendingMicAction = action
-      micPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
-    }
-  }
-  val onToggleOpusVoice: () -> Unit = {
-    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-    if (uiState.opusVoiceReaderEnabled) {
-      JarvisRuntime.setOpusVoiceReaderEnabled(context, false)
-    } else if (JarvisRuntime.hasMediaAudioPermission(context)) {
-      JarvisRuntime.setOpusVoiceReaderEnabled(context, true)
-    } else {
-      audioPermLauncher.launch(JarvisRuntime.audioReadPermission())
-    }
+  ) {
+    JarvisRuntime.syncCalendarAndEvents(context)
   }
   val requestAmbientPermissions: () -> Unit = {
     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -239,7 +212,7 @@ fun JarvisBaseplatePanel(
           letterSpacing = 1.2.sp,
         )
         Text(
-          text = "${uiState.playbooks.size} PLAYBOOKS · ${uiState.activeReplyHandleCount} REPLY HANDLES",
+          text = "${uiState.scheduledEvents.size} EVENTS · ${uiState.eventClashes.size} CLASHES · ${uiState.activeReplyHandleCount} REPLIES",
           color = TextPureWhite,
           fontFamily = style.fontFamily,
           fontSize = (11.5f * style.fontScale).sp,
@@ -251,11 +224,8 @@ fun JarvisBaseplatePanel(
 
       Spacer(modifier = Modifier.width(8.dp))
 
-      val hasActiveJobs = uiState.isExecutingCommand ||
-        uiState.isProcessing ||
-        uiState.pendingTier3Approval != null ||
-        uiState.voiceStatus.mode == VoiceSessionMode.LIVE_STREAMING ||
-        uiState.voiceStatus.mode == VoiceSessionMode.ENROLLING
+      val hasActiveJobs = uiState.isProcessing ||
+        uiState.pendingTier3Approval != null
       Row(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -376,7 +346,7 @@ fun JarvisBaseplatePanel(
             else -> "OFFLINE"
           }
           StatusPill(
-            label = "SHIZUKU HANDS",
+            label = "SHIZUKU",
             value = shizukuValue,
             state = shizukuState,
             accent = accent,
@@ -419,40 +389,16 @@ fun JarvisBaseplatePanel(
           )
 
           StatusPill(
-            label = "OPUS VOICE",
-            value = when {
-              uiState.opusVoiceReaderEnabled && uiState.hasMediaAudioPermission -> "LIVE"
-              uiState.opusVoiceReaderEnabled -> "PERM"
-              else -> "OFF"
-            },
-            state = when {
-              uiState.opusVoiceReaderEnabled && uiState.hasMediaAudioPermission -> PillState.OK
-              uiState.opusVoiceReaderEnabled -> PillState.WARN
-              else -> PillState.WARN
-            },
-            accent = accent,
-            onClick = onToggleOpusVoice,
-          )
-
-          StatusPill(
-            label = "MIC GATE",
-            value = when {
-              !uiState.voiceStatus.hasMicPermission -> "GRANT"
-              uiState.voiceStatus.pauseReason != null -> uiState.voiceStatus.pauseReason!!
-              else -> uiState.voiceStatus.mode.label
-            },
-            state = when {
-              !uiState.voiceStatus.hasMicPermission -> PillState.FAULT
-              uiState.voiceStatus.pauseReason != null -> PillState.WARN
-              uiState.voiceStatus.mode == VoiceSessionMode.LIVE_STREAMING -> PillState.OK
-              uiState.voiceStatus.voiceprintEnrolled -> PillState.OK
-              else -> PillState.WARN
-            },
+            label = "CALENDAR",
+            value = if (uiState.hasCalendarPermission) "SYNC" else "GRANT",
+            state = if (uiState.hasCalendarPermission) PillState.OK else PillState.WARN,
             accent = accent,
             onClick = {
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              runWithMicPermission {
-                JarvisRuntime.togglePushToTalkVoice(context)
+              if (uiState.hasCalendarPermission) {
+                JarvisRuntime.syncCalendarAndEvents(context)
+              } else {
+                calPermLauncher.launch(Manifest.permission.READ_CALENDAR)
               }
             },
           )
@@ -472,51 +418,53 @@ fun JarvisBaseplatePanel(
         }
       }
 
-      // Milestone 4 Voiceprint Gate, Earbud Mode & gemini-3.8-live Card
-      item(key = "voice_earbud_mode") {
-        VoiceEarbudCard(
-          voiceStatus = uiState.voiceStatus,
-          hasApiKey = uiState.hasApiKey,
+      // Event Planner: Active Clashes + Upcoming Schedule
+      if (uiState.eventClashes.isNotEmpty()) {
+        item(key = "event_clashes_card") {
+          EventClashesCard(
+            clashes = uiState.eventClashes,
+            accent = accent,
+            onKeepEvent = { clashId, keepId ->
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              JarvisRuntime.resolveClashKeep(context, clashId, keepId)
+            },
+            onIgnoreClash = { clashId ->
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              JarvisRuntime.ignoreClash(context, clashId)
+            },
+          )
+        }
+      }
+
+      item(key = "event_planner_card") {
+        EventPlannerCard(
+          events = uiState.scheduledEvents,
+          draftTitle = eventTitleDraft,
+          draftTime = eventTimeDraft,
+          draftLocation = eventLocationDraft,
           accent = accent,
-          onEnroll = {
+          onTitleChange = { eventTitleDraft = it },
+          onTimeChange = { eventTimeDraft = it },
+          onLocationChange = { eventLocationDraft = it },
+          onAddEvent = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            runWithMicPermission { JarvisRuntime.startVoiceprintEnrollment(context) }
+            val startMs = parseDraftEventTimeMs(eventTimeDraft)
+            JarvisRuntime.addManualEvent(
+              context = context,
+              title = eventTitleDraft,
+              startEpochMs = startMs,
+              endEpochMs = startMs + 3_600_000L,
+              location = eventLocationDraft,
+            )
+            eventTitleDraft = ""
+            eventTimeDraft = ""
+            eventLocationDraft = ""
+            keyboardController?.hide()
+            focusManager.clearFocus()
           },
-          onClearVoiceprint = {
+          onDismissEvent = { eventId ->
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            JarvisRuntime.clearVoiceprint(context)
-          },
-          onTogglePtt = {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            runWithMicPermission { JarvisRuntime.togglePushToTalkVoice(context) }
-          },
-          onToggleWakeWord = { enabled ->
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            if (enabled) {
-              runWithMicPermission { JarvisRuntime.setWakeWordVoiceEnabled(context, true) }
-            } else {
-              JarvisRuntime.setWakeWordVoiceEnabled(context, false)
-            }
-          },
-          onClaimWhisper = {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            runWithMicPermission { JarvisRuntime.claimWhisperNow(context) }
-          },
-          onPlayParked = { id ->
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            runWithMicPermission { JarvisRuntime.playParkedMessage(context, id) }
-          },
-          onPlayAllParked = {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            runWithMicPermission { JarvisRuntime.playAllParkedMessages(context) }
-          },
-          onDismissParked = { id ->
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            JarvisRuntime.dismissParkedMessage(context, id)
-          },
-          onClearParked = {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            JarvisRuntime.clearParkedMessages(context)
+            JarvisRuntime.dismissScheduledEvent(context, eventId)
           },
         )
       }
@@ -582,30 +530,6 @@ fun JarvisBaseplatePanel(
         )
       }
 
-      // Command Test Bar for end-to-end Playbook Replay & gemini-4-hydrogen Planner Execution
-      item(key = "command_test_bar") {
-        CommandTestBarCard(
-          draftCommand = commandDraft,
-          isExecuting = uiState.isExecutingCommand,
-          playbooksCount = uiState.playbooks.size,
-          traceLog = uiState.lastExecutionLog,
-          accent = accent,
-          onDraftChange = { commandDraft = it },
-          onRun = {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            val cmd = commandDraft
-            commandDraft = ""
-            keyboardController?.hide()
-            focusManager.clearFocus()
-            JarvisRuntime.executeUiCommand(context, cmd)
-          },
-          onStop = {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            JarvisRuntime.stopCommandExecution(context, reason = "Playbook STOP button tapped")
-          },
-        )
-      }
-
       // Trusted Contacts Toggle List
       item(key = "trusted_contacts") {
         TrustedContactsCard(
@@ -657,7 +581,6 @@ fun JarvisBaseplatePanel(
 
       // Optional live processing / feedback banner
       val bannerText = when {
-        uiState.isExecutingCommand -> "EXECUTING UI PLAN..."
         uiState.isProcessing -> "TRIAGING VIA GEMINI 3.5 FLASH-LITE..."
         !uiState.lastError.isNullOrBlank() -> uiState.lastError
         !uiState.lastStatusBanner.isNullOrBlank() -> uiState.lastStatusBanner
@@ -665,7 +588,7 @@ fun JarvisBaseplatePanel(
       }
       if (bannerText != null) {
         item(key = "status_banner") {
-          val busy = uiState.isProcessing || uiState.isExecutingCommand
+          val busy = uiState.isProcessing
           val isErr = !busy && !uiState.lastError.isNullOrBlank()
           val bannerColor = if (isErr) CrimsonBright else accent
           Row(
@@ -848,118 +771,6 @@ private fun Tier3BiometricApprovalCard(
         color = TextSilver.copy(alpha = 0.80f),
         fontSize = 10.sp,
         lineHeight = 13.sp,
-      )
-    }
-  }
-}
-
-@Composable
-private fun CommandTestBarCard(
-  draftCommand: String,
-  isExecuting: Boolean,
-  playbooksCount: Int,
-  traceLog: List<String>,
-  accent: Color,
-  onDraftChange: (String) -> Unit,
-  onRun: () -> Unit,
-  onStop: () -> Unit,
-) {
-  val style = LocalLauncherStyle.current
-  Column(
-    modifier = Modifier
-      .fillMaxWidth()
-      .starkHudPlate(
-        accent = accent,
-        focused = isExecuting,
-        showBrackets = true,
-        bracketScale = 0.56f,
-        plateAlpha = 0.88f,
-        style = style,
-      )
-      .padding(10.dp),
-    verticalArrangement = Arrangement.spacedBy(6.dp),
-  ) {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Text(
-        text = "COMMAND TEST BAR (PLAYBOOKS -> HYDROGEN)",
-        color = TextSilver,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 9.5.sp,
-        fontWeight = FontWeight.SemiBold,
-      )
-      Text(
-        text = "$playbooksCount SAVED",
-        color = accent,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 9.sp,
-        fontWeight = FontWeight.Bold,
-      )
-    }
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-      Box(
-        modifier = Modifier
-          .weight(1f)
-          .jarvisInputPlate(accent)
-          .padding(horizontal = 9.dp, vertical = 7.dp),
-      ) {
-        if (draftCommand.isEmpty()) {
-          Text(
-            text = "e.g. search youtube for jazz",
-            color = TextSilver.copy(alpha = 0.50f),
-            fontFamily = FontFamily.Monospace,
-            fontSize = 10.5.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-          )
-        }
-        BasicTextField(
-          value = draftCommand,
-          onValueChange = onDraftChange,
-          singleLine = true,
-          textStyle = TextStyle(
-            color = TextPureWhite,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 10.5.sp,
-          ),
-          cursorBrush = SolidColor(accent),
-          keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-          keyboardActions = KeyboardActions(onGo = { if (draftCommand.isNotBlank() && !isExecuting) onRun() }),
-          modifier = Modifier.fillMaxWidth(),
-        )
-      }
-      if (isExecuting) {
-        ActionChip(
-          text = "■ STOP",
-          tint = CrimsonBright,
-          enabled = true,
-          onClick = onStop,
-        )
-      } else {
-        ActionChip(
-          text = "RUN",
-          tint = accent,
-          enabled = draftCommand.isNotBlank(),
-          onClick = onRun,
-        )
-      }
-    }
-    if (traceLog.isNotEmpty()) {
-      Text(
-        text = traceLog.takeLast(4).joinToString("\n"),
-        color = TextSilver.copy(alpha = 0.88f),
-        fontFamily = FontFamily.Monospace,
-        fontSize = 9.sp,
-        lineHeight = 12.sp,
-        maxLines = 5,
-        overflow = TextOverflow.Ellipsis,
       )
     }
   }
@@ -1637,36 +1448,137 @@ private fun SavedPlacesContextDebugCard(
 }
 
 @Composable
-private fun VoiceEarbudCard(
-  voiceStatus: VoiceStatus,
-  hasApiKey: Boolean,
+private fun EventClashesCard(
+  clashes: List<EventClash>,
   accent: Color,
-  onEnroll: () -> Unit,
-  onClearVoiceprint: () -> Unit,
-  onTogglePtt: () -> Unit,
-  onToggleWakeWord: (Boolean) -> Unit,
-  onClaimWhisper: () -> Unit,
-  onPlayParked: (String) -> Unit,
-  onPlayAllParked: () -> Unit,
-  onDismissParked: (String) -> Unit,
-  onClearParked: () -> Unit,
+  onKeepEvent: (clashId: String, keepEventId: Long) -> Unit,
+  onIgnoreClash: (clashId: String) -> Unit,
 ) {
   val style = LocalLauncherStyle.current
-  val isLive = voiceStatus.mode == VoiceSessionMode.LIVE_STREAMING
-  val isEnrolling = voiceStatus.mode == VoiceSessionMode.ENROLLING
-  val confPct = voiceStatus.lastConfidenceScore.coerceIn(0f, 1f)
-  val confColor = when {
-    confPct <= 0.01f -> TextSilver.copy(alpha = 0.45f)
-    voiceStatus.lastConfidenceAccepted -> accent
-    else -> CrimsonBright
-  }
-
   Column(
     modifier = Modifier
       .fillMaxWidth()
       .starkHudPlate(
-        accent = if (isLive || isEnrolling) accent else style.accent,
-        focused = isLive || isEnrolling || voiceStatus.activeWhisper != null,
+        accent = CrimsonBright,
+        focused = true,
+        showBrackets = true,
+        bracketScale = 0.56f,
+        plateAlpha = 0.92f,
+        style = style,
+      )
+      .padding(10.dp),
+    verticalArrangement = Arrangement.spacedBy(7.dp),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        text = "SCHEDULE CLASHES (${clashes.size})",
+        color = CrimsonBright,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 9.5.sp,
+        fontWeight = FontWeight.Bold,
+      )
+      Text(
+        text = "ACTION NEEDED",
+        color = style.semanticWarn,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 8.5.sp,
+        fontWeight = FontWeight.Bold,
+      )
+    }
+
+    clashes.take(4).forEach { clash ->
+      val reason = if (clash.severity == ClashSeverity.HARD_OVERLAP) {
+        "${clash.overlapMinutes}M OVERLAP"
+      } else {
+        "${clash.gapMinutes}M GAP · DIFF LOCATIONS"
+      }
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .background(style.voidTop.copy(alpha = 0.85f))
+          .border(0.8.dp, Crimson.copy(alpha = 0.65f))
+          .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+      ) {
+        Text(
+          text = reason,
+          color = style.semanticWarn,
+          fontFamily = FontFamily.Monospace,
+          fontSize = 8.5.sp,
+          fontWeight = FontWeight.Bold,
+        )
+        Text(
+          text = "A: ${clash.existingEvent.title} (${formatEventTimeRange(clash.existingEvent.startEpochMs, clash.existingEvent.endEpochMs)})",
+          color = TextPureWhite,
+          fontFamily = FontFamily.Monospace,
+          fontSize = 9.5.sp,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+          text = "B: ${clash.incomingEvent.title} (${formatEventTimeRange(clash.incomingEvent.startEpochMs, clash.incomingEvent.endEpochMs)})",
+          color = TextPureWhite,
+          fontFamily = FontFamily.Monospace,
+          fontSize = 9.5.sp,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+        FlowRow(
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          if (clash.incomingEvent.id > 0L) {
+            ActionChip(
+              text = "KEEP NEW",
+              tint = accent,
+              enabled = true,
+              onClick = { onKeepEvent(clash.clashId, clash.incomingEvent.id) },
+            )
+          }
+          if (clash.existingEvent.id > 0L) {
+            ActionChip(
+              text = "KEEP OLD",
+              tint = accent,
+              enabled = true,
+              onClick = { onKeepEvent(clash.clashId, clash.existingEvent.id) },
+            )
+          }
+          ActionChip(
+            text = "IGNORE",
+            tint = TextSilver,
+            enabled = true,
+            onClick = { onIgnoreClash(clash.clashId) },
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun EventPlannerCard(
+  events: List<ScheduledEvent>,
+  draftTitle: String,
+  draftTime: String,
+  draftLocation: String,
+  accent: Color,
+  onTitleChange: (String) -> Unit,
+  onTimeChange: (String) -> Unit,
+  onLocationChange: (String) -> Unit,
+  onAddEvent: () -> Unit,
+  onDismissEvent: (Long) -> Unit,
+) {
+  val style = LocalLauncherStyle.current
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .starkHudPlate(
+        accent = accent,
+        focused = events.isNotEmpty(),
         showBrackets = true,
         bracketScale = 0.56f,
         plateAlpha = 0.90f,
@@ -1681,257 +1593,141 @@ private fun VoiceEarbudCard(
       verticalAlignment = Alignment.CenterVertically,
     ) {
       Text(
-        text = "VOICE & EARBUD MODE (GEMINI-3.8-LIVE)",
+        text = "EVENT PLANNER (MSG + CALENDAR)",
         color = TextSilver,
         fontFamily = FontFamily.Monospace,
         fontSize = 9.5.sp,
         fontWeight = FontWeight.SemiBold,
       )
       Text(
-        text = voiceStatus.pauseReason ?: voiceStatus.routeLabel,
-        color = if (voiceStatus.pauseReason != null) style.semanticWarn else accent,
+        text = "${events.size} UPCOMING",
+        color = accent,
         fontFamily = FontFamily.Monospace,
         fontSize = 9.sp,
         fontWeight = FontWeight.Bold,
       )
     }
 
-    // Primary voice controls
-    FlowRow(
+    // Quick manual event add row
+    Row(
       modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(6.dp),
-      verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-      ActionChip(
-        text = when {
-          isLive -> "■ STOP LIVE"
-          isEnrolling -> "■ CANCEL ENROLL"
-          else -> "● PUSH TO TALK"
-        },
-        tint = if (isLive || isEnrolling) CrimsonBright else accent,
-        enabled = hasApiKey || isLive || isEnrolling,
-        onClick = onTogglePtt,
-      )
-      ActionChip(
-        text = if (voiceStatus.wakeWordEnabled) "WAKE: ON" else "WAKE: OFF",
-        tint = if (voiceStatus.wakeWordEnabled) accent else TextSilver,
-        enabled = !isEnrolling,
-        onClick = { onToggleWakeWord(!voiceStatus.wakeWordEnabled) },
-      )
-      ActionChip(
-        text = when {
-          voiceStatus.speakerModelDownloadPct != null -> "DL ${voiceStatus.speakerModelDownloadPct}%"
-          isEnrolling -> "STEP ${voiceStatus.enrollmentStep}/3"
-          voiceStatus.voiceprintEnrolled -> "RE-ENROLL"
-          else -> "ENROLL VOICEPRINT"
-        },
-        tint = if (voiceStatus.voiceprintEnrolled) style.semanticWarn else accent,
-        enabled = !isEnrolling && voiceStatus.speakerModelDownloadPct == null,
-        onClick = onEnroll,
-      )
-      if (voiceStatus.voiceprintEnrolled && !isEnrolling) {
-        ActionChip(
-          text = "WIPE VP",
-          tint = CrimsonBright,
-          enabled = true,
-          onClick = onClearVoiceprint,
-        )
-      }
-    }
-
-    // 3-sentence enrollment guide banner
-    if (isEnrolling && voiceStatus.enrollmentStep in 1..3) {
-      val sentence = VoiceCoordinator.ENROLLMENT_PROMPTS[voiceStatus.enrollmentStep - 1]
-      Column(
+      Box(
         modifier = Modifier
-          .fillMaxWidth()
-          .background(accent.copy(alpha = 0.12f))
-          .border(0.8.dp, accent.copy(alpha = 0.55f))
-          .padding(8.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+          .weight(1.4f)
+          .jarvisInputPlate(accent)
+          .padding(horizontal = 8.dp, vertical = 6.dp),
       ) {
-        Text(
-          text = "READ SENTENCE ${voiceStatus.enrollmentStep}/3 ALOUD:",
-          color = accent,
-          fontFamily = FontFamily.Monospace,
-          fontSize = 9.sp,
-          fontWeight = FontWeight.Bold,
-        )
-        Text(
-          text = "\"$sentence\"",
-          color = TextPureWhite,
-          fontFamily = style.fontFamily,
-          fontSize = 11.sp,
-          fontWeight = FontWeight.SemiBold,
-        )
-      }
-    }
-
-    // Live Voiceprint Confidence Meter (0.34 BT SCO / 0.48 wideband)
-    val activeThreshold = if (voiceStatus.earbudsConnected) VoiceprintGate.BT_SCO_THRESHOLD else VoiceprintGate.THRESHOLD
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-      ) {
-        val scoreStr = String.format(Locale.US, "%.2f", voiceStatus.lastConfidenceScore)
-        val thrStr = String.format(Locale.US, "%.2f", activeThreshold)
-        val label = when {
-          !voiceStatus.voiceprintEnrolled -> "VOICEPRINT NOT ENROLLED"
-          voiceStatus.lastConfidenceScore <= 0.01f -> "SPEAKER LOCK READY (THR $thrStr)"
-          voiceStatus.lastConfidenceAccepted -> "VERIFIED SPEAKER ($scoreStr >= $thrStr)"
-          else -> "REJECTED ($scoreStr < $thrStr)"
+        if (draftTitle.isEmpty()) {
+          Text(
+            text = "Event title",
+            color = TextSilver.copy(alpha = 0.50f),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            maxLines = 1,
+          )
         }
-        Text(
-          text = label,
-          color = confColor,
-          fontFamily = FontFamily.Monospace,
-          fontSize = 9.sp,
-          fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-          text = if (voiceStatus.earbudsConnected) "EARBUDS LINKED" else "SPEAKERPHONE",
-          color = TextSilver.copy(alpha = 0.75f),
-          fontFamily = FontFamily.Monospace,
-          fontSize = 8.5.sp,
+        BasicTextField(
+          value = draftTitle,
+          onValueChange = onTitleChange,
+          singleLine = true,
+          textStyle = TextStyle(color = TextPureWhite, fontFamily = FontFamily.Monospace, fontSize = 10.sp),
+          cursorBrush = SolidColor(accent),
+          modifier = Modifier.fillMaxWidth(),
         )
       }
       Box(
         modifier = Modifier
-          .fillMaxWidth()
-          .height(6.dp)
-          .background(Color.White.copy(alpha = 0.10f))
-          .drawBehind {
-            val thrX = size.width * activeThreshold
-            drawLine(
-              color = TextPureWhite.copy(alpha = 0.65f),
-              start = Offset(thrX, 0f),
-              end = Offset(thrX, size.height),
-              strokeWidth = 2f,
-            )
-          },
+          .weight(0.8f)
+          .jarvisInputPlate(accent)
+          .padding(horizontal = 8.dp, vertical = 6.dp),
       ) {
-        if (confPct > 0f) {
-          Box(
-            modifier = Modifier
-              .fillMaxWidth(confPct)
-              .height(6.dp)
-              .background(confColor),
-          )
-        }
-      }
-    }
-
-    if (voiceStatus.lastTranscriptOrStatus.isNotBlank()) {
-      Text(
-        text = voiceStatus.lastTranscriptOrStatus,
-        color = TextSilver,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 9.sp,
-        maxLines = 2,
-        overflow = TextOverflow.Ellipsis,
-      )
-    }
-
-    // Active 5-second Earbud Whisper banner
-    voiceStatus.activeWhisper?.let { whisper ->
-      Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .background(style.semanticWarn.copy(alpha = 0.14f))
-          .border(0.8.dp, style.semanticWarn.copy(alpha = 0.55f))
-          .padding(7.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Column(modifier = Modifier.weight(1f)) {
+        if (draftTime.isEmpty()) {
           Text(
-            text = "WHISPER (5S WINDOW) · ${whisper.sender}",
-            color = style.semanticWarn,
+            text = "18:30 / +2h",
+            color = TextSilver.copy(alpha = 0.50f),
             fontFamily = FontFamily.Monospace,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
-          )
-          Text(
-            text = whisper.summary,
-            color = TextPureWhite,
-            fontFamily = style.fontFamily,
             fontSize = 10.sp,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
           )
         }
-        Spacer(modifier = Modifier.width(6.dp))
-        ActionChip(
-          text = "READ NOW",
-          tint = accent,
-          enabled = hasApiKey,
-          onClick = onClaimWhisper,
+        BasicTextField(
+          value = draftTime,
+          onValueChange = onTimeChange,
+          singleLine = true,
+          textStyle = TextStyle(color = TextPureWhite, fontFamily = FontFamily.Monospace, fontSize = 10.sp),
+          cursorBrush = SolidColor(accent),
+          modifier = Modifier.fillMaxWidth(),
         )
       }
-    }
-
-    // Parked Messages list (deferred while walking/riding with earbuds)
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Text(
-        text = "PARKED MESSAGES (${voiceStatus.parkedMessages.size})",
-        color = TextSilver.copy(alpha = 0.85f),
-        fontFamily = FontFamily.Monospace,
-        fontSize = 9.sp,
-        fontWeight = FontWeight.SemiBold,
+      ActionChip(
+        text = "+ ADD",
+        tint = accent,
+        enabled = draftTitle.isNotBlank(),
+        onClick = onAddEvent,
       )
-      if (voiceStatus.parkedMessages.isNotEmpty()) {
-        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-          ActionChip(
-            text = "READ ALL",
-            tint = accent,
-            enabled = hasApiKey,
-            onClick = onPlayAllParked,
-          )
-          ActionChip(
-            text = "CLEAR",
-            tint = CrimsonBright,
-            enabled = true,
-            onClick = onClearParked,
-          )
-        }
-      }
     }
 
-    if (voiceStatus.parkedMessages.isEmpty()) {
+    Box(
+      modifier = Modifier
+        .fillMaxWidth()
+        .jarvisInputPlate(accent)
+        .padding(horizontal = 8.dp, vertical = 6.dp),
+    ) {
+      if (draftLocation.isEmpty()) {
+        Text(
+          text = "Location (optional, flags tight travel gaps)",
+          color = TextSilver.copy(alpha = 0.50f),
+          fontFamily = FontFamily.Monospace,
+          fontSize = 9.5.sp,
+          maxLines = 1,
+        )
+      }
+      BasicTextField(
+        value = draftLocation,
+        onValueChange = onLocationChange,
+        singleLine = true,
+        textStyle = TextStyle(color = TextPureWhite, fontFamily = FontFamily.Monospace, fontSize = 9.5.sp),
+        cursorBrush = SolidColor(accent),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { if (draftTitle.isNotBlank()) onAddEvent() }),
+        modifier = Modifier.fillMaxWidth(),
+      )
+    }
+
+    if (events.isEmpty()) {
       Text(
-        text = "No parked messages. Unclaimed earbud whispers while walking/riding appear here.",
-        color = TextSilver.copy(alpha = 0.55f),
+        text = "No upcoming events yet. Incoming message plans & synced calendar events appear here.",
+        color = TextSilver.copy(alpha = 0.58f),
         fontFamily = FontFamily.Monospace,
         fontSize = 8.5.sp,
       )
     } else {
-      voiceStatus.parkedMessages.take(4).forEach { msg ->
+      events.take(8).forEach { ev ->
         Row(
           modifier = Modifier
             .fillMaxWidth()
             .background(style.voidTop.copy(alpha = 0.72f))
             .border(0.6.dp, accent.copy(alpha = 0.28f))
-            .padding(horizontal = 7.dp, vertical = 5.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically,
         ) {
           Column(modifier = Modifier.weight(1f)) {
             Text(
-              text = "${msg.sender} · ${msg.appLabel} (${msg.urgency})",
+              text = "[${ev.source.label}] ${ev.title}",
               color = TextPureWhite,
               fontFamily = FontFamily.Monospace,
-              fontSize = 9.sp,
+              fontSize = 9.5.sp,
               fontWeight = FontWeight.Bold,
               maxLines = 1,
               overflow = TextOverflow.Ellipsis,
             )
+            val locSuffix = if (ev.location.isNotBlank()) " · ${ev.location}" else ""
             Text(
-              text = msg.summary,
+              text = "${formatEventTimeRange(ev.startEpochMs, ev.endEpochMs)}$locSuffix",
               color = TextSilver.copy(alpha = 0.82f),
               fontFamily = FontFamily.Monospace,
               fontSize = 8.5.sp,
@@ -1939,25 +1735,54 @@ private fun VoiceEarbudCard(
               overflow = TextOverflow.Ellipsis,
             )
           }
-          Spacer(modifier = Modifier.width(6.dp))
-          Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            ActionChip(
-              text = "PLAY",
-              tint = accent,
-              enabled = hasApiKey,
-              onClick = { onPlayParked(msg.id) },
-            )
+          if (ev.id > 0L) {
+            Spacer(modifier = Modifier.width(6.dp))
             ActionChip(
               text = "X",
               tint = CrimsonBright,
               enabled = true,
-              onClick = { onDismissParked(msg.id) },
+              onClick = { onDismissEvent(ev.id) },
             )
           }
         }
       }
     }
   }
+}
+
+private fun parseDraftEventTimeMs(raw: String, nowMs: Long = System.currentTimeMillis()): Long {
+  val trimmed = raw.trim().lowercase()
+  if (trimmed.isEmpty()) return nowMs + 60 * 60_000L
+  Regex("""^\+(\d+)\s*h$""").matchEntire(trimmed)?.let { m ->
+    val hours = m.groupValues[1].toLongOrNull() ?: 1L
+    return nowMs + hours.coerceIn(1L, 168L) * 3_600_000L
+  }
+  Regex("""^\+(\d+)\s*m$""").matchEntire(trimmed)?.let { m ->
+    val mins = m.groupValues[1].toLongOrNull() ?: 30L
+    return nowMs + mins.coerceIn(1L, 1440L) * 60_000L
+  }
+  Regex("""^(\d{1,2}):(\d{2})$""").matchEntire(trimmed)?.let { m ->
+    val h = m.groupValues[1].toIntOrNull()?.coerceIn(0, 23) ?: 18
+    val min = m.groupValues[2].toIntOrNull()?.coerceIn(0, 59) ?: 0
+    val cal = java.util.Calendar.getInstance().apply {
+      timeInMillis = nowMs
+      set(java.util.Calendar.HOUR_OF_DAY, h)
+      set(java.util.Calendar.MINUTE, min)
+      set(java.util.Calendar.SECOND, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    if (cal.timeInMillis <= nowMs - 5 * 60_000L) {
+      cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+    }
+    return cal.timeInMillis
+  }
+  return nowMs + 60 * 60_000L
+}
+
+private fun formatEventTimeRange(startMs: Long, endMs: Long): String {
+  val dayFmt = java.text.SimpleDateFormat("MMM d HH:mm", Locale.getDefault())
+  val timeFmt = java.text.SimpleDateFormat("HH:mm", Locale.getDefault())
+  return "${dayFmt.format(java.util.Date(startMs))}-${timeFmt.format(java.util.Date(endMs))}"
 }
 
 @Composable

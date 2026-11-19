@@ -64,6 +64,16 @@ class ShizukuInstallService : Binder {
       val output = process.inputStream.bufferedReader().readText().trim()
       val exit = process.waitFor()
       val ok = exit == 0 && output.contains("Success", ignoreCase = true)
+      if (ok) {
+        // Relaunch E.D.I.T.H after pm install -r replaces and kills the running launcher process.
+        runCatching {
+          ProcessBuilder(
+            "sh",
+            "-c",
+            "sleep 0.35 && am start -n com.nexwork.edith/.MainActivity",
+          ).start()
+        }
+      }
       reply?.writeNoException()
       reply?.writeInt(if (ok) 1 else 0)
       reply?.writeString(output)

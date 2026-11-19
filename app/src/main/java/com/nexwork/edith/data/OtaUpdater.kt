@@ -297,10 +297,10 @@ class OtaUpdater(private val context: Context) {
     val args = Shizuku.UserServiceArgs(
       ComponentName(context.packageName, ShizukuInstallService::class.java.name),
     )
-      .daemon(false)
+      .daemon(true)
       .processNameSuffix("shizuku_installer")
       .debuggable(false)
-      .version(1)
+      .version(2)
 
     val binderDeferred = CompletableDeferred<IBinder?>()
     val connection = object : ServiceConnection {
@@ -347,7 +347,7 @@ class OtaUpdater(private val context: Context) {
     } finally {
       try {
         withContext(Dispatchers.Main) {
-          Shizuku.unbindUserService(args, connection, true)
+          Shizuku.unbindUserService(args, connection, false)
         }
       } catch (_: Throwable) {
       }

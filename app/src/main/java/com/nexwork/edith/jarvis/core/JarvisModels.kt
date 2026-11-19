@@ -19,6 +19,14 @@ data class NotificationTriage(
   val validFromEpochMs: Long = 0L,
   @SerialName("valid_until_epoch")
   val validUntilEpochMs: Long = 0L,
+  @SerialName("event_title")
+  val eventTitle: String = "",
+  @SerialName("event_start_epoch")
+  val eventStartEpochMs: Long = 0L,
+  @SerialName("event_end_epoch")
+  val eventEndEpochMs: Long = 0L,
+  @SerialName("event_location")
+  val eventLocation: String = "",
 )
 
 /**
@@ -100,66 +108,50 @@ data class JarvisRule(
   val updatedAtMs: Long = 0L,
 )
 
-/**
- * Filtered UI node captured on-demand by [com.nexwork.edith.data.ShizukuControlService] (`uid 2000`).
- */
-data class CompactUiNode(
-  val id: Int,
-  val className: String,
-  val viewId: String = "",
-  val text: String = "",
-  val contentDesc: String = "",
-  val clickable: Boolean = false,
-  val editable: Boolean = false,
-  val scrollable: Boolean = false,
-  val left: Int = 0,
-  val top: Int = 0,
-  val right: Int = 0,
-  val bottom: Int = 0,
-) {
-  val centerX: Int get() = (left + right) / 2
-  val centerY: Int get() = (top + bottom) / 2
+enum class EventSource(val label: String) {
+  MESSAGE("MSG"),
+  CALENDAR("CAL"),
+  MANUAL("MANUAL"),
+}
+
+enum class EventStatus {
+  ACTIVE,
+  RESOLVED,
+  DISMISSED,
 }
 
 /**
- * Compact active-window snapshot handed to [com.nexwork.edith.jarvis.reflex.PlaybookExecutor]
- * and [com.nexwork.edith.jarvis.brain.PlannerClient].
+ * Planned event extracted from an incoming message, read from the device calendar,
+ * or entered manually by the user.
  */
-data class CompactUiTree(
-  val packageName: String,
-  val windowTitle: String = "",
-  val nodes: List<CompactUiNode> = emptyList(),
-  val formattedText: String = "",
-  val blockedReason: String? = null,
-)
-
-/**
- * Parameterized step persisted in SQLite `ui_playbooks` for zero-LLM local replay.
- */
-@Serializable
-data class PlaybookStep(
-  val action: String,
-  val targetText: String? = null,
-  val targetDesc: String? = null,
-  val viewId: String? = null,
-  val inputTemplate: String? = null,
-  val scrollForward: Boolean = true,
-  val packageName: String? = null,
-)
-
-/**
- * Saved UI automation workflow stored in `ui_playbooks`.
- */
-data class UiPlaybook(
+data class ScheduledEvent(
   val id: Long = 0L,
-  val skillId: String,
-  val triggerIntent: String,
-  val targetPackage: String,
-  val steps: List<PlaybookStep>,
-  val stepsJson: String,
-  val successCount: Int = 0,
-  val createdAtMs: Long = 0L,
-  val updatedAtMs: Long = 0L,
+  val title: String,
+  val startEpochMs: Long,
+  val endEpochMs: Long,
+  val location: String = "",
+  val source: EventSource = EventSource.MESSAGE,
+  val sender: String = "",
+  val sourceSummary: String = "",
+  val status: EventStatus = EventStatus.ACTIVE,
+  val createdAtMs: Long = System.currentTimeMillis(),
+)
+
+enum class ClashSeverity(val label: String) {
+  HARD_OVERLAP("OVERLAP"),
+  TIGHT_TRANSITION("TIGHT"),
+}
+
+/**
+ * Pairwise schedule conflict detected between two active [ScheduledEvent] entries.
+ */
+data class EventClash(
+  val clashId: String,
+  val existingEvent: ScheduledEvent,
+  val incomingEvent: ScheduledEvent,
+  val overlapMinutes: Int,
+  val gapMinutes: Int,
+  val severity: ClashSeverity,
 )
 
 /**
@@ -294,6 +286,13 @@ sealed interface ProactiveSuggestion {
     override val sourceSummary: String,
     override val triggeredAtMs: Long = System.currentTimeMillis(),
   ) : ProactiveSuggestion
+
+  data class EventClashAlert(
+    override val id: String,
+    val clash: EventClash,
+    override val sourceSummary: String,
+    override val triggeredAtMs: Long = System.currentTimeMillis(),
+  ) : ProactiveSuggestion
 }
 
 /**
@@ -322,51 +321,6 @@ data class JarvisServiceStatus(
 )
 
 /**
- * Notification held in [com.nexwork.edith.jarvis.voice.DeferredParkQueue] when arriving
- * while walking/riding with earbuds and unclaimed during the 5-second whisper window.
- */
-data class ParkedMessage(
-  val id: String,
-  val sbnKey: String,
-  val appLabel: String,
-  val sender: String,
-  val preview: String,
-  val summary: String,
-  val urgency: String,
-  val arrivedAtMs: Long,
-  val hasReplyHandle: Boolean,
-)
-
-enum class VoiceSessionMode(val label: String) {
-  IDLE("IDLE"),
-  WAKE_LISTENING("WAKE ARMED"),
-  LIVE_STREAMING("LIVE"),
-  ENROLLING("ENROLLING"),
-  PAUSED("PAUSED"),
-}
-
-/**
- * Live Milestone 4 voice gate, VAD, routing, and Gemini Live state for [JarvisUiState].
- */
-data class VoiceStatus(
-  val hasMicPermission: Boolean = false,
-  val voiceprintEnrolled: Boolean = false,
-  val speakerModelReady: Boolean = false,
-  val speakerModelDownloadPct: Int? = null,
-  val wakeWordEnabled: Boolean = false,
-  val mode: VoiceSessionMode = VoiceSessionMode.IDLE,
-  val earbudsConnected: Boolean = false,
-  val routeLabel: String = "PHONE MIC",
-  val pauseReason: String? = null,
-  val enrollmentStep: Int = 0,
-  val lastConfidenceScore: Float = 0f,
-  val lastConfidenceAccepted: Boolean = false,
-  val lastTranscriptOrStatus: String = "",
-  val activeWhisper: ParkedMessage? = null,
-  val parkedMessages: List<ParkedMessage> = emptyList(),
-)
-
-/**
  * Aggregated state consumed by the Jarvis Baseplate Compose UI.
  */
 data class JarvisUiState(
@@ -380,8 +334,7 @@ data class JarvisUiState(
   val hasBackgroundLocationPermission: Boolean = false,
   val hasBluetoothConnectPermission: Boolean = false,
   val hasActivityRecognitionPermission: Boolean = false,
-  val hasMediaAudioPermission: Boolean = false,
-  val opusVoiceReaderEnabled: Boolean = false,
+  val hasCalendarPermission: Boolean = false,
   val batteryUnrestricted: Boolean = false,
   val hasApiKey: Boolean = false,
   val maskedApiKey: String = "",
@@ -389,7 +342,6 @@ data class JarvisUiState(
   val personaCount: Int = 0,
   val suppressedGroupCount: Int = 0,
   val isProcessing: Boolean = false,
-  val isExecutingCommand: Boolean = false,
   val lastStatusBanner: String? = null,
   val lastError: String? = null,
   val lastExecutionLog: List<String> = emptyList(),
@@ -398,9 +350,9 @@ data class JarvisUiState(
   val savedPlaces: List<SavedPlaceProfile> = emptyList(),
   val upcomingDestinations: List<UpcomingDestination> = emptyList(),
   val proactiveSuggestion: ProactiveSuggestion? = null,
+  val scheduledEvents: List<ScheduledEvent> = emptyList(),
+  val eventClashes: List<EventClash> = emptyList(),
   val events: List<JarvisEventRecord> = emptyList(),
   val rules: List<JarvisRule> = emptyList(),
-  val playbooks: List<UiPlaybook> = emptyList(),
   val trustedContacts: List<TrustedContact> = emptyList(),
-  val voiceStatus: VoiceStatus = VoiceStatus(),
 )

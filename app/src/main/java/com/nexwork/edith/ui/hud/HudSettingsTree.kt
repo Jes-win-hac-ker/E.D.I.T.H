@@ -1222,23 +1222,12 @@ private fun JarvisDetailCardContent(
   val scrollState = rememberScrollState()
   var apiKeyInput by remember { mutableStateOf("") }
   var revealApiKey by remember { mutableStateOf(false) }
-  var commandDraft by remember { mutableStateOf("") }
   var contactDraft by remember { mutableStateOf("") }
 
-  val audioPermLauncher = rememberLauncherForActivityResult(
+  val calPermLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.RequestPermission(),
-  ) { granted ->
-    JarvisRuntime.setOpusVoiceReaderEnabled(context, granted)
-  }
-  val onToggleOpusVoice: () -> Unit = {
-    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-    if (uiState.opusVoiceReaderEnabled) {
-      JarvisRuntime.setOpusVoiceReaderEnabled(context, false)
-    } else if (JarvisRuntime.hasMediaAudioPermission(context)) {
-      JarvisRuntime.setOpusVoiceReaderEnabled(context, true)
-    } else {
-      audioPermLauncher.launch(JarvisRuntime.audioReadPermission())
-    }
+  ) {
+    JarvisRuntime.syncCalendarAndEvents(context)
   }
   val bgLocLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.RequestPermission(),
@@ -1328,7 +1317,6 @@ private fun JarvisDetailCardContent(
     }
 
     val bannerText = when {
-      uiState.isExecutingCommand -> "EXECUTING // VOL- OR TAP TO STOP"
       uiState.isProcessing -> "TRIAGING // TAP TO STOP"
       uiState.pendingTier3Approval != null -> "TIER 3 GATE // TAP TO ABORT"
       !uiState.lastError.isNullOrBlank() -> uiState.lastError
@@ -1336,7 +1324,7 @@ private fun JarvisDetailCardContent(
       else -> null
     }
     if (bannerText != null) {
-      val busy = uiState.isProcessing || uiState.isExecutingCommand || uiState.pendingTier3Approval != null
+      val busy = uiState.isProcessing || uiState.pendingTier3Approval != null
       val isErr = !busy && !uiState.lastError.isNullOrBlank()
       CompactHudCard(
         eyebrow = when {
@@ -1455,62 +1443,26 @@ private fun JarvisDetailCardContent(
             JarvisRuntime.triggerTier3BiometricTest(context)
           },
         )
-        HudMicroLabel(
-          text = "CMD // ${uiState.playbooks.size} PLAYBOOKS",
-          reveal = { staggeredReveal(reveal(), 5, totalSteps, stagger = 0.12f) },
-        )
-        HudSharpTextInput(
-          value = commandDraft,
-          onValueChange = { commandDraft = it },
-          placeholder = "search app for ...",
-          reveal = { staggeredReveal(reveal(), 5, totalSteps, stagger = 0.12f) },
-          accent = accent,
-          onDone = {
-            if (commandDraft.isNotBlank() && !uiState.isExecutingCommand) {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              val cmd = commandDraft
-              commandDraft = ""
-              keyboardController?.hide()
-              focusManager.clearFocus()
-              JarvisRuntime.executeUiCommand(context, cmd)
-            }
-          },
-        )
         CompactHudCard(
-          title = if (uiState.isExecutingCommand) "■ STOP EXECUTION (VOL-)" else "RUN UI COMMAND",
-          focused = uiState.isExecutingCommand || commandDraft.isNotBlank(),
-          accent = if (uiState.isExecutingCommand) CrimsonBright else accent,
-          pipColor = if (uiState.isExecutingCommand) CrimsonBright else accent,
+          eyebrow = "EVENT PLANNER",
+          title = if (uiState.eventClashes.isNotEmpty()) {
+            "${uiState.eventClashes.size} CLASH(ES) · ${uiState.scheduledEvents.size} EVENTS"
+          } else {
+            "${uiState.scheduledEvents.size} UPCOMING EVENTS"
+          },
+          badge = if (uiState.eventClashes.isNotEmpty()) "CLASH" else "OPEN",
+          focused = uiState.eventClashes.isNotEmpty(),
+          accent = if (uiState.eventClashes.isNotEmpty()) CrimsonBright else accent,
+          pipColor = if (uiState.eventClashes.isNotEmpty()) CrimsonBright else accent,
           titleSizeSp = 9.6f,
-          centerText = true,
-          reveal = { staggeredReveal(reveal(), 6, totalSteps, stagger = 0.12f) },
-          enabled = enabled && (uiState.isExecutingCommand || commandDraft.isNotBlank()),
-          modifier = Modifier.fillMaxWidth().height(36.dp),
+          reveal = { staggeredReveal(reveal(), 5, totalSteps, stagger = 0.12f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(42.dp),
           onClick = {
-            if (uiState.isExecutingCommand) {
-              haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-              JarvisRuntime.stopCommandExecution(context, "Branch 02 STOP tapped")
-            } else {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              val cmd = commandDraft
-              commandDraft = ""
-              keyboardController?.hide()
-              focusManager.clearFocus()
-              JarvisRuntime.executeUiCommand(context, cmd)
-            }
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onOpenJarvisDrawer()
           },
         )
-        if (uiState.lastExecutionLog.isNotEmpty()) {
-          Text(
-            text = uiState.lastExecutionLog.takeLast(3).joinToString("\n"),
-            color = TextSilver,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 8.5.sp,
-            lineHeight = 11.sp,
-            maxLines = 4,
-            overflow = TextOverflow.Ellipsis,
-          )
-        }
       }
 
       JarvisSettingsSection.PERMISSIONS -> {
@@ -1613,23 +1565,25 @@ private fun JarvisDetailCardContent(
             JarvisRuntime.requestBatteryUnrestricted(context)
           },
         )
-        val opusOk = uiState.opusVoiceReaderEnabled && uiState.hasMediaAudioPermission
         CompactHudCard(
-          eyebrow = "WHATSAPP · TG AUDIO",
-          title = "OPUS VOICE READER",
-          badge = when {
-            opusOk -> "LIVE"
-            uiState.opusVoiceReaderEnabled -> "PERM"
-            else -> "OFF"
-          },
-          pipColor = if (opusOk) accent else warnAccent,
-          focused = opusOk,
-          accent = if (opusOk) accent else warnAccent,
+          eyebrow = "EVENT PLANNER",
+          title = "CALENDAR SYNC",
+          badge = if (uiState.hasCalendarPermission) "SYNC" else "ALLOW",
+          pipColor = if (uiState.hasCalendarPermission) accent else warnAccent,
+          focused = uiState.hasCalendarPermission,
+          accent = if (uiState.hasCalendarPermission) accent else warnAccent,
           titleSizeSp = 9.8f,
           reveal = { staggeredReveal(reveal(), 5, totalSteps, stagger = 0.14f) },
           enabled = enabled,
           modifier = Modifier.fillMaxWidth().height(42.dp),
-          onClick = onToggleOpusVoice,
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            if (uiState.hasCalendarPermission) {
+              JarvisRuntime.syncCalendarAndEvents(context)
+            } else {
+              calPermLauncher.launch(Manifest.permission.READ_CALENDAR)
+            }
+          },
         )
         CompactHudCard(
           eyebrow = "HUD CONSOLE",
@@ -1793,8 +1747,7 @@ private fun JarvisDetailCardContent(
 
       JarvisSettingsSection.RULEBOOK -> {
         val visibleContacts = uiState.trustedContacts.take(6)
-        val visiblePlaybooks = uiState.playbooks.take(6)
-        val totalSteps = (visibleContacts.size + visiblePlaybooks.size + 4).coerceAtLeast(5)
+        val totalSteps = (visibleContacts.size + 4).coerceAtLeast(5)
         HudMicroLabel(
           text = "TRUSTED CONTACTS (${uiState.trustedContacts.size})",
           reveal = { staggeredReveal(reveal(), 1, totalSteps, stagger = 0.12f) },
@@ -1853,47 +1806,25 @@ private fun JarvisDetailCardContent(
           )
         }
         HudMicroLabel(
-          text = "UI PLAYBOOKS (${uiState.playbooks.size})",
+          text = "SCHEDULE (${uiState.scheduledEvents.size} EVENTS · ${uiState.eventClashes.size} CLASHES)",
           reveal = { staggeredReveal(reveal(), (visibleContacts.size + 2).coerceAtMost(totalSteps - 1), totalSteps, stagger = 0.12f) },
         )
-        if (visiblePlaybooks.isEmpty()) {
-          CompactHudCard(
-            eyebrow = "SQLITE SKILL STORE",
-            title = "NO PLAYBOOKS YET",
-            badge = "0",
-            focused = false,
-            accent = accent,
-            titleSizeSp = 9.8f,
-            reveal = { staggeredReveal(reveal(), (visibleContacts.size + 3).coerceAtMost(totalSteps - 1), totalSteps, stagger = 0.12f) },
-            enabled = false,
-            modifier = Modifier.fillMaxWidth().height(42.dp),
-          )
-        } else {
-          visiblePlaybooks.forEachIndexed { idx, pb ->
-            CompactHudCard(
-              eyebrow = "${pb.steps.size} STEPS · ${pb.targetPackage.substringAfterLast('.')}",
-              title = pb.triggerIntent.uppercase(),
-              badge = "${pb.successCount}X",
-              focused = pb.successCount > 0,
-              accent = accent,
-              titleSizeSp = 9.6f,
-              reveal = {
-                staggeredReveal(
-                  reveal(),
-                  (visibleContacts.size + idx + 3).coerceAtMost(totalSteps - 1),
-                  totalSteps,
-                  stagger = 0.10f,
-                )
-              },
-              enabled = enabled,
-              modifier = Modifier.fillMaxWidth().height(42.dp),
-              onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                JarvisRuntime.executeUiCommand(context, pb.triggerIntent)
-              },
-            )
-          }
-        }
+        CompactHudCard(
+          eyebrow = "EVENT PLANNER",
+          title = if (uiState.eventClashes.isNotEmpty()) "${uiState.eventClashes.size} CLASH(ES) DETECTED" else "${uiState.scheduledEvents.size} UPCOMING EVENTS",
+          badge = if (uiState.eventClashes.isNotEmpty()) "CLASH" else "OPEN",
+          focused = uiState.eventClashes.isNotEmpty(),
+          accent = if (uiState.eventClashes.isNotEmpty()) CrimsonBright else accent,
+          pipColor = if (uiState.eventClashes.isNotEmpty()) CrimsonBright else accent,
+          titleSizeSp = 9.8f,
+          reveal = { staggeredReveal(reveal(), (visibleContacts.size + 3).coerceAtMost(totalSteps - 1), totalSteps, stagger = 0.12f) },
+          enabled = enabled,
+          modifier = Modifier.fillMaxWidth().height(42.dp),
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onOpenJarvisDrawer()
+          },
+        )
       }
     }
   }

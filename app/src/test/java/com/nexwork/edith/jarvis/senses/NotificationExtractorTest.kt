@@ -61,21 +61,10 @@ class NotificationExtractorTest {
   }
 
   @Test
-  fun userMentionAndVoiceNoteDetection_identifyGroupPingsAndVoicePayloads() {
+  fun userMentionDetection_identifiesGroupPings() {
     assertTrue(NotificationExtractor.detectUserMention("Jeswin Joy", "@Jeswin class eppozha?"))
     assertTrue(NotificationExtractor.detectUserMention("Jeswin", "Hey everyone @all check pdf"))
     assertFalse(NotificationExtractor.detectUserMention("You", "Are you coming today?"))
     assertFalse(NotificationExtractor.detectUserMention("Jeswin", "Arjun is on the way"))
-
-    val voiceCap = CapturedNotification(
-      sbnKey = "0|com.whatsapp|55|null|1000",
-      packageName = "com.whatsapp",
-      appLabel = "WhatsApp",
-      title = "Arjun",
-      sender = "Arjun",
-      body = "🎤 Voice message (0:14)",
-    )
-    assertTrue(VoiceNoteObserver.isVoiceNoteNotification(voiceCap))
-    assertFalse(VoiceNoteObserver.isVoiceNoteNotification(voiceCap.copy(body = "Let's meet at 5")))
   }
 }

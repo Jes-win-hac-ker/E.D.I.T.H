@@ -1,16 +1,19 @@
 package com.nexwork.edith.jarvis.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Text
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -19,18 +22,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.nexwork.edith.jarvis.core.ClashSeverity
 import com.nexwork.edith.jarvis.core.ProactiveSuggestion
-import com.nexwork.edith.theme.Crimson
 import com.nexwork.edith.theme.CrimsonBright
-import com.nexwork.edith.theme.LocalLauncherStyle
-import com.nexwork.edith.theme.TextPureWhite
 import com.nexwork.edith.ui.hud.HudTelemetryRail
-import com.nexwork.edith.ui.hud.starkHudPlate
 
 /**
  * Native Stark-HUD orbital horizon rail surfacing proactive [ProactiveSuggestion] actions on the
@@ -56,16 +57,25 @@ fun JarvisAmbientPill(
   val eyebrow = when (active) {
     is ProactiveSuggestion.OpenMaps -> "JARVIS.AMBIENT // MAPS.STALL"
     is ProactiveSuggestion.ScanUpiQr -> "JARVIS.AMBIENT // DWELL ${active.dwellMinutes}M · UPI"
+    is ProactiveSuggestion.EventClashAlert -> "JARVIS.PLANNER // SCHEDULE CLASH"
     null -> ""
   }
   val label = when (active) {
     is ProactiveSuggestion.OpenMaps -> "NAVIGATE -> ${active.placeName.uppercase()}"
     is ProactiveSuggestion.ScanUpiQr -> "SCAN QR · ${active.placeLabel.uppercase()}"
+    is ProactiveSuggestion.EventClashAlert ->
+      "${active.clash.existingEvent.title.uppercase()} × ${active.clash.incomingEvent.title.uppercase()}"
     null -> ""
   }
   val badge = when (active) {
     is ProactiveSuggestion.OpenMaps -> "MAPS"
     is ProactiveSuggestion.ScanUpiQr -> "SCAN"
+    is ProactiveSuggestion.EventClashAlert ->
+      if (active.clash.severity == ClashSeverity.HARD_OVERLAP) {
+        "${active.clash.overlapMinutes}M"
+      } else {
+        "${active.clash.gapMinutes}M GAP"
+      }
     null -> null
   }
 
@@ -84,8 +94,8 @@ fun JarvisAmbientPill(
 }
 
 /**
- * Compact sharp-cornered Stark-HUD emergency abort plate anchored on the home screen whenever
- * Jarvis playbooks, LLM planning, or message triage are running.
+ * Subtle pulsing crimson dot anchored on the home screen whenever Jarvis triage or biometric
+ * approval is active.
  */
 @Composable
 fun JarvisEmergencyStopHudPill(
@@ -100,44 +110,34 @@ fun JarvisEmergencyStopHudPill(
     exit = fadeOut(),
     modifier = modifier,
   ) {
-    val style = LocalLauncherStyle.current
-    Row(
+    val pulseTransition = rememberInfiniteTransition(label = "jarvisStopDotPulse")
+    val dotAlpha by pulseTransition.animateFloat(
+      initialValue = 0.42f,
+      targetValue = 1.0f,
+      animationSpec = infiniteRepeatable(
+        animation = tween(durationMillis = 750),
+        repeatMode = RepeatMode.Reverse,
+      ),
+      label = "jarvisStopDotAlpha",
+    )
+    Box(
+      contentAlignment = Alignment.Center,
       modifier = Modifier
-        .starkHudPlate(
-          accent = Crimson,
-          focused = true,
-          showBrackets = true,
-          bracketScale = 0.48f,
-          plateAlpha = 0.92f,
-          style = style,
-        )
-        .clickable(onClick = onStop)
-        .padding(horizontal = 10.dp, vertical = 7.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(7.dp),
+        .size(32.dp)
+        .semantics { contentDescription = "Stop $label" }
+        .clickable(
+          interactionSource = remember { MutableInteractionSource() },
+          indication = null,
+          role = Role.Button,
+          onClick = onStop,
+        ),
     ) {
       Box(
         modifier = Modifier
-          .size(5.dp)
-          .background(Crimson),
-      )
-      Text(
-        text = "STOP",
-        color = CrimsonBright,
-        fontFamily = style.fontFamily,
-        fontSize = (10f * style.fontScale).sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 0.9.sp,
-      )
-      Text(
-        text = label,
-        color = TextPureWhite,
-        fontFamily = style.telemetryFontFamily,
-        fontSize = (9.5f * style.fontScale).sp,
-        fontWeight = FontWeight.Medium,
-        letterSpacing = 0.6.sp,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
+          .size(7.dp)
+          .alpha(dotAlpha)
+          .clip(CircleShape)
+          .background(CrimsonBright),
       )
     }
   }
