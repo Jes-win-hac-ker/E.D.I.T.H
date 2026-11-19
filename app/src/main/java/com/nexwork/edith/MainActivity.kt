@@ -19,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -51,7 +52,17 @@ class MainActivity : ComponentActivity() {
       }
     }
 
+    // Hide status bar on home screen, but show it transparently while IME is open so Gboard's
+    // OPTOUT_EDGE_TO_EDGE window never paints a white status-bar strip over the camera cutout.
     hideStatusBar()
+    ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { view, insets ->
+      if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
+        showStatusBar()
+      } else {
+        hideStatusBar()
+      }
+      ViewCompat.onApplyWindowInsets(view, insets)
+    }
 
     setContent {
       EDITHTheme {
@@ -115,8 +126,14 @@ class MainActivity : ComponentActivity() {
   override fun onWindowFocusChanged(hasFocus: Boolean) {
     super.onWindowFocusChanged(hasFocus)
     if (hasFocus) {
-      hideStatusBar()
+      val imeOpen = ViewCompat.getRootWindowInsets(window.decorView)
+        ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+      if (imeOpen) showStatusBar() else hideStatusBar()
     }
+  }
+
+  private fun showStatusBar() {
+    WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.statusBars())
   }
 
   private fun hideStatusBar() {
