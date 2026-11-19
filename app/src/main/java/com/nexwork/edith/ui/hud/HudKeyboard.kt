@@ -187,6 +187,14 @@ fun HudKeyboard(
     }
   }
 
+  // Center-out cipher decryption progress per keycap during the 1000ms activation.
+  fun keyDecrypt(colFraction: Float): Float {
+    if (isDismissing || r >= 0.995f) return 1f
+    val dist = abs(colFraction - 0.5f) * 2f
+    val start = 0.18f + dist * 0.22f
+    return phase(r, start, (start + 0.48f).coerceAtMost(0.98f))
+  }
+
   Box(
     modifier = modifier
       .fillMaxWidth()
@@ -260,10 +268,11 @@ fun HudKeyboard(
           horizontalArrangement = Arrangement.spacedBy(5.dp),
           verticalAlignment = Alignment.CenterVertically,
         ) {
-          HudKeyboardLogic.COMMAND_CHIPS.forEach { chip ->
+          HudKeyboardLogic.COMMAND_CHIPS.forEachIndexed { idx, chip ->
             StripChip(
               label = chip,
               accent = accent,
+              decryptProgress = if (isDismissing || r >= 0.995f) 1f else phase(r, 0.28f + idx * 0.05f, 0.85f),
               onClick = {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onCommandChip(chip)
@@ -274,6 +283,7 @@ fun HudKeyboard(
         StripChip(
           label = "SYS IME",
           accent = TextSilver,
+          decryptProgress = if (isDismissing || r >= 0.995f) 1f else phase(r, 0.45f, 0.92f),
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             onSwitchToSystemIme()
@@ -282,6 +292,7 @@ fun HudKeyboard(
         StripChip(
           label = "v",
           accent = accent,
+          decryptProgress = 1f,
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnHide()
@@ -299,10 +310,12 @@ fun HudKeyboard(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
       ) {
         row1.forEachIndexed { idx, ch ->
-          val kp = keyReveal((idx + 0.5f) / row1.size)
+          val col = (idx + 0.5f) / row1.size
+          val kp = keyReveal(col)
           HudKeycap(
             label = ch.uppercase(),
             accent = accent,
+            decryptProgress = keyDecrypt(col),
             onPress = {
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
               currentOnAppend(ch)
@@ -325,10 +338,12 @@ fun HudKeyboard(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
       ) {
         row2.forEachIndexed { idx, ch ->
-          val kp = keyReveal((idx + 0.5f) / row2.size)
+          val col = (idx + 0.5f) / row2.size
+          val kp = keyReveal(col)
           HudKeycap(
             label = ch.uppercase(),
             accent = accent,
+            decryptProgress = keyDecrypt(col),
             onPress = {
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
               currentOnAppend(ch)
@@ -354,6 +369,7 @@ fun HudKeyboard(
           label = if (symbolsLayer) "ABC" else "123",
           accent = accent,
           highlighted = symbolsLayer,
+          decryptProgress = keyDecrypt(0.05f),
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             symbolsLayer = !symbolsLayer
@@ -366,10 +382,12 @@ fun HudKeyboard(
             },
         )
         row3.forEachIndexed { idx, ch ->
-          val kp = keyReveal((idx + 1.5f) / 9f)
+          val col = (idx + 1.5f) / 9f
+          val kp = keyReveal(col)
           HudKeycap(
             label = ch.uppercase(),
             accent = accent,
+            decryptProgress = keyDecrypt(col),
             onPress = {
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
               currentOnAppend(ch)
@@ -385,6 +403,7 @@ fun HudKeyboard(
         val delP = keyReveal(0.95f)
         BackspaceKey(
           accent = accent,
+          decryptProgress = keyDecrypt(0.95f),
           onTapDelete = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnBackspace()
@@ -414,6 +433,7 @@ fun HudKeyboard(
         HudKeycap(
           label = "!",
           accent = accent,
+          decryptProgress = keyDecrypt(0.05f),
           onPress = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnAppend("!")
@@ -426,6 +446,7 @@ fun HudKeyboard(
         HudKeycap(
           label = ",",
           accent = accent,
+          decryptProgress = keyDecrypt(0.18f),
           onPress = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnAppend(",")
@@ -440,6 +461,7 @@ fun HudKeyboard(
           accent = accent,
           isSubtle = true,
           showPopup = false,
+          decryptProgress = keyDecrypt(0.50f),
           onPress = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnAppend(" ")
@@ -452,6 +474,7 @@ fun HudKeyboard(
         HudKeycap(
           label = ".",
           accent = accent,
+          decryptProgress = keyDecrypt(0.78f),
           onPress = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             currentOnAppend(".")
@@ -466,6 +489,7 @@ fun HudKeyboard(
           accent = accent,
           highlighted = true,
           lockFlare = actionLockFlare,
+          decryptProgress = keyDecrypt(0.95f),
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             currentOnSubmit()
@@ -479,14 +503,33 @@ fun HudKeyboard(
   }
 }
 
+private fun decryptLabel(text: String, progress: Float, seed: Int): String {
+  if (progress >= 1f || text.isEmpty()) return text
+  val resolved = (progress * (text.length + 1)).toInt().coerceAtMost(text.length)
+  val salt = (progress * 18f).toInt()
+  return buildString(text.length) {
+    for (i in text.indices) {
+      append(
+        when {
+          i < resolved -> text[i]
+          text[i] == ' ' -> ' '
+          else -> decryptGlyph(seed, i, salt)
+        },
+      )
+    }
+  }
+}
+
 @Composable
 private fun StripChip(
   label: String,
   accent: Color,
   onClick: () -> Unit,
+  decryptProgress: Float = 1f,
 ) {
   val style = LocalLauncherStyle.current
   val interaction = remember { MutableInteractionSource() }
+  val shown = decryptLabel(label, decryptProgress, label.hashCode())
   Box(
     modifier = Modifier
       .background(style.voidBottom.copy(alpha = 0.85f))
@@ -496,7 +539,7 @@ private fun StripChip(
     contentAlignment = Alignment.Center,
   ) {
     Text(
-      text = label,
+      text = shown,
       color = accent,
       fontFamily = style.telemetryFontFamily,
       fontSize = (9.5f * style.fontScale).sp,
@@ -515,10 +558,13 @@ private fun HudKeycap(
   modifier: Modifier = Modifier,
   isSubtle: Boolean = false,
   showPopup: Boolean = true,
+  decryptProgress: Float = 1f,
 ) {
   val style = LocalLauncherStyle.current
   val latestPress by rememberUpdatedState(onPress)
   var pressed by remember { mutableStateOf(false) }
+  val isScrambling = decryptProgress < 1f
+  val shownLabel = decryptLabel(label, decryptProgress, label.hashCode())
 
   Box(
     modifier = modifier
@@ -546,8 +592,12 @@ private fun HudKeycap(
     contentAlignment = Alignment.Center,
   ) {
     Text(
-      text = label,
-      color = if (isSubtle) TextSilver.copy(alpha = 0.65f) else TextPureWhite,
+      text = shownLabel,
+      color = when {
+        isScrambling -> accent.copy(alpha = 0.72f)
+        isSubtle -> TextSilver.copy(alpha = 0.65f)
+        else -> TextPureWhite
+      },
       fontFamily = style.fontFamily,
       fontSize = if (isSubtle) (10f * style.fontScale).sp else (15.5f * style.fontScale).sp,
       fontWeight = FontWeight.Medium,
@@ -586,10 +636,12 @@ private fun HudFunctionKey(
   onClick: () -> Unit,
   modifier: Modifier = Modifier,
   lockFlare: Float = 0f,
+  decryptProgress: Float = 1f,
 ) {
   val style = LocalLauncherStyle.current
   val latestClick by rememberUpdatedState(onClick)
   var pressed by remember { mutableStateOf(false) }
+  val shownLabel = decryptLabel(label, decryptProgress, label.hashCode())
 
   Box(
     modifier = modifier
@@ -621,8 +673,8 @@ private fun HudFunctionKey(
     contentAlignment = Alignment.Center,
   ) {
     Text(
-      text = label,
-      color = if (highlighted) accent else TextPureWhite,
+      text = shownLabel,
+      color = if (highlighted) accent else if (decryptProgress < 1f) accent.copy(alpha = 0.72f) else TextPureWhite,
       fontFamily = style.telemetryFontFamily,
       fontSize = (10.5f * style.fontScale).sp,
       fontWeight = FontWeight.Bold,
@@ -639,11 +691,13 @@ private fun BackspaceKey(
   onSwipeClear: () -> Unit,
   scope: kotlinx.coroutines.CoroutineScope,
   modifier: Modifier = Modifier,
+  decryptProgress: Float = 1f,
 ) {
   val style = LocalLauncherStyle.current
   val latestDelete by rememberUpdatedState(onTapDelete)
   val latestClear by rememberUpdatedState(onSwipeClear)
   var pressed by remember { mutableStateOf(false) }
+  val shownDel = decryptLabel("DEL", decryptProgress, "DEL".hashCode())
 
   Box(
     modifier = modifier
@@ -691,8 +745,8 @@ private fun BackspaceKey(
     contentAlignment = Alignment.Center,
   ) {
     Text(
-      text = "DEL",
-      color = if (pressed) TextPureWhite else TextSilver,
+      text = shownDel,
+      color = if (pressed) TextPureWhite else if (decryptProgress < 1f) accent.copy(alpha = 0.72f) else TextSilver,
       fontFamily = style.telemetryFontFamily,
       fontSize = (10.5f * style.fontScale).sp,
       fontWeight = FontWeight.Bold,
