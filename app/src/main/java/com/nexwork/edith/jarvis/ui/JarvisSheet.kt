@@ -1767,18 +1767,20 @@ private fun VoiceEarbudCard(
       }
     }
 
-    // Live Voiceprint Confidence Meter (threshold 0.72)
+    // Live Voiceprint Confidence Meter (0.34 BT SCO / 0.48 wideband)
+    val activeThreshold = if (voiceStatus.earbudsConnected) VoiceprintGate.BT_SCO_THRESHOLD else VoiceprintGate.THRESHOLD
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
       ) {
         val scoreStr = String.format(Locale.US, "%.2f", voiceStatus.lastConfidenceScore)
+        val thrStr = String.format(Locale.US, "%.2f", activeThreshold)
         val label = when {
           !voiceStatus.voiceprintEnrolled -> "VOICEPRINT NOT ENROLLED"
-          voiceStatus.lastConfidenceScore <= 0.01f -> "SPEAKER LOCK READY (THR ${VoiceprintGate.THRESHOLD})"
-          voiceStatus.lastConfidenceAccepted -> "VERIFIED SPEAKER ($scoreStr >= ${VoiceprintGate.THRESHOLD})"
-          else -> "REJECTED ($scoreStr < ${VoiceprintGate.THRESHOLD})"
+          voiceStatus.lastConfidenceScore <= 0.01f -> "SPEAKER LOCK READY (THR $thrStr)"
+          voiceStatus.lastConfidenceAccepted -> "VERIFIED SPEAKER ($scoreStr >= $thrStr)"
+          else -> "REJECTED ($scoreStr < $thrStr)"
         }
         Text(
           text = label,
@@ -1800,7 +1802,7 @@ private fun VoiceEarbudCard(
           .height(6.dp)
           .background(Color.White.copy(alpha = 0.10f))
           .drawBehind {
-            val thrX = size.width * VoiceprintGate.THRESHOLD
+            val thrX = size.width * activeThreshold
             drawLine(
               color = TextPureWhite.copy(alpha = 0.65f),
               start = Offset(thrX, 0f),

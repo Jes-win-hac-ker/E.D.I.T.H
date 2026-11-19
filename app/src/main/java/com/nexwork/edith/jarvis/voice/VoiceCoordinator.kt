@@ -1,7 +1,6 @@
 package com.nexwork.edith.jarvis.voice
 
 import android.content.Context
-import android.util.Log
 import com.nexwork.edith.jarvis.brain.GeminiLiveClient
 import com.nexwork.edith.jarvis.brain.LiveSessionCallbacks
 import com.nexwork.edith.jarvis.brain.LiveToolBridge
@@ -100,11 +99,7 @@ class VoiceCoordinator(
       )
     }
     if (wakeWordSaved && vadEngine.hasMicPermission() && !isAnyVoiceJobActive()) {
-      JarvisForegroundService.promoteForMicrophone(appCtx)
       startWakeWordLoop()
-    } else if (!wakeWordSaved && !isAnyVoiceJobActive() && JarvisForegroundService.isMicPromoted()) {
-      audioRouter.endSession()
-      JarvisForegroundService.demoteMicrophone(appCtx)
     }
   }
 
@@ -231,6 +226,9 @@ class VoiceCoordinator(
             lastTranscriptOrStatus = "Voiceprint enrolled (3 sentences) & Keystore-encrypted",
           )
         }
+        if (wakeWordEnabledFlag) {
+          startWakeWordLoop()
+        }
       } catch (c: CancellationException) {
         throw c
       } catch (err: Throwable) {
@@ -246,14 +244,6 @@ class VoiceCoordinator(
         onUiFault(msg)
       } finally {
         audioRouter.endVoiceRoute()
-        synchronized(jobLock) {
-          if (enrollJob === coroutineContext[Job]) enrollJob = null
-        }
-        if (wakeWordEnabledFlag) {
-          startWakeWordLoop()
-        } else if (!isAnyVoiceJobActive()) {
-          JarvisForegroundService.demoteMicrophone(appCtx)
-        }
       }
     }
     synchronized(jobLock) { enrollJob = job }
@@ -330,18 +320,21 @@ class VoiceCoordinator(
     parkQueue.clearAll()
   }
 
-  fun stopAllVoiceWork(reason: String = "Voice session stopped") {
+  fun stopAllVoiceWork(
+    reason: String = "Voice session stopped",
+    disableWakeWord: Boolean = false,
+  ) {
+    if (disableWakeWord) {
+      wakeWordEnabledFlag = false
+    }
     cancelActiveJobs()
     liveClient.disconnect(reason)
     audioRouter.endSession()
-    if (!wakeWordEnabledFlag) {
-      JarvisForegroundService.demoteMicrophone(appCtx)
-    }
     _status.update {
       it.copy(
+        wakeWordEnabled = wakeWordEnabledFlag,
         mode = VoiceSessionMode.IDLE,
         enrollmentStep = 0,
-        routeLabel = if (audioRouter.isBluetoothHeadsetConnected()) "BT HEADSET READY" else audioRouter.routeLabel,
         lastTranscriptOrStatus = reason,
       )
     }
@@ -358,6 +351,9 @@ class VoiceCoordinator(
     audioRouter.endSession()
   }
 
+  private fun activeThreshold(): Float =
+    if (audioRouter.isBluetoothHeadsetConnected()) VoiceprintGate.BT_SCO_THRESHOLD else VoiceprintGate.THRESHOLD
+
   private fun startWakeWordLoop() {
     cancelActiveJobs()
     val job = scope.launch(Dispatchers.IO) {
@@ -373,45 +369,47 @@ class VoiceCoordinator(
             delay(1_500)
             continue
           }
+          val thr = activeThreshold()
+          val thrStr = String.format(Locale.US, "%.2f", thr)
           _status.update {
             it.copy(
               routeLabel = audioRouter.routeLabel,
               earbudsConnected = audioRouter.earbudsConnected(),
               mode = if (vadEngine.computePauseReason() != null) VoiceSessionMode.PAUSED else VoiceSessionMode.WAKE_LISTENING,
               lastTranscriptOrStatus = if (voiceprintGate.isEnrolled()) {
-                "Listening with Silero VAD + Speaker Gate (>= 0.72)..."
+                "Listening with Silero VAD + Speaker Gate (>= $thrStr)..."
               } else {
                 "Wake-Word waiting: enroll voiceprint first for speaker lock"
               },
             )
           }
-        val speechClip = captureWakeSpeechSegment() ?: continue
-        if (!voiceprintGate.isEnrolled()) {
-          _status.update { it.copy(lastTranscriptOrStatus = "Speech heard — enroll voiceprint to unlock hands-free Live") }
-          delay(400)
-          continue
-        }
-        if (!voiceprintGate.isModelAvailable()) {
-          _status.update { it.copy(lastTranscriptOrStatus = "Speaker model missing — tap ENROLL to download") }
-          delay(1000)
-          continue
-        }
-        val verify = runCatching { voiceprintGate.verify(speechClip) }.getOrNull()
-        if (verify == null) {
-          _status.update { it.copy(lastTranscriptOrStatus = "Need slightly longer speech (>= 1s) to verify voiceprint") }
-          continue
-        }
-        _status.update {
-          it.copy(
-            lastConfidenceScore = verify.score,
-            lastConfidenceAccepted = verify.accepted,
-          )
-        }
-        if (!verify.accepted) {
-          val scoreStr = String.format(Locale.US, "%.2f", verify.score)
-          _status.update { it.copy(lastTranscriptOrStatus = "Speaker rejected ($scoreStr < 0.72)") }
-          continue
-        }
+          val speechClip = captureWakeSpeechSegment() ?: continue
+          if (!voiceprintGate.isEnrolled()) {
+            _status.update { it.copy(lastTranscriptOrStatus = "Speech heard — enroll voiceprint to unlock hands-free Live") }
+            delay(400)
+            continue
+          }
+          if (!voiceprintGate.isModelAvailable()) {
+            _status.update { it.copy(lastTranscriptOrStatus = "Speaker model missing — tap ENROLL to download") }
+            delay(1000)
+            continue
+          }
+          val verify = runCatching { voiceprintGate.verify(speechClip, thr) }.getOrNull()
+          if (verify == null) {
+            _status.update { it.copy(lastTranscriptOrStatus = "Need slightly longer speech (>= 0.8s) to verify voiceprint") }
+            continue
+          }
+          _status.update {
+            it.copy(
+              lastConfidenceScore = verify.score,
+              lastConfidenceAccepted = verify.accepted,
+            )
+          }
+          if (!verify.accepted) {
+            val scoreStr = String.format(Locale.US, "%.2f", verify.score)
+            _status.update { it.copy(lastTranscriptOrStatus = "Speaker rejected ($scoreStr < $thrStr)") }
+            continue
+          }
 
         val apiKey = apiKeyProvider()?.trim().orEmpty()
         if (apiKey.isEmpty()) {
@@ -429,31 +427,22 @@ class VoiceCoordinator(
         }
       } finally {
         audioRouter.endSession()
-        if (!wakeWordEnabledFlag && !isAnyVoiceJobActive()) {
-          JarvisForegroundService.demoteMicrophone(appCtx)
-        }
       }
     }
     synchronized(jobLock) { voiceJob = job }
   }
 
-  /** Collects frames until >= 1.25s of active speech has accumulated (with a 6-frame onset pre-roll). */
+  /** Collects voiced frames (P >= 0.30) until >= 1.25s of active speech has accumulated. */
   private suspend fun captureWakeSpeechSegment(): ShortArray? {
-    val preRoll = ArrayDeque<ShortArray>(PRE_ROLL_FRAMES)
     val speechBuf = mutableListOf<ShortArray>()
     var totalSamples = 0
     return try {
       vadEngine.frames().collect { frame ->
         if (frame.speaking) {
-          if (speechBuf.isEmpty() && preRoll.isNotEmpty()) {
-            while (preRoll.isNotEmpty()) {
-              val pre = preRoll.removeFirst()
-              speechBuf += pre
-              totalSamples += pre.size
-            }
+          if (frame.probability >= 0.30f || speechBuf.isEmpty()) {
+            speechBuf += frame.pcm
+            totalSamples += frame.pcm.size
           }
-          speechBuf += frame.pcm
-          totalSamples += frame.pcm.size
           if (totalSamples >= WAKE_VERIFY_MIN_SAMPLES) {
             throw WakeSegmentReadyException(concatShorts(speechBuf, totalSamples))
           }
@@ -464,9 +453,6 @@ class VoiceCoordinator(
           } else {
             throw WakeSegmentReadyException(concatShorts(speechBuf, totalSamples))
           }
-        } else {
-          if (preRoll.size >= PRE_ROLL_FRAMES) preRoll.removeFirst()
-          preRoll.addLast(frame.pcm)
         }
       }
       null
@@ -476,7 +462,6 @@ class VoiceCoordinator(
   }
 
   private suspend fun captureSingleUtterance(step: Int, maxWaitMs: Long): ShortArray? {
-    val preRoll = ArrayDeque<ShortArray>(PRE_ROLL_FRAMES)
     val speechBuf = mutableListOf<ShortArray>()
     var totalSamples = 0
     var silenceTail = 0
@@ -485,15 +470,10 @@ class VoiceCoordinator(
       withTimeoutOrNull(maxWaitMs) {
         vadEngine.frames().collect { frame ->
           if (frame.speaking) {
-            if (speechBuf.isEmpty() && preRoll.isNotEmpty()) {
-              while (preRoll.isNotEmpty()) {
-                val pre = preRoll.removeFirst()
-                speechBuf += pre
-                totalSamples += pre.size
-              }
+            if (frame.probability >= 0.28f || speechBuf.isEmpty()) {
+              speechBuf += frame.pcm
+              totalSamples += frame.pcm.size
             }
-            speechBuf += frame.pcm
-            totalSamples += frame.pcm.size
             silenceTail = 0
             if (!announcedHearing) {
               announcedHearing = true
@@ -507,9 +487,6 @@ class VoiceCoordinator(
             if (totalSamples >= VoiceprintGate.MIN_SPEECH_SAMPLES && silenceTail >= 7) {
               throw WakeSegmentReadyException(concatShorts(speechBuf, totalSamples))
             }
-          } else {
-            if (preRoll.size >= PRE_ROLL_FRAMES) preRoll.removeFirst()
-            preRoll.addLast(frame.pcm)
           }
         }
       }
@@ -545,11 +522,10 @@ class VoiceCoordinator(
 
       val callbacks = object : LiveSessionCallbacks {
         override fun onConnected(modelId: String) {
-          Log.i(TAG, "Connected Gemini Live session: model=$modelId route=${audioRouter.routeLabel}")
           _status.update {
             it.copy(
               mode = VoiceSessionMode.LIVE_STREAMING,
-              lastTranscriptOrStatus = "LIVE [$modelId] · Speak now (${audioRouter.routeLabel})",
+              lastTranscriptOrStatus = "LIVE [$modelId] · ${audioRouter.routeLabel}",
             )
           }
         }
@@ -564,17 +540,14 @@ class VoiceCoordinator(
         }
 
         override fun onTranscript(text: String) {
-          Log.i(TAG, "Gemini Live transcript: ${text.take(120)}")
           _status.update { it.copy(lastTranscriptOrStatus = text.take(140)) }
         }
 
         override fun onToolActivity(summary: String) {
-          Log.i(TAG, "Gemini Live tool: $summary")
           _status.update { it.copy(lastTranscriptOrStatus = summary) }
         }
 
         override fun onClosed(reason: String) {
-          Log.i(TAG, "Gemini Live closed: $reason")
           _status.update {
             it.copy(
               mode = if (wakeWordEnabledFlag) VoiceSessionMode.WAKE_LISTENING else VoiceSessionMode.IDLE,
@@ -584,7 +557,6 @@ class VoiceCoordinator(
         }
 
         override fun onError(message: String) {
-          Log.w(TAG, "Gemini Live error: $message")
           onUiFault("Gemini Live: $message")
         }
       }
@@ -597,10 +569,7 @@ class VoiceCoordinator(
       )
       connectResult.onFailure { err ->
         if (err is CancellationException) throw err
-        val msg = err.message ?: "Gemini Live connect failed"
-        Log.e(TAG, "connect failure: $msg", err)
-        _status.update { it.copy(mode = VoiceSessionMode.IDLE, lastTranscriptOrStatus = msg) }
-        onUiFault(msg)
+        onUiFault(err.message ?: "Gemini Live connect failed")
         return
       }
 
@@ -612,68 +581,49 @@ class VoiceCoordinator(
         liveClient.sendTextTurn(text)
       }
 
-      val enrolledForVerify = voiceprintGate.isEnrolled() && voiceprintGate.isModelAvailable()
-      var verifiedInPtt = !enrolledForVerify || seedAudio != null
+      val enrolledForMeter = voiceprintGate.isEnrolled() && voiceprintGate.isModelAvailable()
+      var scoredThisSession = seedAudio != null
       val verifyBuf = mutableListOf<ShortArray>()
       var verifySamples = 0
-      val preRoll = ArrayDeque<ShortArray>(PRE_ROLL_FRAMES)
       var wasSpeaking = false
-      var trailingSilenceSent = 0
+      var trailingSilenceFrames = 0
+      val thr = activeThreshold()
 
       vadEngine.frames().collect { frame ->
         if (!liveClient.isConnected()) {
           throw LiveClosedSignal()
         }
         if (frame.speaking) {
+          wasSpeaking = true
+          trailingSilenceFrames = 0
           liveClient.notifyUserSpeakingActivity()
-          if (!wasSpeaking) {
-            wasSpeaking = true
-            trailingSilenceSent = 0
-            while (preRoll.isNotEmpty()) {
-              val pre = preRoll.removeFirst()
-              liveClient.sendAudioChunk(AudioDsp.shortsToLeBytes(pre))
-            }
-          }
-          // Always stream speech frames immediately in Push-to-Talk so initial words are never clipped.
+          // Push-to-Talk streams audio immediately so Gemini Live always hears the user;
+          // voiceprint is still scored in parallel to drive the live confidence meter.
           liveClient.sendAudioChunk(AudioDsp.shortsToLeBytes(frame.pcm))
-
-          if (!verifiedInPtt) {
+          if (enrolledForMeter && !scoredThisSession && frame.probability >= 0.30f) {
             verifyBuf += frame.pcm
             verifySamples += frame.pcm.size
             if (verifySamples >= VoiceprintGate.MIN_SPEECH_SAMPLES) {
+              scoredThisSession = true
               val clip = concatShorts(verifyBuf, verifySamples)
-              val res = runCatching { voiceprintGate.verify(clip) }.getOrNull()
-              if (res != null) {
-                Log.i(TAG, "Voiceprint verify score=${res.score} accepted=${res.accepted}")
-                _status.update {
-                  it.copy(lastConfidenceScore = res.score, lastConfidenceAccepted = res.accepted)
+              verifyBuf.clear()
+              scope.launch(Dispatchers.Default) {
+                runCatching { voiceprintGate.verify(clip, thr) }.getOrNull()?.let { res ->
+                  _status.update {
+                    it.copy(lastConfidenceScore = res.score, lastConfidenceAccepted = res.accepted)
+                  }
                 }
-                if (!res.accepted && wakeWordEnabledFlag) {
-                  val scoreStr = String.format(Locale.US, "%.2f", res.score)
-                  liveClient.disconnect("Voiceprint mismatch ($scoreStr < 0.72)")
-                  throw LiveClosedSignal()
-                }
-                verifiedInPtt = true
               }
             }
           }
-        } else {
-          if (wasSpeaking) {
-            // Send ~640ms of trailing silence frames and then signal audioStreamEnd so Gemini Live's
-            // server-side VAD immediately detects end-of-turn and responds.
-            if (trailingSilenceSent < TRAILING_SILENCE_FRAMES) {
-              trailingSilenceSent++
-              liveClient.sendAudioChunk(AudioDsp.shortsToLeBytes(frame.pcm))
-              if (trailingSilenceSent == TRAILING_SILENCE_FRAMES) {
-                liveClient.sendAudioStreamEnd()
-                wasSpeaking = false
-              }
-            } else {
-              wasSpeaking = false
-            }
-          } else {
-            if (preRoll.size >= PRE_ROLL_FRAMES) preRoll.removeFirst()
-            preRoll.addLast(frame.pcm)
+        } else if (wasSpeaking) {
+          // Stream ~500 ms of natural trailing silence, then signal audioStreamEnd so Gemini Live replies promptly.
+          trailingSilenceFrames++
+          liveClient.sendAudioChunk(AudioDsp.shortsToLeBytes(frame.pcm))
+          if (trailingSilenceFrames >= 16) {
+            wasSpeaking = false
+            trailingSilenceFrames = 0
+            liveClient.sendAudioStreamEnd()
           }
         }
       }
@@ -683,18 +633,14 @@ class VoiceCoordinator(
       throw c
     } catch (err: Throwable) {
       if (err is WakeSegmentReadyException) return
-      Log.e(TAG, "runLiveSession fault", err)
       onUiFault(err.message ?: "Voice stream fault")
     } finally {
       liveClient.disconnect("Voice session closed")
       audioRouter.endSession()
-      if (!wakeWordEnabledFlag) {
-        JarvisForegroundService.demoteMicrophone(appCtx)
-      }
       _status.update {
         it.copy(
           mode = if (wakeWordEnabledFlag) VoiceSessionMode.WAKE_LISTENING else VoiceSessionMode.IDLE,
-          routeLabel = if (audioRouter.isBluetoothHeadsetConnected()) "BT HEADSET READY" else audioRouter.routeLabel,
+          routeLabel = audioRouter.routeLabel,
           earbudsConnected = audioRouter.earbudsConnected(),
         )
       }
@@ -715,9 +661,6 @@ class VoiceCoordinator(
   private class LiveClosedSignal : RuntimeException()
 
   companion object {
-    private const val TAG = "JarvisVoice"
-    private const val PRE_ROLL_FRAMES = 6 // ~192 ms onset pre-roll
-    private const val TRAILING_SILENCE_FRAMES = 18 // ~576 ms trailing silence for server-side VAD
     private const val WAKE_VERIFY_MIN_SAMPLES = AudioDsp.SAMPLE_RATE + (AudioDsp.SAMPLE_RATE / 4) // 1.25 s
     val ENROLLMENT_PROMPTS = listOf(
       "Hey Jarvis, unlock my voice profile for E.D.I.T.H.",

@@ -36,7 +36,7 @@ class VoiceprintGate(
   private var session: OrtSession? = null
   private var normalizeSamples = true
   private var subtractMean = true
-  @Volatile private var cachedTemplates: List<FloatArray>? = null
+  @Volatile private var cachedEnrollment: FloatArray? = null
 
   private val modelFile: File get() = File(File(appCtx.filesDir, "models"), MODEL_FILE)
 
@@ -94,10 +94,10 @@ class VoiceprintGate(
   }
 
   /** L2-normalised speaker embedding for [pcm] (16 kHz mono). Requires >= [MIN_SPEECH_SAMPLES]. */
-  fun embed(pcm: ShortArray, filterSilentFrames: Boolean = true): FloatArray {
+  fun embed(pcm: ShortArray): FloatArray {
     require(pcm.size >= MIN_SPEECH_SAMPLES) { "Need >= ${MIN_SPEECH_SAMPLES / 16} ms of speech" }
     val s = ensureSession()
-    val feats = AudioDsp.fbank(pcm, normalizeSamples, subtractMean, filterSilentFrames)
+    val feats = AudioDsp.fbank(pcm, normalizeSamples, subtractMean)
     val flat = FloatArray(feats.size * AudioDsp.NUM_MEL)
     feats.forEachIndexed { t, row -> System.arraycopy(row, 0, flat, t * AudioDsp.NUM_MEL, AudioDsp.NUM_MEL) }
     val env = OrtEnvironment.getEnvironment()
@@ -110,80 +110,30 @@ class VoiceprintGate(
     }
   }
 
-  fun isEnrolled(): Boolean = !loadTemplates().isNullOrEmpty()
+  fun isEnrolled(): Boolean = loadEnrollment() != null
 
   fun enroll(utterances: List<ShortArray>) {
-    require(utterances.isNotEmpty())
-    val individual = utterances.map { embed(it) }
-    val centroid = AudioDsp.centroid(individual)
-    val allTemplates = buildList {
-      add(centroid)
-      addAll(individual)
-    }
-    val dim = centroid.size
-    val packed = FloatArray(allTemplates.size * dim)
-    allTemplates.forEachIndexed { idx, vec ->
-      System.arraycopy(vec, 0, packed, idx * dim, dim)
-    }
-    db.saveVoiceprint(encrypt(AudioDsp.floatsToBytes(packed)), dim, MODEL_FILE)
-    cachedTemplates = allTemplates
+    require(utterances.size >= 1)
+    val centroid = AudioDsp.centroid(utterances.map { embed(it) })
+    db.saveVoiceprint(encrypt(AudioDsp.floatsToBytes(centroid)), centroid.size, MODEL_FILE)
+    cachedEnrollment = centroid
   }
 
   fun clearEnrollment() {
     db.clearVoiceprint()
-    cachedTemplates = null
+    cachedEnrollment = null
   }
 
-  fun verify(pcm: ShortArray): VoiceprintResult {
-    val templates = loadTemplates() ?: return VoiceprintResult(0f, false)
-    val voicedEmb = embed(pcm, filterSilentFrames = true)
-    // If only a single 512-d centroid exists from a legacy enrollment, also evaluate unfiltered CMN
-    // so existing enrollments work seamlessly without forcing re-enrollment.
-    val candidates = if (templates.size == 1) {
-      listOf(voicedEmb, embed(pcm, filterSilentFrames = false))
-    } else {
-      listOf(voicedEmb)
-    }
-    var bestRaw = -1f
-    for (liveEmb in candidates) {
-      for (tmpl in templates) {
-        if (tmpl.size == liveEmb.size) {
-          val c = AudioDsp.cosine(liveEmb, tmpl)
-          if (c > bestRaw) bestRaw = c
-        }
-      }
-    }
-    val calibrated = calibrateCosineScore(bestRaw)
-    return VoiceprintResult(calibrated, calibrated >= THRESHOLD)
+  fun verify(pcm: ShortArray, threshold: Float = THRESHOLD): VoiceprintResult {
+    val enrolled = loadEnrollment() ?: return VoiceprintResult(0f, false)
+    val score = AudioDsp.cosine(embed(pcm), enrolled)
+    return VoiceprintResult(score, score >= threshold)
   }
 
-  /**
-   * Maps 512-d CAM++ cosine similarity to a calibrated confidence score in [0, 1] where the
-   * VoxCeleb / Bluetooth SCO speaker verification decision boundary (`RAW_ACCEPT_COSINE` = 0.48)
-   * aligns with [THRESHOLD] (0.72), while impostor speakers (< 0.35 raw cosine) remain below 0.55.
-   */
-  internal fun calibrateCosineScore(rawCosine: Float): Float {
-    val c = rawCosine.coerceIn(-1f, 1f)
-    if (c <= 0f) return 0f
-    return if (c < RAW_ACCEPT_COSINE) {
-      (c / RAW_ACCEPT_COSINE) * THRESHOLD
-    } else {
-      val span = (1f - RAW_ACCEPT_COSINE).coerceAtLeast(1e-4f)
-      (THRESHOLD + ((c - RAW_ACCEPT_COSINE) / span) * (1f - THRESHOLD)).coerceIn(0f, 1f)
-    }
-  }
-
-  private fun loadTemplates(): List<FloatArray>? {
-    cachedTemplates?.let { return it }
+  private fun loadEnrollment(): FloatArray? {
+    cachedEnrollment?.let { return it }
     val blob = db.getVoiceprintBlob() ?: return null
-    val floats = runCatching { AudioDsp.bytesToFloats(decrypt(blob)) }.getOrNull() ?: return null
-    if (floats.isEmpty() || floats.size % EMBEDDING_DIM != 0) return null
-    val count = floats.size / EMBEDDING_DIM
-    val templates = List(count) { i ->
-      floats.copyOfRange(i * EMBEDDING_DIM, (i + 1) * EMBEDDING_DIM)
-    }
-    cachedTemplates = templates
-    return templates
+    return runCatching { AudioDsp.bytesToFloats(decrypt(blob)) }.getOrNull()?.also { cachedEnrollment = it }
   }
 
   fun close() {
@@ -221,9 +171,8 @@ class VoiceprintGate(
   }
 
   companion object {
-    const val THRESHOLD = 0.72f
-    const val RAW_ACCEPT_COSINE = 0.48f
-    private const val EMBEDDING_DIM = 512
+    const val THRESHOLD = 0.48f
+    const val BT_SCO_THRESHOLD = 0.34f
     const val MIN_SPEECH_SAMPLES = (AudioDsp.SAMPLE_RATE * 4) / 5 // 0.8 s (79 fbank frames)
     const val MODEL_FILE = "3dspeaker_campplus_en_voxceleb_16k.onnx"
     const val ASSET_PATH = "models/$MODEL_FILE"
