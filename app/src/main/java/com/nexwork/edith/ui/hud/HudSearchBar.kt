@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -92,6 +93,9 @@ fun HudSearchBar(
   onExitGroup: () -> Unit = {},
   commandHint: String? = null,
   onSubmitQuery: () -> Boolean = { false },
+  useSystemIme: Boolean = false,
+  hudKeyboardOpen: Boolean = false,
+  onHudKeyboardVisibilityChange: (Boolean) -> Unit = {},
 ) {
   val density = LocalDensity.current
   val haptic = LocalHapticFeedback.current
@@ -171,17 +175,25 @@ fun HudSearchBar(
     }
   }
 
-  LaunchedEffect(isOpen) {
+  LaunchedEffect(isOpen, useSystemIme) {
     if (isOpen && autoFocus) {
-      delay(160L)
-      focusRequester.requestFocus()
-      keyboardController?.show()
+      if (useSystemIme) {
+        delay(160L)
+        focusRequester.requestFocus()
+        keyboardController?.show()
+      } else {
+        keyboardController?.hide()
+        focusManager.clearFocus()
+        onHudKeyboardVisibilityChange(true)
+      }
       lastInteractionTimestamp = System.currentTimeMillis()
+    } else if (!isOpen) {
+      onHudKeyboardVisibilityChange(false)
     }
   }
 
   // Empty query 4s -> dismiss; multi-match idle 1s -> hide keyboard
-  LaunchedEffect(isOpen, textFieldValue, lastInteractionTimestamp, matchingApps.size) {
+  LaunchedEffect(isOpen, textFieldValue, lastInteractionTimestamp, matchingApps.size, useSystemIme) {
     if (!isOpen) return@LaunchedEffect
     if (textFieldValue.composition != null) return@LaunchedEffect
     if (textFieldValue.text.isEmpty()) {
@@ -190,6 +202,7 @@ fun HudSearchBar(
       if (isOpen && textFieldValue.text.isEmpty() && textFieldValue.composition == null) {
         keyboardController?.hide()
         focusManager.clearFocus()
+        onHudKeyboardVisibilityChange(false)
         onDismiss()
       }
     } else if (matchingApps.size > 1) {
@@ -197,6 +210,7 @@ fun HudSearchBar(
       if (isOpen && textFieldValue.text.isNotEmpty() && textFieldValue.composition == null) {
         keyboardController?.hide()
         focusManager.clearFocus()
+        onHudKeyboardVisibilityChange(false)
       }
     }
   }
@@ -235,10 +249,15 @@ fun HudSearchBar(
       .height(78.dp)
       .graphicsLayer { alpha = if (reveal <= 0.001f) 0f else 1f }
       // Tapping the console area summons focus/keyboard even when opened in browse mode.
-      .pointerInput(Unit) {
+      .pointerInput(useSystemIme) {
         detectTapGestures {
-          focusRequester.requestFocus()
-          keyboardController?.show()
+          lastInteractionTimestamp = System.currentTimeMillis()
+          if (useSystemIme) {
+            focusRequester.requestFocus()
+            keyboardController?.show()
+          } else {
+            onHudKeyboardVisibilityChange(true)
+          }
         }
       },
   ) {
@@ -435,13 +454,25 @@ fun HudSearchBar(
       )
       Spacer(Modifier.width(8.dp))
       Box(modifier = Modifier.weight(1f)) {
+        val cursorBlink by scanTransition.animateFloat(
+          initialValue = 1f,
+          targetValue = 0f,
+          animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 520, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+          ),
+          label = "hudCursorBlink",
+        )
         BasicTextField(
           value = if (isOpen) textFieldValue else frozen,
           onValueChange = { newVal ->
-            lastInteractionTimestamp = System.currentTimeMillis()
-            textFieldValue = newVal
-            if (newVal.text != searchQuery) onSearchQueryChange(newVal.text)
+            if (useSystemIme) {
+              lastInteractionTimestamp = System.currentTimeMillis()
+              textFieldValue = newVal
+              if (newVal.text != searchQuery) onSearchQueryChange(newVal.text)
+            }
           },
+          readOnly = !useSystemIme,
           singleLine = true,
           textStyle = TextStyle(
             color = TextPureWhite,
@@ -470,8 +501,17 @@ fun HudSearchBar(
             .focusRequester(focusRequester)
             .fillMaxWidth(),
           decorationBox = { innerTextField ->
-            Box(contentAlignment = Alignment.CenterStart) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
               if (shownText.isEmpty()) {
+                if (!useSystemIme && hudKeyboardOpen) {
+                  Box(
+                    Modifier
+                      .width(2.dp)
+                      .height(19.dp)
+                      .background(launcherStyle.accent.copy(alpha = if (cursorBlink > 0.45f) 0.95f else 0f)),
+                  )
+                  Spacer(Modifier.width(4.dp))
+                }
                 Text(
                   text = "SEARCH TELEMETRY",
                   color = TextPureWhite.copy(alpha = 0.28f),
@@ -480,8 +520,20 @@ fun HudSearchBar(
                   fontWeight = FontWeight.Medium,
                   letterSpacing = 1.6.sp,
                 )
+              } else {
+                Box(contentAlignment = Alignment.CenterStart) {
+                  innerTextField()
+                }
+                if (!useSystemIme && hudKeyboardOpen) {
+                  Spacer(Modifier.width(2.dp))
+                  Box(
+                    Modifier
+                      .width(2.dp)
+                      .height(19.dp)
+                      .background(launcherStyle.accent.copy(alpha = if (cursorBlink > 0.45f) 0.95f else 0f)),
+                  )
+                }
               }
-              innerTextField()
             }
           },
         )
@@ -510,8 +562,12 @@ fun HudSearchBar(
               lastInteractionTimestamp = System.currentTimeMillis()
               textFieldValue = TextFieldValue("")
               onSearchQueryChange("")
-              focusRequester.requestFocus()
-              keyboardController?.show()
+              if (useSystemIme) {
+                focusRequester.requestFocus()
+                keyboardController?.show()
+              } else {
+                onHudKeyboardVisibilityChange(true)
+              }
             },
           contentAlignment = Alignment.CenterEnd,
         ) {

@@ -75,8 +75,11 @@ import com.nexwork.edith.ui.hud.BindHudSettingsChoreography
 import com.nexwork.edith.ui.hud.CrimeSceneFocusOverlay
 import com.nexwork.edith.ui.hud.HudCardDeck
 import com.nexwork.edith.ui.hud.HudClock
+import com.nexwork.edith.ui.hud.HudKeyboard
+import com.nexwork.edith.ui.hud.HudKeyboardLogic
 import com.nexwork.edith.ui.hud.HudOtaPill
 import com.nexwork.edith.ui.hud.HudSearchBar
+import com.nexwork.edith.ui.hud.filterMatchingApps
 import com.nexwork.edith.ui.hud.HudSettingsOverlayLayer
 import com.nexwork.edith.ui.hud.HudSettingsRootLayer
 import com.nexwork.edith.ui.hud.GlobeController
@@ -255,8 +258,18 @@ fun MainScreen(
   val settingsOpen = state.settingsStage != SettingsStage.CLOSED
   val jarvisOpen = state.isJarvisSheetOpen
   val searchOpen = state.isSpotlightSearchOpen
+  var isHudKeyboardVisible by remember { mutableStateOf(false) }
+  var useSystemIme by remember { mutableStateOf(false) }
+  LaunchedEffect(consoleOpen) {
+    if (!consoleOpen) {
+      isHudKeyboardVisible = false
+      useSystemIme = false
+    }
+  }
   val dismissConsole: () -> Unit = {
     lastScreenActivityMs = System.currentTimeMillis()
+    isHudKeyboardVisible = false
+    useSystemIme = false
     if (state.isSpotlightSearchOpen) viewModel.closeSpotlightSearch() else viewModel.closeAppBrowse()
   }
 
@@ -339,7 +352,11 @@ fun MainScreen(
   // Back climbs one level: detail -> branch -> root settings -> home, or search/browse/jarvis unwind.
   BackHandler(enabled = consoleOpen || settingsOpen || isSettingsMounted || jarvisOpen) {
     lastScreenActivityMs = System.currentTimeMillis()
-    viewModel.handleBackPress()
+    if (consoleOpen && isHudKeyboardVisible) {
+      isHudKeyboardVisible = false
+    } else {
+      viewModel.handleBackPress()
+    }
   }
 
   EDITHTheme(
@@ -689,6 +706,9 @@ fun MainScreen(
       commandHint = state.commandHint,
       onSubmitQuery = viewModel::submitConsoleQuery,
       onExitGroup = viewModel::closeAppGroup,
+      useSystemIme = useSystemIme,
+      hudKeyboardOpen = isHudKeyboardVisible,
+      onHudKeyboardVisibilityChange = { isHudKeyboardVisible = it },
       modifier = Modifier
         .zIndex(4f)
         .align(Alignment.TopStart),
@@ -701,12 +721,16 @@ fun MainScreen(
     val density = LocalDensity.current
     val cardHeight = (maxWidth - 36.dp) * 124f / 312f
     val deckResting = maxHeight * 0.5f - cardHeight / 2f
-    val keyboardUp = consoleOpen && WindowInsets.isImeVisible
+    val keyboardUp = consoleOpen && ((useSystemIme && WindowInsets.isImeVisible) || (!useSystemIme && isHudKeyboardVisible))
     val deckShift = animateFloatAsState(
       targetValue = if (keyboardUp) 0f else 1f,
       animationSpec = tween(260),
       label = "deckShift",
     )
+
+    val matchingApps = remember(state.searchQuery, state.apps) {
+      filterMatchingApps(state.searchQuery, state.apps)
+    }
 
     HudCardDeck(
       isOpen = consoleOpen,
@@ -725,6 +749,7 @@ fun MainScreen(
       onActionArmedChange = { armed ->
         isCardActionArmed = armed
         if (armed) {
+          isHudKeyboardVisible = false
           keyboardController?.hide()
           focusManager.clearFocus()
         }
@@ -737,6 +762,50 @@ fun MainScreen(
         .graphicsLayer {
           translationY = with(density) { (deckResting - 236.dp).toPx() } * deckShift.value
         },
+    )
+
+    HudKeyboard(
+      visible = consoleOpen && !useSystemIme && isHudKeyboardVisible,
+      query = state.searchQuery,
+      matchCount = matchingApps.size,
+      onAppend = { token ->
+        lastScreenActivityMs = System.currentTimeMillis()
+        viewModel.onSearchQueryChange(HudKeyboardLogic.appendToken(state.searchQuery, token))
+      },
+      onBackspace = {
+        lastScreenActivityMs = System.currentTimeMillis()
+        viewModel.onSearchQueryChange(HudKeyboardLogic.backspace(state.searchQuery))
+      },
+      onClearQuery = {
+        lastScreenActivityMs = System.currentTimeMillis()
+        viewModel.onSearchQueryChange("")
+      },
+      onCommandChip = { chip ->
+        lastScreenActivityMs = System.currentTimeMillis()
+        viewModel.onSearchQueryChange(HudKeyboardLogic.applyCommandChip(state.searchQuery, chip))
+      },
+      onSubmit = {
+        lastScreenActivityMs = System.currentTimeMillis()
+        isHudKeyboardVisible = false
+        if (!viewModel.submitConsoleQuery()) {
+          matchingApps.firstOrNull()?.let { top ->
+            viewModel.launchApp(top)
+            dismissConsole()
+          }
+        }
+      },
+      onHideKeyboard = {
+        lastScreenActivityMs = System.currentTimeMillis()
+        isHudKeyboardVisible = false
+      },
+      onSwitchToSystemIme = {
+        lastScreenActivityMs = System.currentTimeMillis()
+        isHudKeyboardVisible = false
+        useSystemIme = true
+      },
+      modifier = Modifier
+        .zIndex(4.4f)
+        .align(Alignment.BottomCenter),
     )
 
     val hasJarvisBusy = jarvisUiState.isExecutingCommand ||
