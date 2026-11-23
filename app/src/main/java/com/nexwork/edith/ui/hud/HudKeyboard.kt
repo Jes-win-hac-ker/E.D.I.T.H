@@ -69,7 +69,7 @@ object HudKeyboardLogic {
   val SYMBOLS_ROW_2 = listOf("+", "-", "*", "/", "(", ")", "=", "%", ":")
   val SYMBOLS_ROW_3 = listOf("!", "?", "@", "#", "_", "&", "\"")
 
-  val COMMAND_CHIPS = listOf("!jarvis", "!monet", "!ota", "?")
+  val COMMAND_CHIPS = listOf("!monet", "!ota", "?")
 
   fun appendToken(current: String, token: String): String = current + token
 

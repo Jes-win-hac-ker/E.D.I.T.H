@@ -9,18 +9,14 @@ import org.junit.Test
 class HudSettingsChoreographyTest {
 
   @Test
-  fun rootBranchSpecs_launcherAndJarvisBuilt_shizukuStandby() {
-    assertEquals(3, ROOT_BRANCH_SPECS.size)
+  fun rootBranchSpecs_launcherBuilt_shizukuStandby() {
+    assertEquals(2, ROOT_BRANCH_SPECS.size)
 
     val left = ROOT_BRANCH_SPECS[0]
-    val center = ROOT_BRANCH_SPECS[1]
-    val right = ROOT_BRANCH_SPECS[2]
+    val right = ROOT_BRANCH_SPECS[1]
 
     assertEquals(SettingsStage.LAUNCHER_TREE, left.stage)
     assertTrue(left.isBuilt)
-
-    assertEquals(SettingsStage.AGENT_PLACEHOLDER, center.stage)
-    assertTrue("Finished Agent (JARVIS) branch must share active red laser status", center.isBuilt)
 
     assertEquals(SettingsStage.SHIZUKU_PLACEHOLDER, right.stage)
     assertFalse("Standby SHIZUKU branch must remain dim", right.isBuilt)
@@ -41,7 +37,7 @@ class HudSettingsChoreographyTest {
     assertFalse(
       HudSettingsGateChecker.shouldPlaceRootAboveGlobe(
         targetStage = SettingsStage.ROOT_BRANCHES,
-        retainedOverlayStage = SettingsStage.AGENT_PLACEHOLDER,
+        retainedOverlayStage = SettingsStage.LAUNCHER_TREE,
         treeProgress = 0.25f,
         detailProgress = 0.0f,
       ),
@@ -49,7 +45,7 @@ class HudSettingsChoreographyTest {
     assertFalse(
       HudSettingsGateChecker.shouldPlaceRootAboveGlobe(
         targetStage = SettingsStage.ROOT_BRANCHES,
-        retainedOverlayStage = SettingsStage.AGENT_PLACEHOLDER,
+        retainedOverlayStage = SettingsStage.LAUNCHER_TREE,
         treeProgress = 0.01f,
         detailProgress = 0.0f,
       ),

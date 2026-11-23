@@ -2,7 +2,6 @@ package com.nexwork.edith.ui.main
 
 import com.nexwork.edith.data.DataRepository
 import com.nexwork.edith.model.HudIntensityPreset
-import com.nexwork.edith.model.JarvisSettingsSection
 import com.nexwork.edith.model.LauncherAccentPreset
 import com.nexwork.edith.model.LauncherFontStyle
 import com.nexwork.edith.model.LauncherSettingsConfig
@@ -296,17 +295,9 @@ class MainScreenViewModelTest {
     assertTrue(viewModel.handleBackPress())
     assertEquals(SettingsStage.ROOT_BRANCHES, viewModel.launcherState.value.settingsStage)
 
-    // Agent / Jarvis branch drills into JarvisSettingsSection and unwinds cleanly back to root
-    viewModel.selectSettingsBranch(SettingsStage.AGENT_PLACEHOLDER)
-    assertEquals(SettingsStage.AGENT_PLACEHOLDER, viewModel.launcherState.value.settingsStage)
-    assertNull(viewModel.launcherState.value.selectedJarvisSection)
-
-    viewModel.selectJarvisSetting(JarvisSettingsSection.KEY_VAULT)
-    assertEquals(JarvisSettingsSection.KEY_VAULT, viewModel.launcherState.value.selectedJarvisSection)
-
-    assertTrue(viewModel.handleBackPress())
-    assertNull(viewModel.launcherState.value.selectedJarvisSection)
-    assertEquals(SettingsStage.AGENT_PLACEHOLDER, viewModel.launcherState.value.settingsStage)
+    // Shizuku placeholder branch is entered and unwinds cleanly back to root
+    viewModel.selectSettingsBranch(SettingsStage.SHIZUKU_PLACEHOLDER)
+    assertEquals(SettingsStage.SHIZUKU_PLACEHOLDER, viewModel.launcherState.value.settingsStage)
 
     assertTrue(viewModel.handleBackPress())
     assertEquals(SettingsStage.ROOT_BRANCHES, viewModel.launcherState.value.settingsStage)
@@ -359,27 +350,6 @@ class MainScreenViewModelTest {
     assertTrue(viewModel.submitConsoleQuery())
   }
 
-  @Test
-  fun jarvisDrawer_opensViaCommandAndUnwindsViaBack() = runTest {
-    val viewModel = MainScreenViewModel(FakeMyModelRepository())
-    assertFalse(viewModel.launcherState.value.isJarvisSheetOpen)
-
-    viewModel.openSpotlightSearch()
-    viewModel.onSearchQueryChange("!jarvis")
-    assertEquals("JARVIS  ·  BASEPLATE", viewModel.launcherState.value.commandHint)
-    assertTrue(viewModel.submitConsoleQuery())
-    assertTrue(viewModel.launcherState.value.isJarvisSheetOpen)
-    assertFalse(viewModel.launcherState.value.isSpotlightSearchOpen)
-
-    // Cannot enter ambient center while Jarvis sheet is open
-    viewModel.enterAmbientCenter()
-    assertFalse(viewModel.launcherState.value.isAmbientCentered)
-
-    // Back closes Jarvis drawer cleanly
-    assertTrue(viewModel.handleBackPress())
-    assertFalse(viewModel.launcherState.value.isJarvisSheetOpen)
-    assertFalse(viewModel.handleBackPress())
-  }
 }
 
 private class FakeMyModelRepository : DataRepository {

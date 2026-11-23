@@ -1,0 +1,3218 @@
+  0
+SECTION
+  2
+HEADER
+  9
+$ACADVER
+  1
+AC1015
+  9
+$MEASUREMENT
+ 70
+     1
+  0
+ENDSEC
+  0
+SECTION
+  2
+TABLES
+  0
+TABLE
+  2
+LAYER
+ 70
+     11
+  0
+LAYER
+  2
+0
+ 70
+     0
+ 62
+     7
+  6
+CONTINUOUS
+  0
+LAYER
+  2
+BORDER
+ 70
+     0
+ 62
+     7
+  6
+CONTINUOUS
+  0
+LAYER
+  2
+TITLE_BLOCK
+ 70
+     0
+ 62
+     3
+  6
+CONTINUOUS
+  0
+LAYER
+  2
+DIMENSIONS
+ 70
+     0
+ 62
+     3
+  6
+CONTINUOUS
+  0
+LAYER
+  2
+PHONE_FRAME
+ 70
+     0
+ 62
+     8
+  6
+CONTINUOUS
+  0
+LAYER
+  2
+BG_GLOBE
+ 70
+     0
+ 62
+     8
+  6
+CONTINUOUS
+  0
+LAYER
+  2
+DECK_CARD
+ 70
+     0
+ 62
+     8
+  6
+CONTINUOUS
+  0
+LAYER
+  2
+HUD_SLATE
+ 70
+     0
+ 62
+     8
+  6
+CONTINUOUS
+  0
+LAYER
+  2
+HUD_WHITE
+ 70
+     0
+ 62
+     7
+  6
+CONTINUOUS
+  0
+LAYER
+  2
+HUD_CRIMSON
+ 70
+     0
+ 62
+     1
+  6
+CONTINUOUS
+  0
+LAYER
+  2
+TITLE
+ 70
+     0
+ 62
+     7
+  6
+CONTINUOUS
+  0
+ENDTAB
+  0
+ENDSEC
+  0
+SECTION
+  2
+ENTITIES
+  0
+LINE
+  5
+1000
+100
+AcDbEntity
+  8
+BORDER
+100
+AcDbLine
+ 10
+-88.0000
+ 20
+-70.0000
+ 30
+0.0
+ 11
+1355.0000
+ 21
+-70.0000
+ 31
+0.0
+  0
+LINE
+  5
+1001
+100
+AcDbEntity
+  8
+BORDER
+100
+AcDbLine
+ 10
+1355.0000
+ 20
+-70.0000
+ 30
+0.0
+ 11
+1355.0000
+ 21
+925.0000
+ 31
+0.0
+  0
+LINE
+  5
+1002
+100
+AcDbEntity
+  8
+BORDER
+100
+AcDbLine
+ 10
+1355.0000
+ 20
+925.0000
+ 30
+0.0
+ 11
+-88.0000
+ 21
+925.0000
+ 31
+0.0
+  0
+LINE
+  5
+1003
+100
+AcDbEntity
+  8
+BORDER
+100
+AcDbLine
+ 10
+-88.0000
+ 20
+925.0000
+ 30
+0.0
+ 11
+-88.0000
+ 21
+-70.0000
+ 31
+0.0
+  0
+TEXT
+  5
+1004
+100
+AcDbEntity
+  8
+TITLE
+100
+AcDbText
+ 10
+-68.0000
+ 20
+890.0000
+ 30
+0.0
+ 40
+13.0000
+  1
+E.D.I.T.H // SEARCH CONSOLE DESIGN OPTIONS (360x800 DP, MOTO G45 5G)
+ 50
+0.00
+  0
+TEXT
+  5
+1005
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbText
+ 10
+-68.0000
+ 20
+868.0000
+ 30
+0.0
+ 40
+8.5000
+  1
+ALL THREE OPTIONS STAY AT TOP OF SCREEN (72-84 DP) ABOVE DECK (236 DP) | NO LEGACY BOX OR BRACKETS
+ 50
+0.00
+  0
+TEXT
+  5
+1006
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbText
+ 10
+0.0000
+ 20
+834.0000
+ 30
+0.0
+ 40
+9.5000
+  1
+OPTION A: FRAMELESS ORBITAL LINE (RECOMMENDED)
+ 50
+0.00
+  0
+LINE
+  5
+1007
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+24.0000
+ 20
+0.0000
+ 30
+0.0
+ 11
+336.0000
+ 21
+0.0000
+ 31
+0.0
+  0
+LINE
+  5
+1008
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+360.0000
+ 20
+24.0000
+ 30
+0.0
+ 11
+360.0000
+ 21
+776.0000
+ 31
+0.0
+  0
+LINE
+  5
+1009
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+336.0000
+ 20
+800.0000
+ 30
+0.0
+ 11
+24.0000
+ 21
+800.0000
+ 31
+0.0
+  0
+LINE
+  5
+100A
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+0.0000
+ 20
+776.0000
+ 30
+0.0
+ 11
+0.0000
+ 21
+24.0000
+ 31
+0.0
+  0
+ARC
+  5
+100B
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbCircle
+ 10
+336.0000
+ 20
+24.0000
+ 30
+0.0
+ 40
+24.0000
+100
+AcDbArc
+ 50
+270.00
+ 51
+0.00
+  0
+ARC
+  5
+100C
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbCircle
+ 10
+336.0000
+ 20
+776.0000
+ 30
+0.0
+ 40
+24.0000
+100
+AcDbArc
+ 50
+0.00
+ 51
+90.00
+  0
+ARC
+  5
+100D
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbCircle
+ 10
+24.0000
+ 20
+776.0000
+ 30
+0.0
+ 40
+24.0000
+100
+AcDbArc
+ 50
+90.00
+ 51
+180.00
+  0
+ARC
+  5
+100E
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbCircle
+ 10
+24.0000
+ 20
+24.0000
+ 30
+0.0
+ 40
+24.0000
+100
+AcDbArc
+ 50
+180.00
+ 51
+270.00
+  0
+CIRCLE
+  5
+100F
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbCircle
+ 10
+180.0000
+ 20
+778.0000
+ 30
+0.0
+ 40
+6.0000
+  0
+TEXT
+  5
+1010
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+20.0000
+ 20
+772.0000
+ 30
+0.0
+ 40
+6.5000
+  1
+22:39
+ 50
+0.00
+  0
+TEXT
+  5
+1011
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+300.0000
+ 20
+772.0000
+ 30
+0.0
+ 40
+6.5000
+  1
+5G 88%
+ 50
+0.00
+  0
+LINE
+  5
+1012
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+132.0000
+ 20
+12.0000
+ 30
+0.0
+ 11
+228.0000
+ 21
+12.0000
+ 31
+0.0
+  0
+CIRCLE
+  5
+1013
+100
+AcDbEntity
+  8
+BG_GLOBE
+100
+AcDbCircle
+ 10
+180.0000
+ 20
+380.0000
+ 30
+0.0
+ 40
+118.0000
+  0
+CIRCLE
+  5
+1014
+100
+AcDbEntity
+  8
+BG_GLOBE
+100
+AcDbCircle
+ 10
+180.0000
+ 20
+380.0000
+ 30
+0.0
+ 40
+77.8800
+  0
+LINE
+  5
+1015
+100
+AcDbEntity
+  8
+BG_GLOBE
+100
+AcDbLine
+ 10
+62.0000
+ 20
+380.0000
+ 30
+0.0
+ 11
+298.0000
+ 21
+380.0000
+ 31
+0.0
+  0
+LINE
+  5
+1016
+100
+AcDbEntity
+  8
+BG_GLOBE
+100
+AcDbLine
+ 10
+180.0000
+ 20
+262.0000
+ 30
+0.0
+ 11
+180.0000
+ 21
+498.0000
+ 31
+0.0
+  0
+TEXT
+  5
+1017
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+124.0000
+ 20
+242.0000
+ 30
+0.0
+ 40
+6.0000
+  1
+BLURRED SEARCH GLOBE
+ 50
+0.00
+  0
+LINE
+  5
+1018
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+18.0000
+ 20
+564.0000
+ 30
+0.0
+ 11
+342.0000
+ 21
+564.0000
+ 31
+0.0
+  0
+LINE
+  5
+1019
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+342.0000
+ 20
+564.0000
+ 30
+0.0
+ 11
+342.0000
+ 21
+452.0000
+ 31
+0.0
+  0
+LINE
+  5
+101A
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+342.0000
+ 20
+452.0000
+ 30
+0.0
+ 11
+18.0000
+ 21
+452.0000
+ 31
+0.0
+  0
+LINE
+  5
+101B
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+18.0000
+ 20
+452.0000
+ 30
+0.0
+ 11
+18.0000
+ 21
+564.0000
+ 31
+0.0
+  0
+TEXT
+  5
+101C
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+30.0000
+ 20
+542.0000
+ 30
+0.0
+ 40
+8.0000
+  1
+CARD 01 // CAMERA
+ 50
+0.00
+  0
+TEXT
+  5
+101D
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbText
+ 10
+290.0000
+ 20
+542.0000
+ 30
+0.0
+ 40
+7.5000
+  1
+LAUNCH
+ 50
+0.00
+  0
+LINE
+  5
+101E
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+18.0000
+ 20
+436.0000
+ 30
+0.0
+ 11
+342.0000
+ 21
+436.0000
+ 31
+0.0
+  0
+LINE
+  5
+101F
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+342.0000
+ 20
+436.0000
+ 30
+0.0
+ 11
+342.0000
+ 21
+354.0000
+ 31
+0.0
+  0
+LINE
+  5
+1020
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+342.0000
+ 20
+354.0000
+ 30
+0.0
+ 11
+18.0000
+ 21
+354.0000
+ 31
+0.0
+  0
+LINE
+  5
+1021
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+18.0000
+ 20
+354.0000
+ 30
+0.0
+ 11
+18.0000
+ 21
+436.0000
+ 31
+0.0
+  0
+TEXT
+  5
+1022
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+30.0000
+ 20
+414.0000
+ 30
+0.0
+ 40
+7.5000
+  1
+CARD 02 // SETTINGS
+ 50
+0.00
+  0
+LINE
+  5
+1023
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+8.0000
+ 20
+260.0000
+ 30
+0.0
+ 11
+352.0000
+ 21
+260.0000
+ 31
+0.0
+  0
+TEXT
+  5
+1024
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+132.0000
+ 20
+130.0000
+ 30
+0.0
+ 40
+8.0000
+  1
+IME KEYBOARD
+ 50
+0.00
+  0
+LINE
+  5
+1025
+100
+AcDbEntity
+  8
+DIMENSIONS
+100
+AcDbLine
+ 10
+-2.0000
+ 20
+800.0000
+ 30
+0.0
+ 11
+-55.0000
+ 21
+800.0000
+ 31
+0.0
+  0
+LINE
+  5
+1026
+100
+AcDbEntity
+  8
+DIMENSIONS
+100
+AcDbLine
+ 10
+-2.0000
+ 20
+720.0000
+ 30
+0.0
+ 11
+-55.0000
+ 21
+720.0000
+ 31
+0.0
+  0
+LINE
+  5
+1027
+100
+AcDbEntity
+  8
+DIMENSIONS
+100
+AcDbLine
+ 10
+-52.0000
+ 20
+800.0000
+ 30
+0.0
+ 11
+-52.0000
+ 21
+720.0000
+ 31
+0.0
+  0
+LINE
+  5
+1028
+100
+AcDbEntity
+  8
+DIMENSIONS
+100
+AcDbLine
+ 10
+-53.5000
+ 20
+798.5000
+ 30
+0.0
+ 11
+-50.5000
+ 21
+801.5000
+ 31
+0.0
+  0
+LINE
+  5
+1029
+100
+AcDbEntity
+  8
+DIMENSIONS
+100
+AcDbLine
+ 10
+-53.5000
+ 20
+718.5000
+ 30
+0.0
+ 11
+-50.5000
+ 21
+721.5000
+ 31
+0.0
+  0
+TEXT
+  5
+102A
+100
+AcDbEntity
+  8
+DIMENSIONS
+100
+AcDbText
+ 10
+-50.5000
+ 20
+758.6250
+ 30
+0.0
+ 40
+2.2000
+  1
+76 DP
+ 50
+0.00
+  0
+LINE
+  5
+102B
+100
+AcDbEntity
+  8
+DIMENSIONS
+100
+AcDbLine
+ 10
+-2.0000
+ 20
+800.0000
+ 30
+0.0
+ 11
+-31.0000
+ 21
+800.0000
+ 31
+0.0
+  0
+LINE
+  5
+102C
+100
+AcDbEntity
+  8
+DIMENSIONS
+100
+AcDbLine
+ 10
+-2.0000
+ 20
+564.0000
+ 30
+0.0
+ 11
+-31.0000
+ 21
+564.0000
+ 31
+0.0
+  0
+LINE
+  5
+102D
+100
+AcDbEntity
+  8
+DIMENSIONS
+100
+AcDbLine
+ 10
+-28.0000
+ 20
+800.0000
+ 30
+0.0
+ 11
+-28.0000
+ 21
+564.0000
+ 31
+0.0
+  0
+LINE
+  5
+102E
+100
+AcDbEntity
+  8
+DIMENSIONS
+100
+AcDbLine
+ 10
+-29.5000
+ 20
+798.5000
+ 30
+0.0
+ 11
+-26.5000
+ 21
+801.5000
+ 31
+0.0
+  0
+LINE
+  5
+102F
+100
+AcDbEntity
+  8
+DIMENSIONS
+100
+AcDbLine
+ 10
+-29.5000
+ 20
+562.5000
+ 30
+0.0
+ 11
+-26.5000
+ 21
+565.5000
+ 31
+0.0
+  0
+TEXT
+  5
+1030
+100
+AcDbEntity
+  8
+DIMENSIONS
+100
+AcDbText
+ 10
+-26.5000
+ 20
+680.6250
+ 30
+0.0
+ 40
+2.2000
+  1
+236 DP
+ 50
+0.00
+  0
+LINE
+  5
+1031
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbLine
+ 10
+18.0000
+ 20
+670.0000
+ 30
+0.0
+ 11
+342.0000
+ 21
+670.0000
+ 31
+0.0
+  0
+LINE
+  5
+1032
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbLine
+ 10
+18.0000
+ 20
+671.5000
+ 30
+0.0
+ 11
+233.0000
+ 21
+671.5000
+ 31
+0.0
+  0
+CIRCLE
+  5
+1033
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbCircle
+ 10
+233.0000
+ 20
+671.5000
+ 30
+0.0
+ 40
+3.6000
+  0
+CIRCLE
+  5
+1034
+100
+AcDbEntity
+  8
+HUD_WHITE
+100
+AcDbCircle
+ 10
+233.0000
+ 20
+671.5000
+ 30
+0.0
+ 40
+1.4000
+  0
+CIRCLE
+  5
+1035
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbCircle
+ 10
+180.0000
+ 20
+670.0000
+ 30
+0.0
+ 40
+2.4000
+  0
+TEXT
+  5
+1036
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+18.0000
+ 20
+716.0000
+ 30
+0.0
+ 40
+6.8000
+  1
+SEARCH.SYS // QUERY
+ 50
+0.00
+  0
+TEXT
+  5
+1037
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbText
+ 10
+286.0000
+ 20
+716.0000
+ 30
+0.0
+ 40
+7.0000
+  1
+2 HITS
+ 50
+0.00
+  0
+TEXT
+  5
+1038
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbText
+ 10
+18.0000
+ 20
+686.0000
+ 30
+0.0
+ 40
+13.5000
+  1
+>
+ 50
+0.00
+  0
+TEXT
+  5
+1039
+100
+AcDbEntity
+  8
+HUD_WHITE
+100
+AcDbText
+ 10
+36.0000
+ 20
+686.0000
+ 30
+0.0
+ 40
+13.5000
+  1
+CAM_
+ 50
+0.00
+  0
+TEXT
+  5
+103A
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+328.0000
+ 20
+688.0000
+ 30
+0.0
+ 40
+9.0000
+  1
+X
+ 50
+0.00
+  0
+TEXT
+  5
+103B
+100
+AcDbEntity
+  8
+TITLE
+100
+AcDbText
+ 10
+470.0000
+ 20
+834.0000
+ 30
+0.0
+ 40
+9.5000
+  1
+OPTION B: TOP INVERTED ORBITAL ARC
+ 50
+0.00
+  0
+LINE
+  5
+103C
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+494.0000
+ 20
+0.0000
+ 30
+0.0
+ 11
+806.0000
+ 21
+0.0000
+ 31
+0.0
+  0
+LINE
+  5
+103D
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+830.0000
+ 20
+24.0000
+ 30
+0.0
+ 11
+830.0000
+ 21
+776.0000
+ 31
+0.0
+  0
+LINE
+  5
+103E
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+806.0000
+ 20
+800.0000
+ 30
+0.0
+ 11
+494.0000
+ 21
+800.0000
+ 31
+0.0
+  0
+LINE
+  5
+103F
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+470.0000
+ 20
+776.0000
+ 30
+0.0
+ 11
+470.0000
+ 21
+24.0000
+ 31
+0.0
+  0
+ARC
+  5
+1040
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbCircle
+ 10
+806.0000
+ 20
+24.0000
+ 30
+0.0
+ 40
+24.0000
+100
+AcDbArc
+ 50
+270.00
+ 51
+0.00
+  0
+ARC
+  5
+1041
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbCircle
+ 10
+806.0000
+ 20
+776.0000
+ 30
+0.0
+ 40
+24.0000
+100
+AcDbArc
+ 50
+0.00
+ 51
+90.00
+  0
+ARC
+  5
+1042
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbCircle
+ 10
+494.0000
+ 20
+776.0000
+ 30
+0.0
+ 40
+24.0000
+100
+AcDbArc
+ 50
+90.00
+ 51
+180.00
+  0
+ARC
+  5
+1043
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbCircle
+ 10
+494.0000
+ 20
+24.0000
+ 30
+0.0
+ 40
+24.0000
+100
+AcDbArc
+ 50
+180.00
+ 51
+270.00
+  0
+CIRCLE
+  5
+1044
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbCircle
+ 10
+650.0000
+ 20
+778.0000
+ 30
+0.0
+ 40
+6.0000
+  0
+TEXT
+  5
+1045
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+490.0000
+ 20
+772.0000
+ 30
+0.0
+ 40
+6.5000
+  1
+22:39
+ 50
+0.00
+  0
+TEXT
+  5
+1046
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+770.0000
+ 20
+772.0000
+ 30
+0.0
+ 40
+6.5000
+  1
+5G 88%
+ 50
+0.00
+  0
+LINE
+  5
+1047
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+602.0000
+ 20
+12.0000
+ 30
+0.0
+ 11
+698.0000
+ 21
+12.0000
+ 31
+0.0
+  0
+CIRCLE
+  5
+1048
+100
+AcDbEntity
+  8
+BG_GLOBE
+100
+AcDbCircle
+ 10
+650.0000
+ 20
+380.0000
+ 30
+0.0
+ 40
+118.0000
+  0
+CIRCLE
+  5
+1049
+100
+AcDbEntity
+  8
+BG_GLOBE
+100
+AcDbCircle
+ 10
+650.0000
+ 20
+380.0000
+ 30
+0.0
+ 40
+77.8800
+  0
+LINE
+  5
+104A
+100
+AcDbEntity
+  8
+BG_GLOBE
+100
+AcDbLine
+ 10
+532.0000
+ 20
+380.0000
+ 30
+0.0
+ 11
+768.0000
+ 21
+380.0000
+ 31
+0.0
+  0
+LINE
+  5
+104B
+100
+AcDbEntity
+  8
+BG_GLOBE
+100
+AcDbLine
+ 10
+650.0000
+ 20
+262.0000
+ 30
+0.0
+ 11
+650.0000
+ 21
+498.0000
+ 31
+0.0
+  0
+TEXT
+  5
+104C
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+594.0000
+ 20
+242.0000
+ 30
+0.0
+ 40
+6.0000
+  1
+BLURRED SEARCH GLOBE
+ 50
+0.00
+  0
+LINE
+  5
+104D
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+488.0000
+ 20
+564.0000
+ 30
+0.0
+ 11
+812.0000
+ 21
+564.0000
+ 31
+0.0
+  0
+LINE
+  5
+104E
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+812.0000
+ 20
+564.0000
+ 30
+0.0
+ 11
+812.0000
+ 21
+452.0000
+ 31
+0.0
+  0
+LINE
+  5
+104F
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+812.0000
+ 20
+452.0000
+ 30
+0.0
+ 11
+488.0000
+ 21
+452.0000
+ 31
+0.0
+  0
+LINE
+  5
+1050
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+488.0000
+ 20
+452.0000
+ 30
+0.0
+ 11
+488.0000
+ 21
+564.0000
+ 31
+0.0
+  0
+TEXT
+  5
+1051
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+500.0000
+ 20
+542.0000
+ 30
+0.0
+ 40
+8.0000
+  1
+CARD 01 // CAMERA
+ 50
+0.00
+  0
+TEXT
+  5
+1052
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbText
+ 10
+760.0000
+ 20
+542.0000
+ 30
+0.0
+ 40
+7.5000
+  1
+LAUNCH
+ 50
+0.00
+  0
+LINE
+  5
+1053
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+488.0000
+ 20
+436.0000
+ 30
+0.0
+ 11
+812.0000
+ 21
+436.0000
+ 31
+0.0
+  0
+LINE
+  5
+1054
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+812.0000
+ 20
+436.0000
+ 30
+0.0
+ 11
+812.0000
+ 21
+354.0000
+ 31
+0.0
+  0
+LINE
+  5
+1055
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+812.0000
+ 20
+354.0000
+ 30
+0.0
+ 11
+488.0000
+ 21
+354.0000
+ 31
+0.0
+  0
+LINE
+  5
+1056
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+488.0000
+ 20
+354.0000
+ 30
+0.0
+ 11
+488.0000
+ 21
+436.0000
+ 31
+0.0
+  0
+TEXT
+  5
+1057
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+500.0000
+ 20
+414.0000
+ 30
+0.0
+ 40
+7.5000
+  1
+CARD 02 // SETTINGS
+ 50
+0.00
+  0
+LINE
+  5
+1058
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+478.0000
+ 20
+260.0000
+ 30
+0.0
+ 11
+822.0000
+ 21
+260.0000
+ 31
+0.0
+  0
+TEXT
+  5
+1059
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+602.0000
+ 20
+130.0000
+ 30
+0.0
+ 40
+8.0000
+  1
+IME KEYBOARD
+ 50
+0.00
+  0
+ARC
+  5
+105A
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbCircle
+ 10
+650.0000
+ 20
+176.0000
+ 30
+0.0
+ 40
+540.0000
+100
+AcDbArc
+ 50
+72.54
+ 51
+107.46
+  0
+LINE
+  5
+105B
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbLine
+ 10
+715.8094
+ 20
+711.9749
+ 30
+0.0
+ 11
+716.3579
+ 21
+716.4414
+ 31
+0.0
+  0
+LINE
+  5
+105C
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbLine
+ 10
+682.9662
+ 20
+714.9928
+ 30
+0.0
+ 11
+683.2409
+ 21
+719.4844
+ 31
+0.0
+  0
+LINE
+  5
+105D
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbLine
+ 10
+650.0000
+ 20
+716.0000
+ 30
+0.0
+ 11
+650.0000
+ 21
+723.5000
+ 31
+0.0
+  0
+LINE
+  5
+105E
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbLine
+ 10
+617.0338
+ 20
+714.9928
+ 30
+0.0
+ 11
+616.7591
+ 21
+719.4844
+ 31
+0.0
+  0
+LINE
+  5
+105F
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbLine
+ 10
+584.1906
+ 20
+711.9749
+ 30
+0.0
+ 11
+583.6421
+ 21
+716.4414
+ 31
+0.0
+  0
+TEXT
+  5
+1060
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+602.0000
+ 20
+729.0000
+ 30
+0.0
+ 40
+6.5000
+  1
+SYS.QUERY // 34
+ 50
+0.00
+  0
+TEXT
+  5
+1061
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbText
+ 10
+488.0000
+ 20
+664.0000
+ 30
+0.0
+ 40
+13.0000
+  1
+>
+ 50
+0.00
+  0
+TEXT
+  5
+1062
+100
+AcDbEntity
+  8
+HUD_WHITE
+100
+AcDbText
+ 10
+506.0000
+ 20
+664.0000
+ 30
+0.0
+ 40
+13.0000
+  1
+CAM_
+ 50
+0.00
+  0
+TEXT
+  5
+1063
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbText
+ 10
+766.0000
+ 20
+666.0000
+ 30
+0.0
+ 40
+7.5000
+  1
+02 X
+ 50
+0.00
+  0
+TEXT
+  5
+1064
+100
+AcDbEntity
+  8
+TITLE
+100
+AcDbText
+ 10
+940.0000
+ 20
+834.0000
+ 30
+0.0
+ 40
+9.5000
+  1
+OPTION C: TOP OPEN-EDGE RIBBON
+ 50
+0.00
+  0
+LINE
+  5
+1065
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+964.0000
+ 20
+0.0000
+ 30
+0.0
+ 11
+1276.0000
+ 21
+0.0000
+ 31
+0.0
+  0
+LINE
+  5
+1066
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+1300.0000
+ 20
+24.0000
+ 30
+0.0
+ 11
+1300.0000
+ 21
+776.0000
+ 31
+0.0
+  0
+LINE
+  5
+1067
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+1276.0000
+ 20
+800.0000
+ 30
+0.0
+ 11
+964.0000
+ 21
+800.0000
+ 31
+0.0
+  0
+LINE
+  5
+1068
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+940.0000
+ 20
+776.0000
+ 30
+0.0
+ 11
+940.0000
+ 21
+24.0000
+ 31
+0.0
+  0
+ARC
+  5
+1069
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbCircle
+ 10
+1276.0000
+ 20
+24.0000
+ 30
+0.0
+ 40
+24.0000
+100
+AcDbArc
+ 50
+270.00
+ 51
+0.00
+  0
+ARC
+  5
+106A
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbCircle
+ 10
+1276.0000
+ 20
+776.0000
+ 30
+0.0
+ 40
+24.0000
+100
+AcDbArc
+ 50
+0.00
+ 51
+90.00
+  0
+ARC
+  5
+106B
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbCircle
+ 10
+964.0000
+ 20
+776.0000
+ 30
+0.0
+ 40
+24.0000
+100
+AcDbArc
+ 50
+90.00
+ 51
+180.00
+  0
+ARC
+  5
+106C
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbCircle
+ 10
+964.0000
+ 20
+24.0000
+ 30
+0.0
+ 40
+24.0000
+100
+AcDbArc
+ 50
+180.00
+ 51
+270.00
+  0
+CIRCLE
+  5
+106D
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbCircle
+ 10
+1120.0000
+ 20
+778.0000
+ 30
+0.0
+ 40
+6.0000
+  0
+TEXT
+  5
+106E
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+960.0000
+ 20
+772.0000
+ 30
+0.0
+ 40
+6.5000
+  1
+22:39
+ 50
+0.00
+  0
+TEXT
+  5
+106F
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+1240.0000
+ 20
+772.0000
+ 30
+0.0
+ 40
+6.5000
+  1
+5G 88%
+ 50
+0.00
+  0
+LINE
+  5
+1070
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+1072.0000
+ 20
+12.0000
+ 30
+0.0
+ 11
+1168.0000
+ 21
+12.0000
+ 31
+0.0
+  0
+CIRCLE
+  5
+1071
+100
+AcDbEntity
+  8
+BG_GLOBE
+100
+AcDbCircle
+ 10
+1120.0000
+ 20
+380.0000
+ 30
+0.0
+ 40
+118.0000
+  0
+CIRCLE
+  5
+1072
+100
+AcDbEntity
+  8
+BG_GLOBE
+100
+AcDbCircle
+ 10
+1120.0000
+ 20
+380.0000
+ 30
+0.0
+ 40
+77.8800
+  0
+LINE
+  5
+1073
+100
+AcDbEntity
+  8
+BG_GLOBE
+100
+AcDbLine
+ 10
+1002.0000
+ 20
+380.0000
+ 30
+0.0
+ 11
+1238.0000
+ 21
+380.0000
+ 31
+0.0
+  0
+LINE
+  5
+1074
+100
+AcDbEntity
+  8
+BG_GLOBE
+100
+AcDbLine
+ 10
+1120.0000
+ 20
+262.0000
+ 30
+0.0
+ 11
+1120.0000
+ 21
+498.0000
+ 31
+0.0
+  0
+TEXT
+  5
+1075
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+1064.0000
+ 20
+242.0000
+ 30
+0.0
+ 40
+6.0000
+  1
+BLURRED SEARCH GLOBE
+ 50
+0.00
+  0
+LINE
+  5
+1076
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+958.0000
+ 20
+564.0000
+ 30
+0.0
+ 11
+1282.0000
+ 21
+564.0000
+ 31
+0.0
+  0
+LINE
+  5
+1077
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+1282.0000
+ 20
+564.0000
+ 30
+0.0
+ 11
+1282.0000
+ 21
+452.0000
+ 31
+0.0
+  0
+LINE
+  5
+1078
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+1282.0000
+ 20
+452.0000
+ 30
+0.0
+ 11
+958.0000
+ 21
+452.0000
+ 31
+0.0
+  0
+LINE
+  5
+1079
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+958.0000
+ 20
+452.0000
+ 30
+0.0
+ 11
+958.0000
+ 21
+564.0000
+ 31
+0.0
+  0
+TEXT
+  5
+107A
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+970.0000
+ 20
+542.0000
+ 30
+0.0
+ 40
+8.0000
+  1
+CARD 01 // CAMERA
+ 50
+0.00
+  0
+TEXT
+  5
+107B
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbText
+ 10
+1230.0000
+ 20
+542.0000
+ 30
+0.0
+ 40
+7.5000
+  1
+LAUNCH
+ 50
+0.00
+  0
+LINE
+  5
+107C
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+958.0000
+ 20
+436.0000
+ 30
+0.0
+ 11
+1282.0000
+ 21
+436.0000
+ 31
+0.0
+  0
+LINE
+  5
+107D
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+1282.0000
+ 20
+436.0000
+ 30
+0.0
+ 11
+1282.0000
+ 21
+354.0000
+ 31
+0.0
+  0
+LINE
+  5
+107E
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+1282.0000
+ 20
+354.0000
+ 30
+0.0
+ 11
+958.0000
+ 21
+354.0000
+ 31
+0.0
+  0
+LINE
+  5
+107F
+100
+AcDbEntity
+  8
+DECK_CARD
+100
+AcDbLine
+ 10
+958.0000
+ 20
+354.0000
+ 30
+0.0
+ 11
+958.0000
+ 21
+436.0000
+ 31
+0.0
+  0
+TEXT
+  5
+1080
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+970.0000
+ 20
+414.0000
+ 30
+0.0
+ 40
+7.5000
+  1
+CARD 02 // SETTINGS
+ 50
+0.00
+  0
+LINE
+  5
+1081
+100
+AcDbEntity
+  8
+PHONE_FRAME
+100
+AcDbLine
+ 10
+948.0000
+ 20
+260.0000
+ 30
+0.0
+ 11
+1292.0000
+ 21
+260.0000
+ 31
+0.0
+  0
+TEXT
+  5
+1082
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+1072.0000
+ 20
+130.0000
+ 30
+0.0
+ 40
+8.0000
+  1
+IME KEYBOARD
+ 50
+0.00
+  0
+LINE
+  5
+1083
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbLine
+ 10
+958.0000
+ 20
+724.0000
+ 30
+0.0
+ 11
+1282.0000
+ 21
+724.0000
+ 31
+0.0
+  0
+LINE
+  5
+1084
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbLine
+ 10
+1120.0000
+ 20
+724.0000
+ 30
+0.0
+ 11
+1120.0000
+ 21
+720.0000
+ 31
+0.0
+  0
+LINE
+  5
+1085
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbLine
+ 10
+958.0000
+ 20
+662.0000
+ 30
+0.0
+ 11
+1282.0000
+ 21
+662.0000
+ 31
+0.0
+  0
+CIRCLE
+  5
+1086
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbCircle
+ 10
+1173.0000
+ 20
+662.0000
+ 30
+0.0
+ 40
+3.4000
+  0
+CIRCLE
+  5
+1087
+100
+AcDbEntity
+  8
+HUD_WHITE
+100
+AcDbCircle
+ 10
+1173.0000
+ 20
+662.0000
+ 30
+0.0
+ 40
+1.4000
+  0
+TEXT
+  5
+1088
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+962.0000
+ 20
+707.0000
+ 30
+0.0
+ 40
+6.8000
+  1
+QUERY // 2 HITS
+ 50
+0.00
+  0
+TEXT
+  5
+1089
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbText
+ 10
+1230.0000
+ 20
+707.0000
+ 30
+0.0
+ 40
+6.8000
+  1
+CMD
+ 50
+0.00
+  0
+TEXT
+  5
+108A
+100
+AcDbEntity
+  8
+HUD_CRIMSON
+100
+AcDbText
+ 10
+962.0000
+ 20
+680.0000
+ 30
+0.0
+ 40
+13.0000
+  1
+>
+ 50
+0.00
+  0
+TEXT
+  5
+108B
+100
+AcDbEntity
+  8
+HUD_WHITE
+100
+AcDbText
+ 10
+980.0000
+ 20
+680.0000
+ 30
+0.0
+ 40
+13.0000
+  1
+CAM_
+ 50
+0.00
+  0
+TEXT
+  5
+108C
+100
+AcDbEntity
+  8
+HUD_SLATE
+100
+AcDbText
+ 10
+1266.0000
+ 20
+682.0000
+ 30
+0.0
+ 40
+9.0000
+  1
+X
+ 50
+0.00
+  0
+ENDSEC
+  0
+EOF

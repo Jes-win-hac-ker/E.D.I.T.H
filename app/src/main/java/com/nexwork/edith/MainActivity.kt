@@ -7,10 +7,10 @@ import android.os.Bundle
 import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
-import androidx.activity.OnBackPressedCallback
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.OnBackPressedCallback
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -24,12 +24,10 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsAnimationCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.nexwork.edith.jarvis.core.JarvisRuntime
 import com.nexwork.edith.theme.EDITHTheme
 
 class MainActivity : ComponentActivity() {
   private var homeResetSignal by mutableIntStateOf(0)
-  private var volumeDownAbortConsumed: Boolean = false
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -105,43 +103,6 @@ class MainActivity : ComponentActivity() {
         }
       }
     }
-
-    // Defer Jarvis KeyVault, SQLite WAL, and ForegroundService startup until frame 1 renders.
-    JarvisRuntime.schedulePostFirstFrame(this)
-  }
-
-  override fun onResume() {
-    super.onResume()
-    JarvisRuntime.setLauncherForeground(this, visible = true)
-  }
-
-  override fun onPause() {
-    volumeDownAbortConsumed = false
-    JarvisRuntime.setLauncherForeground(this, visible = false)
-    super.onPause()
-  }
-
-  override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-    if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN && JarvisRuntime.isAnyAbortableWorkActive()) {
-      if (event?.repeatCount == 0) {
-        volumeDownAbortConsumed = true
-        JarvisRuntime.emergencyStop(
-          context = this,
-          reason = "Volume-Down physical stop",
-          bounceHome = false,
-        )
-      }
-      return true
-    }
-    return super.onKeyDown(keyCode, event)
-  }
-
-  override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
-    if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN && volumeDownAbortConsumed) {
-      volumeDownAbortConsumed = false
-      return true
-    }
-    return super.onKeyUp(keyCode, event)
   }
 
   override fun onNewIntent(intent: Intent) {

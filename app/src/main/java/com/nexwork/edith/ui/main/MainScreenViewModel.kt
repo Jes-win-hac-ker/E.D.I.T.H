@@ -14,11 +14,9 @@ import com.nexwork.edith.data.OtaState
 import com.nexwork.edith.data.OtaUpdater
 import com.nexwork.edith.data.ShizukuControlManager
 import com.nexwork.edith.data.WeatherRepository
-import com.nexwork.edith.jarvis.core.JarvisRuntime
 import com.nexwork.edith.model.AppEntry
 import com.nexwork.edith.model.AppFootprint
 import com.nexwork.edith.model.DeviceTelemetry
-import com.nexwork.edith.model.JarvisSettingsSection
 import com.nexwork.edith.model.HudIntensityPreset
 import com.nexwork.edith.model.LauncherAccentPreset
 import com.nexwork.edith.model.LauncherFontStyle
@@ -80,9 +78,7 @@ data class LauncherHomeState(
   val monetUiState: MonetUiState = MonetUiState(),
   val settingsStage: SettingsStage = SettingsStage.CLOSED,
   val selectedSettingsSection: LauncherSettingsSection? = null,
-  val selectedJarvisSection: JarvisSettingsSection? = null,
   val launcherSettings: LauncherSettingsConfig = LauncherSettingsConfig(),
-  val isJarvisSheetOpen: Boolean = false,
 )
 
 class MainScreenViewModel(
@@ -141,20 +137,7 @@ class MainScreenViewModel(
       otaUpdater = OtaUpdater(appCtx).also {
         it.requestShizukuPermissionUpfront()
       }
-      viewModelScope.launch {
-        JarvisRuntime.emergencyStopEvents.collect {
-          val curOta = _launcherState.value.otaState
-          if (curOta is OtaState.Downloading || curOta is OtaState.Checking) {
-            dismissOtaPill()
-          }
-        }
-      }
-      viewModelScope.launch {
-        _launcherState
-          .map { it.otaState is OtaState.Downloading || it.otaState is OtaState.Checking }
-          .distinctUntilChanged()
-          .collect { active -> JarvisRuntime.setOtaActive(active) }
-      }
+
     }
     if (monetThemeManager == null) {
       val manager = MonetThemeManager(appCtx)
@@ -386,15 +369,12 @@ class MainScreenViewModel(
       is HudCommand.SetRefreshRate -> {
         setRefreshRatePreset(command.hz, closeConsole = true)
       }
-      HudCommand.OpenJarvis -> {
-        openJarvisSheet()
-      }
       HudCommand.ShowHelp -> {
         _launcherState.update {
-          it.copy(commandHint = "!JARVIS !PIN !WIFI !BT !DND !BAT !RAM !WX !OTA")
+          it.copy(commandHint = "!PIN !WIFI !BT !DND !BAT !RAM !WX !OTA")
         }
         _feedbackEvents.tryEmit(
-          HudFeedbackEvent("Commands: !jarvis !pin !wifi !bt !dnd !refresh !bat !ram !wx !ota !usage !notif !home ?web =math")
+          HudFeedbackEvent("Commands: !pin !wifi !bt !dnd !refresh !bat !ram !wx !ota !usage !notif !home ?web =math")
         )
       }
       is HudCommand.WebSearch -> {
@@ -522,8 +502,7 @@ class MainScreenViewModel(
       HudCommand.ToggleDnd -> if (shizukuReady) "DND  ·  TOGGLE" else "DND  ·  SETTINGS"
       is HudCommand.SetRefreshRate ->
         if (command.hz == null) "HZ  ·  AUTO" else "HZ  ·  ${command.hz}HZ"
-      HudCommand.OpenJarvis -> "JARVIS  ·  BASEPLATE"
-      HudCommand.ShowHelp -> "!JARVIS !PIN !WIFI !BT !DND !BAT !RAM !WX !OTA"
+      HudCommand.ShowHelp -> "!PIN !WIFI !BT !DND !BAT !RAM !WX !OTA"
       is HudCommand.WebSearch ->
         if (command.query.isBlank()) "WEB  ·  TYPE QUERY" else "WEB  ·  ${command.query.take(18).uppercase()}"
       is HudCommand.Unknown -> "UNKNOWN CMD  ·  !HELP"
@@ -786,38 +765,13 @@ class MainScreenViewModel(
       state.copy(
         settingsStage = SettingsStage.ROOT_BRANCHES,
         selectedSettingsSection = null,
-        selectedJarvisSection = null,
         isSpotlightSearchOpen = false,
         isAppBrowseOpen = false,
         browseGroup = null,
         searchQuery = "",
         commandHint = null,
         isAmbientCentered = false,
-        isJarvisSheetOpen = false,
       )
-    }
-  }
-
-  fun openJarvisSheet() {
-    _launcherState.update { state ->
-      state.copy(
-        isJarvisSheetOpen = true,
-        isSpotlightSearchOpen = false,
-        isAppBrowseOpen = false,
-        browseGroup = null,
-        searchQuery = "",
-        commandHint = null,
-        isAmbientCentered = false,
-        settingsStage = SettingsStage.CLOSED,
-        selectedSettingsSection = null,
-        selectedJarvisSection = null,
-      )
-    }
-  }
-
-  fun closeJarvisSheet() {
-    _launcherState.update { state ->
-      if (!state.isJarvisSheetOpen) state else state.copy(isJarvisSheetOpen = false)
     }
   }
 
@@ -827,7 +781,6 @@ class MainScreenViewModel(
       else state.copy(
         settingsStage = stage,
         selectedSettingsSection = null,
-        selectedJarvisSection = null,
         isAmbientCentered = false,
       )
     }
@@ -840,19 +793,11 @@ class MainScreenViewModel(
     }
   }
 
-  fun selectJarvisSetting(section: JarvisSettingsSection?) {
-    _launcherState.update { state ->
-      if (state.settingsStage != SettingsStage.AGENT_PLACEHOLDER) state
-      else state.copy(selectedJarvisSection = section)
-    }
-  }
-
   fun dismissSettings() {
     _launcherState.update { state ->
       state.copy(
         settingsStage = SettingsStage.CLOSED,
         selectedSettingsSection = null,
-        selectedJarvisSection = null,
       )
     }
   }
@@ -979,7 +924,6 @@ class MainScreenViewModel(
       if (state.isSpotlightSearchOpen ||
         state.isAppBrowseOpen ||
         state.settingsStage != SettingsStage.CLOSED ||
-        state.isJarvisSheetOpen ||
         state.isAmbientCentered
       ) {
         state
@@ -1013,10 +957,6 @@ class MainScreenViewModel(
 
   fun handleBackPress(): Boolean {
     val current = _launcherState.value
-    if (current.isJarvisSheetOpen) {
-      closeJarvisSheet()
-      return true
-    }
     if (current.isSpotlightSearchOpen) {
       closeSpotlightSearch()
       return true
@@ -1036,11 +976,7 @@ class MainScreenViewModel(
         return true
       }
       SettingsStage.AGENT_PLACEHOLDER -> {
-        if (current.selectedJarvisSection != null) {
-          selectJarvisSetting(null)
-        } else {
-          selectSettingsBranch(SettingsStage.ROOT_BRANCHES)
-        }
+        selectSettingsBranch(SettingsStage.ROOT_BRANCHES)
         return true
       }
       SettingsStage.SHIZUKU_PLACEHOLDER -> {
@@ -1052,6 +988,7 @@ class MainScreenViewModel(
         return true
       }
     }
+    return false
   }
 }
 

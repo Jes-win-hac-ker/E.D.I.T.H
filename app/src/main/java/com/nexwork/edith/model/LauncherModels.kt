@@ -113,14 +113,6 @@ enum class LauncherSettingsSection(val title: String, val tag: String) {
   PERMS_OTA("PERMS & OTA", "SYSTEM"),
 }
 
-enum class JarvisSettingsSection(val title: String, val tag: String) {
-  RUNTIME("RUNTIME & SVC", "ENGINE"),
-  PERMISSIONS("PERMS & PWR", "SENSES"),
-  KEY_VAULT("KEY VAULT", "GEMINI"),
-  EVENT_FEED("TRIAGE FEED", "SQLITE"),
-  RULEBOOK("RULEBOOK", "RULES"),
-}
-
 data class LauncherSettingsConfig(
   val accentPreset: LauncherAccentPreset = LauncherAccentPreset.ICE_CYAN,
   val hudIntensity: HudIntensityPreset = HudIntensityPreset.TACTICAL,

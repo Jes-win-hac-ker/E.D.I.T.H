@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "aesthete-agent": {
+      "source": "docsor1212/aesthete-agent",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "40ef2144a10d9e08768a3651566544977dc86f3676b5818a084417e769260849"
+    }
+  }
+}

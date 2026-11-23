@@ -10,7 +10,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import com.nexwork.edith.model.JarvisSettingsSection
 import com.nexwork.edith.model.LauncherSettingsSection
 import com.nexwork.edith.model.SettingsStage
 import kotlin.math.roundToInt
@@ -50,14 +49,7 @@ val ROOT_BRANCH_SPECS: List<RootBranchSpec> = listOf(
   ),
   RootBranchSpec(
     index = 1,
-    eyebrow = "02 // AI AGENT",
-    title = "JARVIS",
-    stage = SettingsStage.AGENT_PLACEHOLDER,
-    isBuilt = true,
-  ),
-  RootBranchSpec(
-    index = 2,
-    eyebrow = "03 // STANDBY",
+    eyebrow = "02 // STANDBY",
     title = "SHIZUKU",
     stage = SettingsStage.SHIZUKU_PLACEHOLDER,
     isBuilt = false,
@@ -148,9 +140,6 @@ class HudSettingsChoreographyController(initialStage: SettingsStage) {
   var retainedLauncherSection by mutableStateOf<LauncherSettingsSection?>(null)
     internal set
 
-  var retainedJarvisSection by mutableStateOf<JarvisSettingsSection?>(null)
-    internal set
-
   val isRootAboveGlobe: Boolean
     get() = HudSettingsGateChecker.shouldPlaceRootAboveGlobe(
       targetStage = targetStage,
@@ -168,13 +157,8 @@ class HudSettingsChoreographyController(initialStage: SettingsStage) {
   suspend fun driveTo(
     stage: SettingsStage,
     selectedLauncherSection: LauncherSettingsSection?,
-    selectedJarvisSection: JarvisSettingsSection?,
-    onPrepareAgentStage: () -> Unit,
   ) {
     targetStage = stage
-    if (stage == SettingsStage.AGENT_PLACEHOLDER) {
-      onPrepareAgentStage()
-    }
 
     if (stage == SettingsStage.CLOSED) {
       if (!mounted) {
@@ -201,7 +185,6 @@ class HudSettingsChoreographyController(initialStage: SettingsStage) {
         detailCardAnim.snapTo(0f)
         collapseAnim.snapTo(0f)
         retainedLauncherSection = null
-        retainedJarvisSection = null
         retainedOverlayStage = SettingsStage.ROOT_BRANCHES
         delay(220L)
         animateUp(rootAnim, ROOT_ENTER_DURATION_MS)
@@ -222,7 +205,7 @@ class HudSettingsChoreographyController(initialStage: SettingsStage) {
       return
     }
 
-    // Deep branch stages: LAUNCHER_TREE, AGENT_PLACEHOLDER, SHIZUKU_PLACEHOLDER
+    // Deep branch stages: LAUNCHER_TREE, SHIZUKU_PLACEHOLDER
     if (rootAnim.value < 0.999f) {
       animateUp(rootAnim, ROOT_ENTER_DURATION_MS / 2)
     }
@@ -241,20 +224,17 @@ class HudSettingsChoreographyController(initialStage: SettingsStage) {
 
     retainedOverlayStage = stage
     if (stage != SettingsStage.LAUNCHER_TREE) retainedLauncherSection = null
-    if (stage != SettingsStage.AGENT_PLACEHOLDER) retainedJarvisSection = null
 
     val targetLauncher = if (stage == SettingsStage.LAUNCHER_TREE) selectedLauncherSection else null
-    val targetJarvis = if (stage == SettingsStage.AGENT_PLACEHOLDER) selectedJarvisSection else null
-    val changingDetail = (targetLauncher != retainedLauncherSection) || (targetJarvis != retainedJarvisSection)
+    val changingDetail = targetLauncher != retainedLauncherSection
 
-    // If user backed out of Stage 3 -> Stage 2 or switched cards, unwind previous detail first.
+    // If user backed out of Stage 3 -> Stage 2 or switched branches, unwind previous detail first.
     if (changingDetail && detailCardAnim.value > HudSettingsGateChecker.ZERO_EPSILON) {
       animateDown(detailCardAnim, DETAIL_EXIT_DURATION_MS)
     }
     if (detailCardAnim.value <= HudSettingsGateChecker.ZERO_EPSILON) {
-      if (targetLauncher == null && targetJarvis == null) {
+      if (targetLauncher == null) {
         retainedLauncherSection = null
-        retainedJarvisSection = null
       }
     }
 
@@ -262,11 +242,10 @@ class HudSettingsChoreographyController(initialStage: SettingsStage) {
       animateUp(branchTreeAnim, BRANCH_ENTER_DURATION_MS)
     }
 
-    if ((targetLauncher != null || targetJarvis != null) &&
+    if (targetLauncher != null &&
       HudSettingsGateChecker.canLaunchDetailCard(branchTreeAnim.value)
     ) {
       retainedLauncherSection = targetLauncher
-      retainedJarvisSection = targetJarvis
       if (detailCardAnim.value < 0.999f) {
         animateUp(detailCardAnim, DETAIL_ENTER_DURATION_MS)
       }
@@ -279,7 +258,6 @@ class HudSettingsChoreographyController(initialStage: SettingsStage) {
     }
     detailCardAnim.snapTo(0f)
     retainedLauncherSection = null
-    retainedJarvisSection = null
 
     if (branchTreeAnim.value > HudSettingsGateChecker.ZERO_EPSILON) {
       animateDown(branchTreeAnim, BRANCH_EXIT_DURATION_MS)
@@ -293,7 +271,6 @@ class HudSettingsChoreographyController(initialStage: SettingsStage) {
     collapseAnim.snapTo(0f)
     rootAnim.snapTo(0f)
     retainedLauncherSection = null
-    retainedJarvisSection = null
     retainedOverlayStage = SettingsStage.CLOSED
   }
 
@@ -318,19 +295,15 @@ fun BindHudSettingsChoreography(
   choreographer: HudSettingsChoreographyController,
   stage: SettingsStage,
   selectedSection: LauncherSettingsSection?,
-  selectedJarvisSection: JarvisSettingsSection?,
-  onPrepareAgentStage: () -> Unit,
   onMountedChange: (Boolean) -> Unit,
 ) {
   LaunchedEffect(choreographer.mounted) {
     onMountedChange(choreographer.mounted)
   }
-  LaunchedEffect(stage, selectedSection, selectedJarvisSection) {
+  LaunchedEffect(stage, selectedSection) {
     choreographer.driveTo(
       stage = stage,
       selectedLauncherSection = selectedSection,
-      selectedJarvisSection = selectedJarvisSection,
-      onPrepareAgentStage = onPrepareAgentStage,
     )
   }
 }

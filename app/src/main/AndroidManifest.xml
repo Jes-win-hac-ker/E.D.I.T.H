@@ -74,27 +74,6 @@
             </intent-filter>
         </service>
 
-        <service
-            android:name=".jarvis.core.JarvisForegroundService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="specialUse|connectedDevice|location"
-            android:stopWithTask="false">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Persistent local AI assistant baseplate for notification triage and quick-reply caching" />
-        </service>
-
-        <service
-            android:name=".jarvis.senses.JarvisNotificationService"
-            android:exported="true"
-            android:label="@string/jarvis_listener_label"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
-
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

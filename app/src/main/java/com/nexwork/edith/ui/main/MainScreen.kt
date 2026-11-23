@@ -62,10 +62,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
 import kotlinx.coroutines.delay
 import com.nexwork.edith.LocalHomeResetSignal
-import com.nexwork.edith.jarvis.core.JarvisRuntime
-import com.nexwork.edith.jarvis.ui.JarvisAmbientPill
-import com.nexwork.edith.jarvis.ui.JarvisDrawerSheet
-import com.nexwork.edith.jarvis.ui.JarvisEmergencyStopHudPill
 import com.nexwork.edith.model.HudIntensityPreset
 import com.nexwork.edith.model.SettingsStage
 import com.nexwork.edith.theme.EDITHTheme
@@ -113,27 +109,19 @@ fun MainScreen(
   var lastScreenActivityMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
   var lastAmbientWakeMs by remember { mutableLongStateOf(0L) }
   val isAmbientCenteredState = rememberUpdatedState(state.isAmbientCentered)
-  val isSettingsOrJarvisOpen = rememberUpdatedState(state.settingsStage != SettingsStage.CLOSED || state.isJarvisSheetOpen)
+  val isSettingsOpen = rememberUpdatedState(state.settingsStage != SettingsStage.CLOSED)
   val globeController = remember { GlobeController() }
   val isGlobeAtHorizon by globeController.isGlobeAtHorizon.collectAsStateWithLifecycle()
   val isStartupComplete by globeController.isStartupComplete.collectAsStateWithLifecycle()
   var isClockMounted by remember { mutableStateOf(false) }
   var isOtaMounted by remember { mutableStateOf(false) }
-  var isAmbientPillMounted by remember { mutableStateOf(false) }
-  val isHudMounted = isClockMounted || isOtaMounted || isAmbientPillMounted
-  val proactiveSuggestion by JarvisRuntime.proactiveSuggestion.collectAsStateWithLifecycle()
-  val jarvisUiState by JarvisRuntime.uiState.collectAsStateWithLifecycle()
+  val isHudMounted = isClockMounted || isOtaMounted
   val settingsChoreographer = rememberHudSettingsChoreographer(state.settingsStage)
   var isSettingsMounted by remember { mutableStateOf(state.settingsStage != SettingsStage.CLOSED) }
   BindHudSettingsChoreography(
     choreographer = settingsChoreographer,
     stage = state.settingsStage,
     selectedSection = state.selectedSettingsSection,
-    selectedJarvisSection = state.selectedJarvisSection,
-    onPrepareAgentStage = {
-      JarvisRuntime.ensureInitialized(context)
-      JarvisRuntime.refreshEnvironmentStatus(context)
-    },
     onMountedChange = { isSettingsMounted = it },
   )
   var clockRedrawSignal by remember { mutableIntStateOf(0) }
@@ -152,7 +140,6 @@ fun MainScreen(
     viewModel.closeSpotlightSearch()
     viewModel.closeAppBrowse()
     viewModel.dismissSettings()
-    viewModel.closeJarvisSheet()
     if (now - lastHomeWakeMs > 600L) {
       lastHomeWakeMs = now
       clockRedrawSignal++
@@ -177,10 +164,9 @@ fun MainScreen(
   LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
     isResumed = true
     val keyguardManager = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-    if (keyguardManager?.isKeyguardLocked != true && !isSettingsOrJarvisOpen.value) {
+    if (keyguardManager?.isKeyguardLocked != true && !isSettingsOpen.value) {
       triggerHomeWake()
     }
-    JarvisRuntime.refreshEnvironmentStatus(context)
     viewModel.refreshLauncherData()
     viewModel.checkForUpdates(force = false)
     viewModel.ensureMonetPersisted()
@@ -256,7 +242,6 @@ fun MainScreen(
 
   val consoleOpen = state.isSpotlightSearchOpen || state.isAppBrowseOpen
   val settingsOpen = state.settingsStage != SettingsStage.CLOSED
-  val jarvisOpen = state.isJarvisSheetOpen
   val searchOpen = state.isSpotlightSearchOpen
   var isHudKeyboardVisible by remember { mutableStateOf(false) }
   var useSystemIme by remember { mutableStateOf(false) }
@@ -324,7 +309,6 @@ fun MainScreen(
     isResumed,
     consoleOpen,
     settingsOpen,
-    jarvisOpen,
     searchOpen,
     state.searchQuery,
     state.browseGroup,
@@ -333,7 +317,7 @@ fun MainScreen(
     lastScreenActivityMs,
   ) {
     if (!isResumed) return@LaunchedEffect
-    if (settingsOpen || jarvisOpen) return@LaunchedEffect
+    if (settingsOpen) return@LaunchedEffect
     if (consoleOpen) {
       if (isCardActionArmed) return@LaunchedEffect
       val timeoutMs = if (searchOpen && state.searchQuery.isEmpty()) 4_000L else 10_000L
@@ -349,8 +333,8 @@ fun MainScreen(
     }
   }
 
-  // Back climbs one level: detail -> branch -> root settings -> home, or search/browse/jarvis unwind.
-  BackHandler(enabled = consoleOpen || settingsOpen || isSettingsMounted || jarvisOpen) {
+  // Back climbs one level: detail -> branch -> root settings -> home, or search/browse unwind.
+  BackHandler(enabled = consoleOpen || settingsOpen || isSettingsMounted) {
     lastScreenActivityMs = System.currentTimeMillis()
     if (consoleOpen && isHudKeyboardVisible) {
       isHudKeyboardVisible = false
@@ -402,8 +386,8 @@ fun MainScreen(
           }
         }
       }
-      .pointerInput(consoleOpen, settingsOpen, isSettingsMounted, jarvisOpen) {
-        if (!consoleOpen && !settingsOpen && !isSettingsMounted && !jarvisOpen) {
+      .pointerInput(consoleOpen, settingsOpen, isSettingsMounted) {
+        if (!consoleOpen && !settingsOpen && !isSettingsMounted) {
           awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val downTimeMs = System.currentTimeMillis()
@@ -596,7 +580,7 @@ fun MainScreen(
 
     // The clock crowns the globe horizon apex after startup assembly completes and the globe rests at horizon.
     val topHudHidden =
-      consoleOpen || settingsOpen || isSettingsMounted || jarvisOpen || state.isAmbientCentered || !isGlobeAtHorizon || !isStartupComplete
+      consoleOpen || settingsOpen || isSettingsMounted || state.isAmbientCentered || !isGlobeAtHorizon || !isStartupComplete
     val globeApexY = maxHeight * 0.64f
     val clockTop = (globeApexY - 82.dp).coerceAtLeast(66.dp)
     HudClock(
@@ -625,36 +609,10 @@ fun MainScreen(
         .padding(start = 18.dp, end = 18.dp, top = otaTop),
     )
 
-    val ambientPillTargetTop = (if (isOtaMounted) otaTop - 52.dp else otaTop).coerceAtLeast(36.dp)
-    val ambientPillTop by animateDpAsState(
-      targetValue = ambientPillTargetTop,
-      animationSpec = tween(220, easing = FastOutSlowInEasing),
-      label = "ambientPillTop",
-    )
-    JarvisAmbientPill(
-      suggestion = proactiveSuggestion,
-      onAction = { suggestion ->
-        if (suggestion is com.nexwork.edith.jarvis.core.ProactiveSuggestion.EventClashAlert) {
-          viewModel.openJarvisSheet()
-        } else {
-          JarvisRuntime.executeProactiveSuggestion(context, suggestion)
-        }
-      },
-      onDismiss = {
-        JarvisRuntime.dismissProactiveSuggestion()
-      },
-      hidden = topHudHidden,
-      onMountedChange = { isAmbientPillMounted = it },
-      modifier = Modifier
-        .zIndex(2f)
-        .align(Alignment.TopStart)
-        .padding(start = 18.dp, end = 18.dp, top = ambientPillTop),
-    )
 
     HudSettingsOverlayLayer(
       stage = state.settingsStage,
       selectedSection = state.selectedSettingsSection,
-      selectedJarvisSection = state.selectedJarvisSection,
       settings = state.launcherSettings,
       telemetry = state.telemetry,
       liveWeather = state.liveWeather,
@@ -664,8 +622,6 @@ fun MainScreen(
       screenWidth = maxWidth,
       screenHeight = maxHeight,
       onSelectSection = viewModel::selectLauncherSetting,
-      onSelectJarvisSection = viewModel::selectJarvisSetting,
-      onOpenJarvisDrawer = viewModel::openJarvisSheet,
       onBackStep = { viewModel.handleBackPress() },
       onAccentChange = viewModel::updateLauncherAccent,
       onIntensityChange = viewModel::updateHudIntensity,
@@ -812,26 +768,6 @@ fun MainScreen(
         .align(Alignment.BottomCenter),
     )
 
-    val hasJarvisBusy = jarvisUiState.isProcessing ||
-      jarvisUiState.pendingTier3Approval != null
-    val busyLabel = if (jarvisUiState.pendingTier3Approval != null) "TIER 3 GATE" else "TRIAGE"
-    JarvisEmergencyStopHudPill(
-      visible = hasJarvisBusy && !jarvisOpen && !settingsOpen && !isSettingsMounted,
-      label = busyLabel,
-      onStop = { JarvisRuntime.emergencyStop(context, "Home HUD STOP tapped") },
-      modifier = Modifier
-        .zIndex(4.5f)
-        .align(Alignment.TopEnd)
-        .statusBarsPadding()
-        .padding(top = 14.dp, end = 18.dp),
-    )
-
-    if (jarvisOpen) {
-      JarvisDrawerSheet(
-        onDismiss = viewModel::closeJarvisSheet,
-        modifier = Modifier.zIndex(5f),
-      )
-    }
   }
   }
 }
