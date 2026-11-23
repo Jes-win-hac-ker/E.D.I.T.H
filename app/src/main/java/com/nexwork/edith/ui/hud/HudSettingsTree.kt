@@ -595,8 +595,8 @@ fun HudSettingsOverlayLayer(
         )
       }
     } else if (activeStage == SettingsStage.SHIZUKU_PLACEHOLDER) {
-      // Standby Branch 03 (SHIZUKU): laser starts from exact sunken Card 03 top center
-      val origin = geo.sunkenCardTopCenter(2)
+      // Standby Branch 02 (SHIZUKU): laser starts from exact sunken Card 02 top center
+      val origin = geo.sunkenCardTopCenter(1)
       val cardWDp = (geo.widthDp - 56.dp).coerceIn(220.dp, 312.dp)
       val cardHDp = 128.dp
       val cardLeftDp = (geo.widthDp - cardWDp) * 0.5f
@@ -655,7 +655,7 @@ fun HudSettingsOverlayLayer(
         ) {
           Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             HudHeaderDecryptBlock(
-              eyebrow = "SYS.03 // SHIZUKU BRIDGE",
+              eyebrow = "SYS.02 // SHIZUKU BRIDGE",
               title = "STANDBY // OS MONET",
               reveal = { phase(bodyReveal, 0f, 0.72f) },
               accent = accent,
