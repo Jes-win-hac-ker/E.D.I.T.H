@@ -41,8 +41,15 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.PaintingStyle
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -508,6 +515,91 @@ fun MainScreen(
         }
       }
   ) {
+    val accentColor = activeStyle.accent
+
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .zIndex(0.5f)
+        .drawWithCache {
+          onDrawBehind {
+            val scanSpacing = 3.dp.toPx()
+            val scanAlpha = 0.03f
+            val scanPaint = Paint().apply {
+              this.color = Color.White.copy(alpha = scanAlpha)
+            }
+            val gridPaint = Paint().apply {
+              this.color = accentColor.copy(alpha = 0.025f)
+            }
+            val gridStrokeWidth = 0.5f.dp.toPx()
+            gridPaint.strokeWidth = gridStrokeWidth
+            gridPaint.style = PaintingStyle.Stroke
+
+            for (y in 0 until size.height.toInt() step scanSpacing.toInt()) {
+              drawRect(
+                brush = Brush.verticalGradient(
+                  listOf(Color.White.copy(alpha = scanAlpha * 1.5f), Color.Transparent),
+                ),
+                size = Size(size.width, 1.dp.toPx()),
+                topLeft = Offset(0f, y.toFloat()),
+              )
+            }
+            val gridSpacing = 60.dp.toPx()
+            for (x in gridSpacing.toInt() until size.width.toInt() step gridSpacing.toInt()) {
+              drawLine(
+                color = gridPaint.color,
+                start = Offset(x.toFloat(), 0f),
+                end = Offset(x.toFloat(), size.height),
+                strokeWidth = gridStrokeWidth,
+              )
+            }
+            for (y in gridSpacing.toInt() until size.height.toInt() step gridSpacing.toInt()) {
+              drawLine(
+                color = gridPaint.color,
+                start = Offset(0f, y.toFloat()),
+                end = Offset(size.width, y.toFloat()),
+                strokeWidth = gridStrokeWidth,
+              )
+            }
+          }
+        },
+    )
+
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .zIndex(0.6f)
+        .drawWithCache {
+          val cornerSize = 48.dp.toPx()
+          val bracketWidth = 1.5f.dp.toPx()
+          onDrawBehind {
+            val accentAlpha = 0.18f
+            val tlColor = accentColor.copy(alpha = accentAlpha)
+            val trColor = accentColor.copy(alpha = accentAlpha * 0.85f)
+            val blColor = accentColor.copy(alpha = accentAlpha * 0.72f)
+            val brColor = accentColor.copy(alpha = accentAlpha * 0.60f)
+
+            // Top-left bracket
+            drawRect(tlColor, Offset.Zero, Size(bracketWidth, cornerSize))
+            drawRect(tlColor, Offset.Zero, Size(cornerSize, bracketWidth))
+
+            val w = this@onDrawBehind.size.width
+            val h = this@onDrawBehind.size.height
+            // Top-right bracket
+            drawRect(trColor, Offset(w - bracketWidth, 0f), Size(bracketWidth, cornerSize))
+            drawRect(trColor, Offset(w - cornerSize, 0f), Size(cornerSize, bracketWidth))
+
+            // Bottom-left bracket
+            drawRect(blColor, Offset.Zero, Size(bracketWidth, cornerSize))
+            drawRect(blColor, Offset(0f, h - bracketWidth), Size(cornerSize, bracketWidth))
+
+            // Bottom-right bracket
+            drawRect(brColor, Offset(w - bracketWidth, h - cornerSize), Size(bracketWidth, cornerSize))
+            drawRect(brColor, Offset(w - cornerSize, h - bracketWidth), Size(cornerSize, bracketWidth))
+          }
+        },
+    )
+
     val browseGroupCount = remember(state.apps, state.browseGroup) {
       val name = state.browseGroup ?: return@remember 0
       groupApps(state.apps).firstOrNull { it.name == name }?.apps?.size ?: 0

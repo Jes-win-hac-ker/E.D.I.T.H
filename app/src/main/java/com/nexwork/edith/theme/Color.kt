@@ -4,8 +4,8 @@ import androidx.compose.ui.graphics.Color
 
 // Material theme surface roles; the home screen paints its own void.
 val ObsidianBgTop = Color(0xFF0B0D12)
-val GlassSurface = Color(0xFF1A202C)
-val GlassSurfaceElevated = Color(0xFF232B3A)
+val GlassSurface = Color(0xFF0A0F18)
+val GlassSurfaceElevated = Color(0xFF0F1724)
 
 val TextPureWhite = Color(0xFFF8FAFC)
 val TextSilver = Color(0xFFCBD5E1)

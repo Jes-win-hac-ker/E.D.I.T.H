@@ -17,7 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.geometry.CornerRadius
+
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -151,7 +151,7 @@ fun HudGroupCard(
           val cellW = 7.4f.dp.toPx()
           val cellGap = 2.4f.dp.toPx()
           val cellH = 3f.dp.toPx()
-          val cellRadius = CornerRadius(0.8f.dp.toPx(), 0.8f.dp.toPx())
+
           val meterX = X(22f)
           val meterY = Y(107f)
           val tickStart = X(150f)
@@ -242,11 +242,10 @@ fun HudGroupCard(
                 isLit -> Color.White.copy(alpha = 0.88f * meterP)
                 else -> Color.White.copy(alpha = 0.15f * meterP)
               }
-              drawRoundRect(
+              drawRect(
                 color = cellColor,
                 topLeft = Offset(meterX + cell * (cellW + cellGap), meterY),
                 size = Size(cellW, cellH),
-                cornerRadius = cellRadius,
               )
             }
 
@@ -331,7 +330,7 @@ fun HudGroupCard(
         },
     )
 
-    val cellShape = remember { RoundedCornerShape(percent = 24) }
+    val cellShape = RoundedCornerShape(0f)
     Layout(
       modifier = Modifier
         .fillMaxSize()
@@ -344,7 +343,7 @@ fun HudGroupCard(
         },
       content = {
         members.forEach { member ->
-          MiniAppIcon(member, cellShape, monochrome)
+          MiniAppIcon(member, cellShape, monochrome, style)
         }
       },
     ) { measurables, constraints ->
@@ -368,14 +367,14 @@ fun HudGroupCard(
 }
 
 @Composable
-private fun MiniAppIcon(entry: AppEntry, shape: RoundedCornerShape, filter: ColorFilter) {
+private fun MiniAppIcon(entry: AppEntry, shape: RoundedCornerShape, filter: ColorFilter, style: com.nexwork.edith.theme.LauncherStyleTokens) {
   val bitmap = remember(entry.packageName, entry.icon) { entry.cachedIconBitmap() }
   Box(
     Modifier
       .fillMaxSize()
       .clip(shape)
-      .background(Color.White.copy(alpha = 0.06f))
-      .border(0.8.dp, Color.White.copy(alpha = 0.24f), shape),
+      .background(Color(0xFF0A0A0A).copy(alpha = 0.88f))
+      .border(0.8.dp, style.graphicAccent.copy(alpha = 0.45f), shape),
     contentAlignment = Alignment.Center,
   ) {
     if (bitmap != null) {

@@ -17,7 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.geometry.CornerRadius
+
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
@@ -167,7 +167,7 @@ fun HudAppCard(
           val cellW = 7.4f.dp.toPx()
           val cellGap = 2.4f.dp.toPx()
           val cellH = 3f.dp.toPx()
-          val cellRadius = CornerRadius(0.8f.dp.toPx(), 0.8f.dp.toPx())
+
           val meterX = X(22f)
           val meterY = Y(107f)
           val stripStart = X(150f)
@@ -300,11 +300,10 @@ fun HudAppCard(
               } else {
                 Color.White.copy(alpha = 0.15f * meterP)
               }
-              drawRoundRect(
+              drawRect(
                 color = cellColor,
                 topLeft = Offset(meterX + cell * (cellW + cellGap), meterY),
                 size = Size(cellW, cellH),
-                cornerRadius = cellRadius,
               )
             }
 
@@ -412,7 +411,7 @@ fun HudAppCard(
         },
     )
 
-    val iconShape = remember { RoundedCornerShape(percent = 25) }
+    val iconShape = RoundedCornerShape(0f)
     Layout(
       modifier = Modifier.fillMaxSize(),
       content = {
@@ -426,8 +425,8 @@ fun HudAppCard(
               translationY = (1f - settle) * iconRise
             }
             .clip(iconShape)
-            .background(Color.White.copy(alpha = 0.06f))
-            .border(1.dp, Color.White.copy(alpha = 0.28f), iconShape),
+            .background(Color(0xFF0A0A0A).copy(alpha = 0.88f))
+            .border(0.8.dp, style.graphicAccent.copy(alpha = 0.45f), RoundedCornerShape(0f)),
           contentAlignment = Alignment.Center,
         ) {
           if (iconBitmap != null) {

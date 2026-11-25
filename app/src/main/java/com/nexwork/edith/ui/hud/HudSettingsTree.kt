@@ -872,6 +872,7 @@ private fun LauncherDetailCardContent(
   onCheckOta: () -> Unit,
 ) {
   val scrollState = rememberScrollState()
+  val style = LocalLauncherStyle.current
   Column(
     modifier = Modifier
       .fillMaxSize()
@@ -897,6 +898,7 @@ private fun LauncherDetailCardContent(
             title = preset.label.uppercase(),
             badge = if (selected) "ACTIVE" else preset.code,
             swatchColor = presetColor,
+            pipColor = if (selected) accent else style.orbitalMuted.copy(alpha = style.railAlpha),
             focused = selected,
             accent = presetColor,
             titleSizeSp = 10.0f,
@@ -919,6 +921,7 @@ private fun LauncherDetailCardContent(
             val selected = settings.hudIntensity == preset
             CompactHudCard(
               title = preset.code,
+              pipColor = if (selected) accent else style.orbitalMuted.copy(alpha = style.railAlpha),
               focused = selected,
               accent = accent,
               titleSizeSp = 9.5f,
