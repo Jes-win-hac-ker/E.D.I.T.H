@@ -17,7 +17,8 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -43,9 +44,10 @@ kotlin {
     jvmToolchain(17)
 }
 
-dependencyLocking {
-    lockAllConfigurations()
-}
+// Disabled: Gradle 9.x dependency locking requires explicit task setup; Coil lock files can't be generated automatically
+// dependencyLocking {
+//     lockAllConfigurations()
+// }
 
 dependencies {
   val composeBom = platform(libs.androidx.compose.bom)
@@ -74,6 +76,9 @@ dependencies {
   // Local tests: jUnit, coroutines, Android runner
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
+
+  // Image loading with memory cache
+  implementation(libs.coil)
 
   // Instrumented tests: jUnit rules and runners
   androidTestImplementation(libs.androidx.test.core)

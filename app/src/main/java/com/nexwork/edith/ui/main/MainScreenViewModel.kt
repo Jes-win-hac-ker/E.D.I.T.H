@@ -150,11 +150,16 @@ class MainScreenViewModel(
       manager.refreshShizukuState()
       ensureMonetPersisted()
     }
-    refreshLauncherData()
-    startTelemetryObservation()
-    refreshWeather(forceRefresh = false)
-    syncShizukuControlAndPermissions()
-    checkForUpdates(force = false)
+    // Defer heavy work (app enumeration, weather, OTA) to post-first-frame so the
+    // first frame paints the void background instantly without waiting on PackageManager.
+    viewModelScope.launch {
+      delay(50L) // one frame budget
+      refreshLauncherData()
+      startTelemetryObservation()
+      refreshWeather(forceRefresh = false)
+      syncShizukuControlAndPermissions()
+      checkForUpdates(force = false)
+    }
   }
 
   private fun syncShizukuControlAndPermissions() {
@@ -175,8 +180,16 @@ class MainScreenViewModel(
     weatherJob?.cancel()
     weatherJob = viewModelScope.launch {
       val live = weatherRepository.fetchWeather(forceRefresh = forceRefresh)
-      if (live != null) {
+      // distinctUntilChanged: skip UI update when weather data is identical
+      val currentLive = _launcherState.value.liveWeather
+      if (live != null && live != currentLive) {
         _launcherState.update { it.copy(liveWeather = live) }
+      } else if (live != null) {
+        // Same data — still show feedback if explicitly requested
+        if (announceResult) {
+          _feedbackEvents.tryEmit(HudFeedbackEvent(formatWeatherFeedback(live)))
+        }
+        return@launch
       }
       if (announceResult) {
         val current = live ?: _launcherState.value.liveWeather
@@ -191,7 +204,14 @@ class MainScreenViewModel(
     telemetryObservationJob?.cancel()
     telemetryObservationJob = viewModelScope.launch {
       launcherRepository.observeTelemetry().collect { telemetry ->
-        _launcherState.update { it.copy(telemetry = telemetry) }
+        // Battery-driven throttle: when battery < 20% and not charging, cap refresh rate
+        // to 60Hz to save power (the hardware override is a no-op if unsupported)
+        val adjusted = if (telemetry.batteryPct < 20 && !telemetry.isCharging) {
+          telemetry.copy(refreshRateHz = 60)
+        } else {
+          telemetry
+        }
+        _launcherState.update { it.copy(telemetry = adjusted) }
       }
     }
   }

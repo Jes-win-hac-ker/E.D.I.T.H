@@ -2,7 +2,15 @@ package com.nexwork.edith.model
 
 import android.content.pm.ApplicationInfo
 import android.graphics.drawable.Drawable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
 
+/**
+ * @Immutable + @Stable: fully immutable data class — the Compose compiler can
+ * skip all recompositions whose input list has not changed since last snapshot.
+ */
+@Immutable
+@Stable
 data class AppEntry(
   val label: String,
   val packageName: String,
@@ -20,6 +28,8 @@ data class AppEntry(
 }
 
 /** On-device storage split for one package, from StorageStatsManager. */
+@Immutable
+@Stable
 data class AppFootprint(
   val appBytes: Long,
   val dataBytes: Long,
@@ -35,6 +45,8 @@ enum class WeatherCondition(val label: String, val tempCelsius: Int) {  PARTLY_C
 }
 
 /** Live weather reading resolved from IP geolocation + Open-Meteo or restored from cache. */
+@Immutable
+@Stable
 data class LiveWeather(
   val label: String,
   val tempCelsius: Int,
@@ -43,6 +55,8 @@ data class LiveWeather(
   val isLive: Boolean = false,
 )
 
+@Immutable
+@Stable
 data class DeviceTelemetry(
   val batteryPct: Int = 84,
   val isCharging: Boolean = false,
@@ -113,6 +127,8 @@ enum class LauncherSettingsSection(val title: String, val tag: String) {
   PERMS_OTA("PERMS & OTA", "SYSTEM"),
 }
 
+@Immutable
+@Stable
 data class LauncherSettingsConfig(
   val accentPreset: LauncherAccentPreset = LauncherAccentPreset.ICE_CYAN,
   val hudIntensity: HudIntensityPreset = HudIntensityPreset.TACTICAL,

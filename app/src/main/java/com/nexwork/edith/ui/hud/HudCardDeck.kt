@@ -18,6 +18,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -286,89 +289,107 @@ fun HudCardDeck(
     val followers = (pool.size - 1 - spot).coerceIn(0, 4)
     val stackBottom = cardPx + with(density) { (followers * 18).dp.toPx() + 6.dp.toPx() }
 
-    // Render only the visible 5-card fan plus 1 pre-warmed card below; focusedState tracks integer
-    // spot boundaries so continuous drag/snap moves GPU layers without invalidating card DrawScopes.
-    pool.forEachIndexed { slot, card ->
-      val slotDist = slot - spot
-      if (slotDist < -1 || slotDist > 5) return@forEachIndexed
+    // LazyColumn: only composes visible cards (spot window ±1), skipping off-screen composition/measurement.
+    // focusedState tracks integer spot boundaries so continuous drag/snap moves GPU layers without invalidating card DrawScopes.
+    val lazyListState = rememberLazyListState(
+      initialFirstVisibleItemIndex = spot.coerceAtLeast(0),
+      initialFirstVisibleItemScrollOffset = 0,
+    )
+    LaunchedEffect(spot) {
+      val clampedSpot = spot.coerceIn(0, lazyListState.layoutInfo.totalItemsCount - 1)
+      lazyListState.animateScrollToItem(clampedSpot)
+    }
 
-      val cardKey = when (card) {
-        is DeckCard.App -> "a:${card.entry.packageName}"
-        is DeckCard.Group -> "g:${card.group.name}"
-      }
-      key(cardKey) {
-        val cardReveal = remember(slot, steps, exiting) {
-          val step = if (exiting) last - slot else slot
-          { staggeredReveal(revealAnim.value, step, steps, Stagger) }
+    LazyColumn(
+      state = lazyListState,
+      modifier = Modifier.fillMaxSize(),
+      reverseLayout = true,
+      verticalArrangement = Arrangement.spacedBy(0.dp),
+    ) {
+      itemsIndexed(pool, key = { index, card ->
+        when (card) {
+          is DeckCard.App -> "a:${card.entry.packageName}"
+          is DeckCard.Group -> "g:${card.group.name}"
         }
-        val cardCharge = remember(slot) { { if (slot == 0) chargeAnim.value else 0f } }
-        val focusedState = remember(slot) { derivedStateOf { slot <= spot } }
-        val cardFocused = remember(focusedState) { { focusedState.value } }
-        val isTrayOwner = (card as? DeckCard.App)?.entry?.packageName?.let {
-          it == swipePkg || it == armedPkg
-        } == true
+      }) { slot, card ->
+        val slotDist = slot - spot
+        if (slotDist < -1 || slotDist > 5) return@itemsIndexed
 
-        Box(
-          Modifier
-            .fillMaxWidth()
-            .aspectRatio(312f / 124f)
-            .zIndex(-slot.toFloat())
-            .graphicsLayer {
-              val depth = slot - focusPos.floatValue
-              val progress = cardReveal()
-              if (progress <= 0.001f || depth < -1.2f || depth > 5.0f) {
-                alpha = 0f
-              } else {
-                alpha = when {
-                  depth <= 0f -> (1f + depth).coerceIn(0f, 1f)
-                  depth <= 4f -> (1f - 0.17f * depth).coerceAtLeast(0.34f)
-                  else -> (0.34f * (5f - depth)).coerceIn(0f, 0.34f)
-                }
-                translationY = if (depth > 0f) depth * settleFwd else depth * settleBack
-                val scale = (if (depth > 0f) 1f - 0.06f * depth else 1f + 0.08f * -depth) *
-                  (0.985f + 0.015f * progress)
-                scaleX = scale
-                scaleY = scale
-              }
-            }
-            .clipToBounds(),
-        ) {
-          if (isTrayOwner) {
-            CardSwipeActionTray(
-              isSystemApp = card.entry.isSystemApp,
-              revealFraction = { swipePos.floatValue },
-              modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .width(trayWidthDp)
-                .fillMaxHeight(),
-            )
+        // Stable key: matches the itemsIndexed key to ensure identity continuity
+        key("a:${(card as? DeckCard.App)?.entry?.packageName ?: "g:${(card as? DeckCard.Group)?.group?.name ?: slot}"}") {
+          val cardReveal = remember(slot, steps, exiting) {
+            val step = if (exiting) last - slot else slot
+            { staggeredReveal(revealAnim.value, step, steps, Stagger) }
           }
+          val cardCharge = remember(slot) { { if (slot == 0) chargeAnim.value else 0f } }
+          val focusedState = remember(slot) { derivedStateOf { slot <= spot } }
+          val cardFocused = remember(focusedState) { { focusedState.value } }
+          val isTrayOwner = (card as? DeckCard.App)?.entry?.packageName?.let {
+            it == swipePkg || it == armedPkg
+          } == true
 
           Box(
             Modifier
-              .fillMaxSize()
+              .fillMaxWidth()
+              .aspectRatio(312f / 124f)
+              .zIndex(-slot.toFloat())
               .graphicsLayer {
-                if (isTrayOwner) {
-                  translationX = -swipePos.floatValue * trayWidthPx
+                val depth = slot - focusPos.floatValue
+                val progress = cardReveal()
+                if (progress <= 0.001f || depth < -1.2f || depth > 5.0f) {
+                  alpha = 0f
+                } else {
+                  alpha = when {
+                    depth <= 0f -> (1f + depth).coerceIn(0f, 1f)
+                    depth <= 4f -> (1f - 0.17f * depth).coerceAtLeast(0.34f)
+                    else -> (0.34f * (5f - depth)).coerceIn(0f, 0.34f)
+                  }
+                  translationY = if (depth > 0f) depth * settleFwd else depth * settleBack
+                  val scale = (if (depth > 0f) 1f - 0.06f * depth else 1f + 0.08f * -depth) *
+                    (0.985f + 0.015f * progress)
+                  scaleX = scale
+                  scaleY = scale
                 }
-              },
+              }
+              .clipToBounds(),
           ) {
-            when (card) {
-              is DeckCard.App -> HudAppCard(
-                app = card.entry,
-                usageFraction = card.usageMillis.toFloat() / peak,
-                footprint = footprints[card.entry.packageName],
-                unreadCount = notificationCounts[card.entry.packageName] ?: 0,
-                reveal = cardReveal,
-                charge = cardCharge,
-                focused = cardFocused,
+            if (isTrayOwner) {
+              CardSwipeActionTray(
+                isSystemApp = card.entry.isSystemApp,
+                revealFraction = { swipePos.floatValue },
+                modifier = Modifier
+                  .align(Alignment.CenterEnd)
+                  .width(trayWidthDp)
+                  .fillMaxHeight(),
               )
-              is DeckCard.Group -> HudGroupCard(
-                group = card.group,
-                usageFraction = card.usageMillis.toFloat() / peak,
-                reveal = cardReveal,
-                focused = cardFocused,
-              )
+            }
+
+            Box(
+              Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                  if (isTrayOwner) {
+                    translationX = -swipePos.floatValue * trayWidthPx
+                  }
+                },
+            ) {
+              when (card) {
+                is DeckCard.App -> HudAppCard(
+                  app = card.entry,
+                  usageFraction = card.usageMillis.toFloat() / peak,
+                  footprint = footprints[card.entry.packageName],
+                  unreadCount = notificationCounts[card.entry.packageName] ?: 0,
+                  reveal = cardReveal,
+                  charge = cardCharge,
+                  focused = cardFocused,
+                )
+                is DeckCard.Group -> HudGroupCard(
+                  group = card.group,
+                  usageFraction = card.usageMillis.toFloat() / peak,
+                  reveal = cardReveal,
+                  focused = cardFocused,
+                )
+              }
             }
           }
         }
